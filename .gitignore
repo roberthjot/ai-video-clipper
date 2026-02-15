@@ -1,5 +1,6 @@
 # Environment variables (contains API keys)
 .env
+.env.local
 
 # Python
 __pycache__/
@@ -8,9 +9,20 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+venv/
+.venv/
 
-# Processed clips output (too large for git)
+# Frontend (React/Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/.eslintcache
+frontend/coverage/
+
+# Application Data
 processed_clips*/
+projects/
+uploads/
+cache/
 
 # Video files (too large for git)
 *.mp4
@@ -18,12 +30,15 @@ processed_clips*/
 *.mkv
 *.mov
 *.wmv
+*.webm
 
 # Helper/debug scripts
 check_duration.py
 check_duration_deep.py
 check_models.py
+test_*.py
 
 # OS
 Thumbs.db
 .DS_Store
+*.log

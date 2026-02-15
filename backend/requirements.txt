@@ -1,0 +1,7 @@
+google-genai
+python-dotenv
+imageio-ffmpeg
+fastapi[standard]
+uvicorn[standard]
+python-multipart
+pydantic

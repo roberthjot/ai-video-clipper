@@ -1,206 +1,101 @@
-# 🎬 AI Video Clipper
+# 🎬 AI Video Clipper v2.0
 
-An AI-powered tool that automatically identifies and extracts the most viral-worthy moments from long-form videos. Built with **Google Gemini 3 Pro** for intelligent video analysis and **FFmpeg** for high-quality clip extraction.
+An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos. 
+
+**Powered by:** Google Gemini 1.5 Pro (Multimodal AI) + FFmpeg + OpenAI Whisper (optional)
+
+![AI Video Clipper Interface](https://via.placeholder.com/800x450?text=AI+Video+Clipper+v2.0+Interface)
 
 ## ✨ Features
 
-- **AI-Powered Analysis** — Uses Google Gemini 3 Pro's multimodal capabilities to watch and analyze entire videos
-- **Smart Clip Detection** — Identifies the most engaging, dramatic, or funny moments that have viral potential
-- **Customizable Output** — Control the number of clips, minimum duration, and analysis focus
-- **Hardware Acceleration** — Intel QSV support for fast video encoding
-- **Detailed Reports** — Generates a Markdown report with viral hooks, captions, timestamps, and viral potential analysis for each clip
-- **Flexible Duration** — Set a minimum clip duration while allowing the AI to capture longer moments when needed
-- **Start Time Offset** — Analyze specific portions of a video by setting a start time
-- **Duration Override** — Manually specify video duration for accurate full-video analysis
+- **🧠 AI-Powered Analysis**: Upload any video and let Gemini 1.5 Pro watch it to find the most engaging, funny, or dramatic moments.
+- **⚡ Smart Clipping**: Automatically extracts clips with precise timestamps.
+- **🎞️ Video Preview**: Play generated clips directly in the browser before exporting.
+- **🎨 Visual Editor**:
+  - **Text Overlay**: Add viral-style captions (TikTok/Reels style) with customizable font, color, and position.
+  - **Watermark**: Upload your own logo/watermark and position it anywhere.
+- **📦 Selective Export**: Choose exactly which clips you want to render.
+- **🚀 High Performance**: 
+  - **Hardware Acceleration**: GPU support for fast encoding.
+  - **Smart Formatting**: Auto-crops to 9:16 (vertical) with blurred background for social media.
+- **📊 Real-time Progress**: Track upload, analysis, and export progress with detailed status bars.
 
-## 📋 Requirements
+## 🛠️ Tech Stack
 
-- **Python 3.10+**
-- **Google API Key** — with access to the Gemini API
-- **FFmpeg** — bundled via `imageio-ffmpeg` (no manual install needed)
-- **Intel QSV** *(optional)* — for hardware-accelerated encoding
+- **Frontend**: React, Vite, Styled Components (Vanilla CSS)
+- **Backend**: Python, FastAPI, Uvicorn
+- **Video Processing**: FFmpeg (via `imageio-ffmpeg`), OpenCV
+- **AI Model**: Google Gemini 1.5 Pro
 
 ## 🚀 Installation
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/ai-video-clipper.git
-   cd ai-video-clipper
-   ```
+### Prerequisites
+- Python 3.10+
+- Node.js 18+
+- [Google AI Studio API Key](https://aistudio.google.com/)
 
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Configure your API key:**
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env` and add your Google API Key:
-   ```
-   GOOGLE_API_KEY=your_google_api_key_here
-   ```
-
-## 📖 Usage
-
-### Basic Usage
-
+### 1. Clone the Repository
 ```bash
-python main.py video.mp4
+git clone https://github.com/YOUR_USERNAME/ai-video-clipper.git
+cd ai-video-clipper
 ```
 
-This will analyze the video and extract **10 clips** (default) with a minimum duration of **20 seconds**.
-
-### Custom Number of Clips
-
+### 2. Backend Setup
 ```bash
-python main.py video.mp4 --clips 25
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Create .env file
+cp .env.example .env
+
+# Edit .env and add your GOOGLE_API_KEY
 ```
 
-### Set Minimum Clip Duration
-
+### 3. Frontend Setup
 ```bash
-python main.py video.mp4 --clips 25 --min-duration 15
+cd frontend
+npm install
 ```
 
-### Enable Intel QSV Hardware Acceleration
+## 🏃‍♂️ Running the App
 
+You need to run both the backend and frontend servers.
+
+### Terminal 1: Backend
 ```bash
-python main.py video.mp4 --clips 25 --min-duration 15 --qsv
+# From the root directory
+python -m uvicorn backend.app.main:app --reload --port 8000
 ```
 
-### Analyze from a Specific Timestamp
-
-Skip the first 10 minutes (600 seconds) of the video:
-
+### Terminal 2: Frontend
 ```bash
-python main.py video.mp4 --clips 15 --start-time 600
+# From the frontend directory
+cd frontend
+npm run dev
 ```
 
-### Override Video Duration
+Open your browser at `http://localhost:5173` (or whatever port Vite assigns).
 
-For very long videos where auto-detection might fail, manually specify the duration:
+## 📖 Usage Guide
 
-```bash
-python main.py video.mp4 --clips 25 --duration 4494
-```
+1.  **Upload**: Drag & drop a video file (MP4, MOV, etc.).
+2.  **Configure**: Set the number of clips chunks (e.g., 5-10) and minimum duration.
+3.  **Analyze**: Click "Analyze Video". The AI will process the video and identify viral moments.
+4.  **Review**: 
+    - Watch previews of detected clips.
+    - Edit the viral captions generated by AI.
+5.  **Edit & Export**:
+    - Go to the "Style & Export" tab.
+    - Add text overlays or watermarks.
+    - Select clips to export.
+    - Click **Export Clips**.
+6.  **Download**: Once processing is done, download your individual clips or find them in the `projects/` folder.
 
-### Custom Output Directory
+## ⚠️ Troubleshooting
 
-```bash
-python main.py video.mp4 --clips 25 --output my_clips_folder
-```
-
-### Full Example (All Options)
-
-```bash
-python main.py podcast_ep7.mp4 --clips 25 --min-duration 15 --qsv --start-time 0 --duration 4494 --output best_clips
-```
-
-## ⚙️ Command Line Arguments
-
-| Argument | Type | Default | Description |
-|---|---|---|---|
-| `video_path` | positional | *required* | Path to the input video file |
-| `--clips` | int | `10` | Number of clips to extract |
-| `--min-duration` | int | `20` | Minimum clip duration in seconds |
-| `--output` | string | auto | Custom output directory name |
-| `--start-time` | float | `0` | Start analysis from this timestamp (seconds) |
-| `--duration` | float | auto | Manually override video duration (seconds) |
-| `--qsv` | flag | `false` | Enable Intel QSV hardware acceleration |
-
-## 📁 Output Structure
-
-For each video processed, the tool creates a dedicated output directory:
-
-```
-processed_clips_video_name/
-├── clip_01_dramatic_confession.mp4
-├── clip_02_funny_reaction.mp4
-├── clip_03_heated_argument.mp4
-├── ...
-└── CLIPS_REPORT.md
-```
-
-### Report Format (`CLIPS_REPORT.md`)
-
-The report contains detailed information for each clip:
-
-```markdown
-## Clip 1: Dramatic confession
-
-- **File**: `clip_01_dramatic_confession.mp4`
-- **Viral Hook**: "She finally reveals the truth about what happened last summer"
-- **Viral Potential**: *Confession content performs well; viewers love dramatic reveals*
-- **Time**: 245.00s - 285.00s
-- **Duration**: 40.00s
-```
-
-## 🏗️ How It Works
-
-```
-┌──────────────────────────────────────────────────────┐
-│                    AI VIDEO CLIPPER                   │
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│  1. UPLOAD        Video → Gemini File API            │
-│                                                      │
-│  2. PROCESS       Wait for Gemini to process video   │
-│                                                      │
-│  3. ANALYZE       Gemini 3 Pro watches the ENTIRE    │
-│                   video and identifies viral moments  │
-│                                                      │
-│  4. PARSE         AI returns JSON with timestamps,   │
-│                   descriptions, captions & reasons    │
-│                                                      │
-│  5. CUT           FFmpeg extracts each clip from     │
-│                   the source video (QSV optional)     │
-│                                                      │
-│  6. REPORT        Markdown report generated with     │
-│                   all clip details for review         │
-│                                                      │
-└──────────────────────────────────────────────────────┘
-```
-
-### Architecture
-
-| Component | Technology | Purpose |
-|---|---|---|
-| Video Analysis | Google Gemini 3 Pro | AI watches and identifies viral moments |
-| Video Cutting | FFmpeg (via imageio-ffmpeg) | Extract clips with precise timestamps |
-| HW Acceleration | Intel QSV (h264_qsv) | Fast encoding on Intel GPUs |
-| Report Generation | Python | Markdown report with clip metadata |
-| Configuration | python-dotenv | Secure API key management |
-
-## 🔧 Customizing the AI Prompt
-
-The AI analysis prompt is located in `main.py` inside the `analyze_video_for_clips()` function. You can modify the `INSTRUCTION` line to change what the AI looks for:
-
-```python
-# Current default:
-INSTRUCTION: Focus on EVERYTHING viral-worthy. Drama, emotions, funny moments...
-
-# Example customizations:
-INSTRUCTION: Focus on "Sophie Rain" - she is the main character...
-INSTRUCTION: Focus on FUNNY, RELATABLE, and SHAREABLE moments...
-INSTRUCTION: This is a PODCAST. Focus on interesting stories, huge confessions...
-```
-
-## 📝 Caption Style
-
-All generated captions follow these rules:
-- Written in **third person** ("She bought a car", not "I bought a car")
-- Designed as **fan account style** reporting
-- **15-30 words** for optimal TikTok text overlay length
-- **English** (US audience target)
-
-## ⚠️ Limitations
-
-- **File Size**: Google Gemini API has a **2GB upload limit**. For larger files, consider trimming or compressing the video first.
-- **Duration Detection**: For very long videos (>30min), use the `--duration` flag to manually specify the duration for accurate analysis.
-- **API Costs**: Each video analysis uses the Gemini API, which may incur costs depending on your plan.
+- **Black Screen on Export**: Ensure you are not using incompatible filters. The app defaults to a safe FFmpeg filter chain (`boxblur`).
+- **Export Fails**: Check the backend console for FFmpeg errors. 
+- **CORS Errors**: Ensure the backend is running on port 8000 and accepting requests from your frontend port.
 
 ## 📄 License
-
-MIT License — See [LICENSE](LICENSE) for details.
+MIT License
