@@ -1,0 +1,29 @@
+# Environment variables (contains API keys)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Processed clips output (too large for git)
+processed_clips*/
+
+# Video files (too large for git)
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.wmv
+
+# Helper/debug scripts
+check_duration.py
+check_duration_deep.py
+check_models.py
+
+# OS
+Thumbs.db
+.DS_Store
