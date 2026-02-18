@@ -89,7 +89,7 @@ def analyze_video(
     
     IMPORTANT:
     1. Timestamps MUST be simple numbers (e.g. 10.5). Do NOT use leading zeros.
-    2. Duration of each clip MUST be between {min_duration} and 60 seconds. Keep clips SHORT and punchy for maximum viral potential (15-45 seconds ideal).
+    2. Duration of each clip MUST be between {min_duration} and 60 seconds. Each clip can be a DIFFERENT duration — use as many seconds as the moment needs, up to 60 seconds maximum. Do NOT make all clips the same length.
     3. ABSOLUTE LIMIT: The video is approximately {video_duration} seconds long.
        - Focus your search from {start_time_offset} seconds to {video_duration} seconds.
        - ALL "start_time" and "end_time" MUST be less than {video_duration}.
