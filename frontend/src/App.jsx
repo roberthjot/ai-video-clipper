@@ -619,8 +619,8 @@ function EditorStep({ projectId, clips, onExportDone }) {
               </div>
             )}
 
-            {/* Draggable text */}
-            {selectedClip && (
+            {/* Draggable text - only show when no preview is active */}
+            {selectedClip && !previewUrl && !videoPreviewUrl && (
               <div
                 className={`draggable-text ${dragging === "text" ? "dragging" : ""}`}
                 style={{
@@ -638,8 +638,8 @@ function EditorStep({ projectId, clips, onExportDone }) {
               </div>
             )}
 
-            {/* Draggable watermark */}
-            {watermarkPreview && (
+            {/* Draggable watermark - only show when no preview is active */}
+            {watermarkPreview && !previewUrl && !videoPreviewUrl && (
               <div
                 className={`draggable-watermark ${dragging === "watermark" ? "dragging" : ""}`}
                 style={{
