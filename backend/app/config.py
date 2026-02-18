@@ -11,7 +11,7 @@ class Settings:
     """Application settings loaded from environment variables."""
 
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-2.5-pro"
 
     # Directories
     UPLOAD_DIR: str = str(ROOT_DIR / "uploads")
