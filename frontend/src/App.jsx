@@ -541,7 +541,15 @@ function EditorStep({ projectId, clips, onExportDone }) {
             </div>
           ))}
         </div>
-        <div className="btn-group" style={{ justifyContent: "center" }}>
+        <div className="btn-group" style={{ justifyContent: "center", marginTop: "16px" }}>
+          <a
+            href={`http://localhost:8000/api/export-info/${projectId}`}
+            download="clips_info.txt"
+            className="btn btn-secondary"
+            style={{ textDecoration: "none" }}
+          >
+            📄 Download Clips Info (TXT)
+          </a>
           <button className="btn btn-primary" onClick={() => onExportDone()}>
             🔄 New Project
           </button>

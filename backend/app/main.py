@@ -2,8 +2,11 @@ import webbrowser
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse as FastFileResponse
+import os
 from .config import settings
 from .routes import upload, clips, export
+from .routes.upload import get_project_store
 
 # Validate settings on startup
 settings.validate()
@@ -32,6 +35,17 @@ app.include_router(export.router)
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "version": "2.0.0"}
+
+
+@app.get("/api/export-info/{project_id}")
+async def download_export_info(project_id: str):
+    """Download clips_info.txt for a project."""
+    from fastapi import HTTPException
+    # Search directly on disk, no need for in-memory project
+    info_path = os.path.join(settings.PROJECTS_DIR, project_id, "exported", "clips_info.txt")
+    if not os.path.exists(info_path):
+        raise HTTPException(status_code=404, detail="Export clips first to generate the info file.")
+    return FastFileResponse(info_path, media_type="text/plain", filename="clips_info.txt")
 
 
 @app.on_event("startup")

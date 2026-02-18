@@ -57,8 +57,26 @@ async def analyze_video(req: AnalyzeRequest):
         }
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         project.status = "error"
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project_id}/download-info")
+async def download_clips_info(project_id: str):
+    """Download the clips_info.txt file for a project."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    info_path = os.path.join(project.output_dir, "clips_info.txt")
+
+    if not os.path.exists(info_path):
+        raise HTTPException(status_code=404, detail="clips_info.txt not found. Export clips first.")
+
+    return FileResponse(info_path, media_type="text/plain", filename="clips_info.txt")
 
 
 @router.get("/{project_id}")

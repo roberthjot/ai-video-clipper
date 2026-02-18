@@ -36,27 +36,31 @@ def export_clip_with_style(
 
     # Add rounded box + text
     if clip.viral_caption:
+        import re as _re
         safe = clip.viral_caption.replace("'", "").replace('"', "").replace("\\", "")
+        safe = _re.sub(r'[^\x00-\x7F]+', '', safe).strip()
         lines = video_service.split_text_into_lines(safe)
 
-        font_size_actual = min(style.font_size, 50)
-        line_spacing = font_size_actual + 8
+        font_size_actual = 42
+        pad_x, pad_y = 24, 16
+        line_gap = 8
+        line_h = int(font_size_actual * 1.15)
         base_y = int(style.text_y * H)
 
         max_line_len = max(len(line) for line in lines)
-        box_w = min(W - 80, int(max_line_len * font_size_actual * 0.55 + 100))
-        box_h = int(font_size_actual * len(lines) + 60 + (len(lines) - 1) * 8)
+        box_w = min(W - 80, int(max_line_len * font_size_actual * 0.55 + pad_x * 2))
+        box_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad_y * 2
         box_x = (W - box_w) // 2
-        box_y = base_y - 30
+        box_y = base_y - pad_y
 
-        rounded_box_path = video_service.create_rounded_box(box_w, box_h)
+        rounded_box_path = video_service.create_rounded_box(box_w, box_h, corner_radius=16)
         filter_complex += f";[{current_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
         current_label = "boxed"
         input_index += 1
 
         for i, line in enumerate(lines):
-            y = base_y + (i * line_spacing)
-            filter_complex += f";[{current_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize=42:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
+            y = box_y + pad_y + i * (line_h + line_gap)
+            filter_complex += f";[{current_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
             current_label = f"t{i}"
 
     # Watermark
@@ -149,6 +153,26 @@ def export_all_clips_background(
                 error_msg = f"Clip {clip.id}: {str(e)}"
                 export_progress[project_id]["errors"].append(error_msg)
                 print(f"[Export] Error: {error_msg}")
+
+        # Generate clips_info.txt
+        try:
+            info_path = os.path.join(output_dir, "clips_info.txt")
+            with open(info_path, "w", encoding="utf-8") as f:
+                f.write("=" * 60 + "\n")
+                f.write("AI VIDEO CLIPPER - CLIPS INFO\n")
+                f.write("=" * 60 + "\n\n")
+                for clip in clips:
+                    duration = clip.end_time - clip.start_time
+                    start_fmt = f"{int(clip.start_time // 60)}:{int(clip.start_time % 60):02d}"
+                    end_fmt = f"{int(clip.end_time // 60)}:{int(clip.end_time % 60):02d}"
+                    f.write(f"CLIP {clip.id} - {getattr(clip, 'description', f'Clip {clip.id}')}\n")
+                    f.write(f"Timestamps : {start_fmt} - {end_fmt} ({int(duration)}s)\n")
+                    f.write(f"Caption    : {clip.viral_caption}\n")
+                    f.write(f"Why viral  : {getattr(clip, 'viral_reason', 'N/A')}\n")
+                    f.write("\n" + "-" * 60 + "\n\n")
+            print(f"[Export] clips_info.txt saved to {info_path}")
+        except Exception as e:
+            print(f"[Export] Failed to write clips_info.txt: {e}")
 
         export_progress[project_id]["status"] = "completed"
         print(f"[Export] All clips exported to {output_dir}")

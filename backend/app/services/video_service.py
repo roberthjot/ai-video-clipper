@@ -91,7 +91,9 @@ def generate_preview_frame(
 
     # Add rounded box + text if caption exists
     if caption_text:
+        import re as _re
         safe = caption_text.replace("'", "").replace('"', "").replace("\\", "")
+        safe = _re.sub(r'[^\x00-\x7F]+', '', safe).strip()
         lines = split_text_into_lines(safe)
 
         font_size_actual = min(font_size, 50)
@@ -185,27 +187,31 @@ def generate_preview_clip(
 
     # Add rounded box + text
     if caption_text:
+        import re as _re
         safe = caption_text.replace("'", "").replace('"', "").replace("\\", "")
+        safe = _re.sub(r'[^\x00-\x7F]+', '', safe).strip()
         lines = split_text_into_lines(safe)
 
-        font_size_actual = min(font_size, 50)
-        line_spacing = font_size_actual + 8
+        font_size_actual = 42
+        pad_x, pad_y = 24, 16
+        line_gap = 8
+        line_h = int(font_size_actual * 1.15)
         base_y = int(text_y * H)
 
         max_line_len = max(len(line) for line in lines)
-        box_w = min(W - 80, int(max_line_len * font_size_actual * 0.55 + 100))
-        box_h = int(font_size_actual * len(lines) + 60 + (len(lines) - 1) * 8)
+        box_w = min(W - 80, int(max_line_len * font_size_actual * 0.55 + pad_x * 2))
+        box_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad_y * 2
         box_x = (W - box_w) // 2
-        box_y = base_y - 30
+        box_y = base_y - pad_y
 
-        rounded_box_path = create_rounded_box(box_w, box_h)
+        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=16)
         filter_complex += f";[{last_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
         last_label = "boxed"
         input_index += 1
 
         for i, line in enumerate(lines):
-            y = base_y + (i * line_spacing)
-            filter_complex += f";[{last_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize=42:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
+            y = box_y + pad_y + i * (line_h + line_gap)
+            filter_complex += f";[{last_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
             last_label = f"t{i}"
 
     end_time = start_time + clip_duration
