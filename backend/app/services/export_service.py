@@ -47,13 +47,18 @@ def export_clip_with_style(
         line_h = int(font_size_actual * 1.15)
         base_y = int(style.text_y * H)
 
-        max_line_len = max(len(line) for line in lines)
-        box_w = min(W - 80, int(max_line_len * font_size_actual * 0.55 + pad_x * 2))
+        try:
+            from PIL import ImageFont as _IF
+            _fnt = _IF.truetype('C:/Windows/Fonts/arialbd.ttf', font_size_actual)
+            max_line_px = max(_fnt.getlength(line) for line in lines)
+        except Exception:
+            max_line_px = max(len(line) for line in lines) * font_size_actual * 0.55
+        box_w = min(W - 80, int(max_line_px + pad_x * 2))
         box_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad_y * 2
         box_x = (W - box_w) // 2
         box_y = base_y - pad_y
 
-        rounded_box_path = video_service.create_rounded_box(box_w, box_h, corner_radius=16)
+        rounded_box_path = video_service.create_rounded_box(box_w, box_h, corner_radius=8)
         filter_complex += f";[{current_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
         current_label = "boxed"
         input_index += 1

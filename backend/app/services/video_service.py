@@ -41,7 +41,7 @@ def split_text_into_lines(text: str, max_chars: int = 35) -> list:
     if current:
         lines.append(" ".join(current))
 
-    return lines[:3]
+    return lines
 
 
 def get_video_duration(file_path: str) -> float:
@@ -198,13 +198,18 @@ def generate_preview_clip(
         line_h = int(font_size_actual * 1.15)
         base_y = int(text_y * H)
 
-        max_line_len = max(len(line) for line in lines)
-        box_w = min(W - 80, int(max_line_len * font_size_actual * 0.55 + pad_x * 2))
+        try:
+            from PIL import ImageFont as _IF
+            _fnt = _IF.truetype('C:/Windows/Fonts/arialbd.ttf', font_size_actual)
+            max_line_px = max(_fnt.getlength(line) for line in lines)
+        except Exception:
+            max_line_px = max(len(line) for line in lines) * font_size_actual * 0.55
+        box_w = min(W - 80, int(max_line_px + pad_x * 2))
         box_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad_y * 2
         box_x = (W - box_w) // 2
         box_y = base_y - pad_y
 
-        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=16)
+        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=8)
         filter_complex += f";[{last_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
         last_label = "boxed"
         input_index += 1
