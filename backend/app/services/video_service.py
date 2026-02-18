@@ -209,7 +209,7 @@ def generate_preview_clip(
         box_x = (W - box_w) // 2
         box_y = base_y - pad_y
 
-        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=8)
+        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=4)
         filter_complex += f";[{last_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
         last_label = "boxed"
         input_index += 1
