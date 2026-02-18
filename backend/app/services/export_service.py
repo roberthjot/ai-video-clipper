@@ -37,7 +37,7 @@ def export_clip_with_style(
     # Add rounded box + text
     if clip.viral_caption:
         import re as _re
-        safe = clip.viral_caption.replace("'", "").replace('"', "").replace("\\", "")
+        safe = clip.viral_caption.replace("'", "`").replace('"', "").replace("\\", "")
         safe = _re.sub(r'[^\x00-\x7F]+', '', safe).strip()
         lines = video_service.split_text_into_lines(safe)
 
