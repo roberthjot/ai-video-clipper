@@ -162,6 +162,8 @@ async def preview_clip_video(project_id: str, clip_id: int):
     os.makedirs(project.output_dir, exist_ok=True)
     video_preview_path = os.path.join(project.output_dir, f"preview_clip_{clip_id}.mp4")
 
+    style = project.style
+
     try:
         await asyncio.to_thread(
             video_service.generate_preview_clip,
@@ -169,6 +171,18 @@ async def preview_clip_video(project_id: str, clip_id: int):
             start_time=clip.start_time,
             duration=clip.duration,
             output_path=video_preview_path,
+            caption_text=clip.viral_caption,
+            text_x=style.text_x,
+            text_y=style.text_y,
+            font_size=style.font_size,
+            text_color=style.text_color,
+            text_stroke_color=style.text_stroke_color,
+            text_stroke_width=style.text_stroke_width,
+            watermark_path=style.watermark_path,
+            watermark_x=style.watermark_x,
+            watermark_y=style.watermark_y,
+            watermark_scale=style.watermark_scale,
+            watermark_opacity=style.watermark_opacity,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Video preview failed: {str(e)}")

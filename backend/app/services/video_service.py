@@ -1,8 +1,47 @@
 import os
 import subprocess
 import imageio_ffmpeg
+from PIL import Image, ImageDraw
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def create_rounded_box(width: int, height: int, corner_radius: int = 20) -> str:
+    """Create a white rounded rectangle PNG."""
+    temp_dir = os.path.join(os.path.dirname(__file__), "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    output_path = os.path.join(temp_dir, f"box_{width}x{height}.png")
+
+    img = Image.new('RGBA', (width, height), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle(
+        [(0, 0), (width, height)],
+        radius=corner_radius,
+        fill=(255, 255, 255, 242)
+    )
+    img.save(output_path)
+    return output_path
+
+
+def split_text_into_lines(text: str, max_chars: int = 35) -> list:
+    """Split text into multiple lines."""
+    words = text.split()
+    lines = []
+    current = []
+
+    for word in words:
+        test = " ".join(current + [word])
+        if len(test) <= max_chars:
+            current.append(word)
+        else:
+            if current:
+                lines.append(" ".join(current))
+            current = [word]
+
+    if current:
+        lines.append(" ".join(current))
+
+    return lines[:3]
 
 
 def get_video_duration(file_path: str) -> float:
@@ -27,7 +66,7 @@ def generate_preview_frame(
     caption_text: str = "",
     text_x: float = 0.5,
     text_y: float = 0.15,
-    font_size: int = 42,
+    font_size: int = 50,
     text_color: str = "white",
     text_stroke_color: str = "black",
     text_stroke_width: int = 3,
@@ -38,64 +77,63 @@ def generate_preview_frame(
     watermark_opacity: float = 0.9,
     **kwargs,
 ) -> str:
-    """Generate a 9:16 preview frame (static JPEG) with blur background + text."""
+    """Generate preview frame (JPEG)."""
     W, H = 1080, 1920
 
     filter_parts = []
-    filter_parts.append(
-        f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
-        f"crop={W}:{H},boxblur=12:2[bg]"
-    )
+    filter_parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg]")
     filter_parts.append(f"[0:v]scale={W}:-2[fg]")
-    filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[composed]")
+    filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
 
-    last = "composed"
+    last = "v"
+    input_index = 1
+    rounded_box_path = None
 
+    # Add rounded box + text if caption exists
     if caption_text:
-        safe = caption_text
-        for ch in ["'", '"', "\\", ":", ";", "%", "{", "}", "[", "]"]:
-            safe = safe.replace(ch, " ")
-        safe = safe.strip()[:80]
+        safe = caption_text.replace("'", "").replace('"', "").replace("\\", "")
+        lines = split_text_into_lines(safe)
 
-        tx = int(text_x * W)
-        ty = int(text_y * H)
+        font_size_actual = min(font_size, 50)
+        line_spacing = font_size_actual + 8
+        base_y = int(text_y * H)
 
-        filter_parts.append(
-            f"[{last}]drawtext="
-            f"text='{safe}':"
-            f"fontsize={font_size}:"
-            f"fontcolor={text_color}:"
-            f"borderw={text_stroke_width}:"
-            f"bordercolor={text_stroke_color}:"
-            f"x={tx}-(text_w/2):y={ty}[texted]"
-        )
-        last = "texted"
+        max_line_len = max(len(line) for line in lines)
+        box_w = min(W - 80, int(max_line_len * font_size_actual * 0.55 + 100))
+        box_h = int(font_size_actual * len(lines) + 60 + (len(lines) - 1) * 8)
+        box_x = (W - box_w) // 2
+        box_y = base_y - 30
 
-    cmd = [
-        FFMPEG_EXE,
-        "-ss", str(timestamp),
-        "-i", video_path,
-    ]
+        rounded_box_path = create_rounded_box(box_w, box_h)
+        filter_parts.append(f"[{last}][{input_index}:v]overlay={box_x}:{box_y}[boxed]")
+        last = "boxed"
+        input_index += 1
+
+        for i, line in enumerate(lines):
+            y = base_y + (i * line_spacing)
+            filter_parts.append(f"[{last}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/impact.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
+            last = f"t{i}"
+
+    # Watermark
+    if watermark_path and os.path.exists(watermark_path):
+        wm_w = max(50, int(W * watermark_scale))
+        wx = int(watermark_x * W)
+        wy = int(watermark_y * H)
+        filter_parts.append(f"[{input_index}:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={watermark_opacity}[wm]")
+        filter_parts.append(f"[{last}][wm]overlay={wx}-(overlay_w/2):{wy}-(overlay_h/2)[final]")
+        last = "final"
+
+    cmd = [FFMPEG_EXE, "-ss", str(timestamp), "-i", video_path]
+
+    if rounded_box_path:
+        cmd.extend(["-loop", "1", "-i", rounded_box_path])
 
     if watermark_path and os.path.exists(watermark_path):
         cmd.extend(["-i", watermark_path])
-        wm_w = max(50, int(W * watermark_scale))
-        filter_parts.append(
-            f"[1:v]scale={wm_w}:-1,format=rgba,"
-            f"colorchannelmixer=aa={watermark_opacity}[wm]"
-        )
-        wx = int(watermark_x * W)
-        wy = int(watermark_y * H)
-        filter_parts.append(
-            f"[{last}][wm]overlay={wx}-(overlay_w/2):{wy}-(overlay_h/2)[final]"
-        )
-        last = "final"
-
-    filter_str = ";".join(filter_parts)
 
     cmd.extend([
         "-vframes", "1",
-        "-filter_complex", filter_str,
+        "-filter_complex", ";".join(filter_parts),
         "-map", f"[{last}]",
         "-q:v", "2",
         "-y", "-loglevel", "error",
@@ -104,19 +142,14 @@ def generate_preview_frame(
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
-    except subprocess.CalledProcessError as e:
-        print(f"Preview error: {e.stderr}")
-        # Fallback: plain frame
-        fallback = [
-            FFMPEG_EXE,
-            "-ss", str(timestamp),
-            "-i", video_path,
-            "-vframes", "1",
-            "-q:v", "2",
-            "-y", "-loglevel", "error",
-            output_path,
-        ]
-        subprocess.run(fallback, check=True)
+    except:
+        pass
+    finally:
+        if rounded_box_path and os.path.exists(rounded_box_path):
+            try:
+                os.remove(rounded_box_path)
+            except:
+                pass
 
     return output_path
 
@@ -127,23 +160,86 @@ def generate_preview_clip(
     duration: float,
     output_path: str,
     max_seconds: float = 10.0,
+    caption_text: str = "",
+    text_x: float = 0.5,
+    text_y: float = 0.08,
+    font_size: int = 50,
+    text_color: str = "white",
+    text_stroke_color: str = "black",
+    text_stroke_width: int = 5,
+    watermark_path: str = None,
+    watermark_x: float = 0.5,
+    watermark_y: float = 0.85,
+    watermark_scale: float = 0.3,
+    watermark_opacity: float = 0.9,
 ) -> str:
-    """Generate a short preview clip (max 10 seconds) for playback."""
-    clip_duration = min(duration, max_seconds)
+    """Generate preview clip with blur + rounded white box + text."""
+    clip_duration = duration
+    W, H = 1080, 1920
 
-    cmd = [
-        FFMPEG_EXE,
-        "-ss", str(start_time),
-        "-i", video_path,
+    # Build filter
+    filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+    last_label = "v"
+    input_index = 1
+    rounded_box_path = None
+
+    # Add rounded box + text
+    if caption_text:
+        safe = caption_text.replace("'", "").replace('"', "").replace("\\", "")
+        lines = split_text_into_lines(safe)
+
+        font_size_actual = min(font_size, 50)
+        line_spacing = font_size_actual + 8
+        base_y = int(text_y * H)
+
+        max_line_len = max(len(line) for line in lines)
+        box_w = min(W - 80, int(max_line_len * font_size_actual * 0.55 + 100))
+        box_h = int(font_size_actual * len(lines) + 60 + (len(lines) - 1) * 8)
+        box_x = (W - box_w) // 2
+        box_y = base_y - 30
+
+        rounded_box_path = create_rounded_box(box_w, box_h)
+        filter_complex += f";[{last_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
+        last_label = "boxed"
+        input_index += 1
+
+        for i, line in enumerate(lines):
+            y = base_y + (i * line_spacing)
+            filter_complex += f";[{last_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/impact.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
+            last_label = f"t{i}"
+
+    cmd = [FFMPEG_EXE, "-ss", str(start_time), "-i", video_path]
+
+    if rounded_box_path:
+        cmd.extend(["-loop", "1", "-i", rounded_box_path])
+
+    cmd.extend([
         "-t", str(clip_duration),
+        "-filter_complex", filter_complex,
+        "-map", f"[{last_label}]",
+        "-map", "0:a?",
         "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-crf", "28",
+        "-preset", "fast",
+        "-crf", "23",
         "-c:a", "aac",
+        "-pix_fmt", "yuv420p",
+        "-sar", "1:1",
         "-movflags", "+faststart",
-        "-y", "-loglevel", "error",
+        "-y",
         output_path,
-    ]
+    ])
 
-    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60)
+    print(f"[Preview] Generating {clip_duration}s clip with {len(lines) if caption_text else 0} text lines")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+    if rounded_box_path and os.path.exists(rounded_box_path):
+        try:
+            os.remove(rounded_box_path)
+        except:
+            pass
+
+    if result.returncode != 0:
+        print(f"[Preview] Error: {result.stderr[-500:]}")
+        raise RuntimeError(f"Preview failed: {result.stderr}")
+
     return output_path

@@ -342,10 +342,10 @@ function EditorStep({ projectId, clips, onExportDone }) {
   const [style, setStyle] = useState({
     text_x: 0.5,
     text_y: 0.15,
-    font_size: 42,
+    font_size: 70,  // Larger font for better readability
     text_color: "#FFFFFF",
     text_stroke_color: "#000000",
-    text_stroke_width: 3,
+    text_stroke_width: 5,  // Thicker stroke for better visibility
     watermark_x: 0.5,
     watermark_y: 0.85,
     watermark_scale: 0.3,
@@ -390,14 +390,20 @@ function EditorStep({ projectId, clips, onExportDone }) {
   };
 
   const handlePreview = async () => {
-    if (!selectedClip) return;
+    if (!selectedClip) {
+      alert("Please select a clip first");
+      return;
+    }
     setLoadingPreview(true);
     setVideoPreviewUrl(null);
     try {
+      console.log("Updating style for project:", projectId);
       await api.updateStyle(projectId, style);
+      console.log("Generating preview for clip:", selectedClip.id);
       setPreviewUrl(api.getPreviewUrl(projectId, selectedClip.id));
     } catch (err) {
       console.error("Preview failed:", err);
+      alert("Preview failed: " + err.message);
     }
     setLoadingPreview(false);
   };
@@ -419,7 +425,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
         const p = await api.getExportProgress(projectId);
         setProgress(p);
 
-        if (p.status === "done") {
+        if (p.status === "completed" || p.status === "done") {
           setExportStatus("done");
           setExportedFiles(p.files || []);
           clearInterval(interval);
@@ -556,7 +562,19 @@ function EditorStep({ projectId, clips, onExportDone }) {
         {/* Canvas Preview */}
         <div className="editor-canvas-container" ref={canvasRef}>
           <div className="editor-canvas">
-            {videoPreviewUrl ? (
+            {loadingPreview ? (
+              <div style={{
+                width: "100%", height: "100%",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: "linear-gradient(180deg, #1a1a2e 0%, #0a0a0f 100%)",
+                flexDirection: "column", gap: "12px",
+              }}>
+                <span style={{ fontSize: "40px" }}>⏳</span>
+                <span style={{ color: "var(--accent)", fontSize: "14px", fontWeight: "500" }}>
+                  Generating preview...
+                </span>
+              </div>
+            ) : videoPreviewUrl ? (
               <video
                 controls
                 autoPlay
@@ -564,7 +582,21 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 style={{ width: "100%", height: "100%", objectFit: "contain", background: "black", borderRadius: 8 }}
               />
             ) : previewUrl ? (
-              <img src={previewUrl} alt="Preview" onError={() => setPreviewUrl(null)} />
+              <img
+                src={previewUrl}
+                alt="Preview"
+                onLoad={() => {
+                  console.log("Preview image loaded successfully!");
+                  setLoadingPreview(false);
+                }}
+                onError={(e) => {
+                  console.error("Preview image failed to load:", e);
+                  alert("Failed to load preview image. Check console for details.");
+                  setPreviewUrl(null);
+                  setLoadingPreview(false);
+                }}
+                style={{ width: "100%", height: "100%", objectFit: "contain" }}
+              />
             ) : (
               <div style={{
                 width: "100%", height: "100%",
@@ -574,7 +606,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
               }}>
                 <span style={{ fontSize: "40px" }}>📱</span>
                 <span style={{ color: "var(--text-muted)", fontSize: "13px" }}>
-                  Select a clip and click "Generate Preview" or "▶ Play"
+                  Select a clip and click "Preview" or "Play Clip"
                 </span>
               </div>
             )}
@@ -660,12 +692,12 @@ function EditorStep({ projectId, clips, onExportDone }) {
             <h3>📝 Text Overlay</h3>
             <div className="slider-group">
               <label>Font Size <span>{style.font_size}px</span></label>
-              <input type="range" min={16} max={72} value={style.font_size}
+              <input type="range" min={20} max={100} value={style.font_size}
                 onChange={(e) => setStyle((s) => ({ ...s, font_size: parseInt(e.target.value) }))} />
             </div>
             <div className="slider-group">
               <label>Stroke Width <span>{style.text_stroke_width}px</span></label>
-              <input type="range" min={0} max={8} value={style.text_stroke_width}
+              <input type="range" min={0} max={12} value={style.text_stroke_width}
                 onChange={(e) => setStyle((s) => ({ ...s, text_stroke_width: parseInt(e.target.value) }))} />
             </div>
             <div style={{ display: "flex", gap: 12, marginTop: 8 }}>

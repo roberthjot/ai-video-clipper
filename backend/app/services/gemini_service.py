@@ -89,7 +89,7 @@ def analyze_video(
     
     IMPORTANT:
     1. Timestamps MUST be simple numbers (e.g. 10.5). Do NOT use leading zeros.
-    2. Duration of each clip MUST be > {min_duration} seconds. LONG clips (up to 90s) are allowed and encouraged if the viral moment requires it.
+    2. Duration of each clip MUST be between {min_duration} and 60 seconds. Keep clips SHORT and punchy for maximum viral potential (15-45 seconds ideal).
     3. ABSOLUTE LIMIT: The video is approximately {video_duration} seconds long.
        - Focus your search from {start_time_offset} seconds to {video_duration} seconds.
        - ALL "start_time" and "end_time" MUST be less than {video_duration}.
@@ -132,11 +132,18 @@ def analyze_video(
 
     clips = []
     for i, clip in enumerate(clips_raw):
+        start = float(clip.get("start_time", 0))
+        end = float(clip.get("end_time", 0))
+
+        # Enforce maximum duration of 60 seconds
+        if end - start > 60:
+            end = start + 60
+
         clips.append(
             ClipData(
                 id=i + 1,
-                start_time=float(clip.get("start_time", 0)),
-                end_time=float(clip.get("end_time", 0)),
+                start_time=start,
+                end_time=end,
                 description=clip.get("description", "clip"),
                 viral_caption=clip.get("viral_caption", ""),
                 viral_reason=clip.get("viral_reason", ""),

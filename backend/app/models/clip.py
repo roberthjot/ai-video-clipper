@@ -22,11 +22,11 @@ class StyleConfig(BaseModel):
     # Text overlay
     text_x: float = 0.5        # 0-1 relative position (center)
     text_y: float = 0.15       # 0-1 relative position (near top)
-    font_size: int = 42
+    font_size: int = 70        # Larger font for better readability
     font_family: str = "Arial"
     text_color: str = "#FFFFFF"
     text_stroke_color: str = "#000000"
-    text_stroke_width: int = 3
+    text_stroke_width: int = 5  # Thicker stroke for better visibility
 
     # Watermark
     watermark_path: Optional[str] = None
