@@ -58,7 +58,7 @@ def export_clip_with_style(
         box_x = (W - box_w) // 2
         box_y = base_y - pad_y
 
-        rounded_box_path = video_service.create_rounded_box(box_w, box_h, corner_radius=4)
+        rounded_box_path = video_service.create_rounded_box(box_w, box_h, corner_radius=14)
         filter_complex += f";[{current_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
         current_label = "boxed"
         input_index += 1

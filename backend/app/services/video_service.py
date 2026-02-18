@@ -113,7 +113,7 @@ def generate_preview_frame(
         box_x = (W - box_w) // 2
         box_y = base_y - pad_y
 
-        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=4)
+        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=14)
         filter_parts.append(f"[{last}][{input_index}:v]overlay={box_x}:{box_y}[boxed]")
         last = "boxed"
         input_index += 1
@@ -216,7 +216,7 @@ def generate_preview_clip(
         box_x = (W - box_w) // 2
         box_y = base_y - pad_y
 
-        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=4)
+        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=14)
         filter_complex += f";[{last_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
         last_label = "boxed"
         input_index += 1
