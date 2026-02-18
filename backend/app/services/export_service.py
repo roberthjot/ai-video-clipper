@@ -56,7 +56,7 @@ def export_clip_with_style(
 
         for i, line in enumerate(lines):
             y = base_y + (i * line_spacing)
-            filter_complex += f";[{current_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/impact.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
+            filter_complex += f";[{current_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize=42:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
             current_label = f"t{i}"
 
     # Watermark
@@ -73,16 +73,14 @@ def export_clip_with_style(
 
     cmd = [
         FFMPEG_EXE,
-        "-ss", str(clip.start_time),
-        "-i", video_path,
-        "-t", str(duration),
+        "-ss", str(clip.start_time), "-to", str(clip.end_time), "-i", video_path,
     ]
 
     if rounded_box_path:
-        cmd.extend(["-loop", "1", "-i", rounded_box_path])
+        cmd.extend(["-loop", "1", "-t", str(duration), "-i", rounded_box_path])
 
     if has_watermark:
-        cmd.extend(["-i", style.watermark_path])
+        cmd.extend(["-loop", "1", "-t", str(duration), "-i", style.watermark_path])
 
     cmd.extend([
         "-filter_complex", filter_complex,

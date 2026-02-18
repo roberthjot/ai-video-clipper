@@ -111,7 +111,7 @@ def generate_preview_frame(
 
         for i, line in enumerate(lines):
             y = base_y + (i * line_spacing)
-            filter_parts.append(f"[{last}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/impact.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
+            filter_parts.append(f"[{last}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize=42:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
             last = f"t{i}"
 
     # Watermark
@@ -205,16 +205,16 @@ def generate_preview_clip(
 
         for i, line in enumerate(lines):
             y = base_y + (i * line_spacing)
-            filter_complex += f";[{last_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/impact.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
+            filter_complex += f";[{last_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize=42:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
             last_label = f"t{i}"
 
-    cmd = [FFMPEG_EXE, "-ss", str(start_time), "-i", video_path]
+    end_time = start_time + clip_duration
+    cmd = [FFMPEG_EXE, "-ss", str(start_time), "-to", str(end_time), "-i", video_path]
 
     if rounded_box_path:
-        cmd.extend(["-loop", "1", "-i", rounded_box_path])
+        cmd.extend(["-loop", "1", "-t", str(clip_duration), "-i", rounded_box_path])
 
     cmd.extend([
-        "-t", str(clip_duration),
         "-filter_complex", filter_complex,
         "-map", f"[{last_label}]",
         "-map", "0:a?",

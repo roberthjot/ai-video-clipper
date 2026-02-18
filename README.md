@@ -1,8 +1,8 @@
-# 🎬 AI Video Clipper v3.0
+# 🎬 AI Video Clipper v4.0
 
 An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos — styled like CapCut/TikTok clips.
 
-**Powered by:** Google Gemini 2.0 Flash (Experimental) + FFmpeg + PIL
+**Powered by:** Google Gemini 2.0 Flash + FFmpeg + PIL
 
 ---
 
@@ -12,9 +12,10 @@ An intelligent, full-stack web application that automatically identifies, extrac
 - **✂️ Smart Clipping**: Extracts clips with precise timestamps, enforcing a **60-second max duration** per clip for viral optimization.
 - **🎞️ Live Preview**: Play generated clips directly in the browser before exporting.
 - **🎨 CapCut-Style Overlay**:
-  - White rounded box with black **Impact** font text
+  - White rounded box with black **Arial Bold** font text
   - Blurred background (boxblur) with centered subject
   - Multiline caption splitting (max 35 chars/line)
+- **💧 Watermark Support**: Upload your own logo/watermark and overlay it on all clips.
 - **📦 Selective Export**: Choose exactly which clips to render and download.
 - **📊 Real-time Progress**: Track upload, analysis, and export with live status bars.
 - **📱 9:16 Vertical Format**: Auto-crops and scales to vertical format optimized for TikTok, Reels, and Shorts.
@@ -27,9 +28,9 @@ An intelligent, full-stack web application that automatically identifies, extrac
 |-------|-----------|
 | Frontend | React + Vite (vanilla CSS) |
 | Backend | Python + FastAPI + Uvicorn |
-| AI Model | Google Gemini 2.0 Flash Experimental |
+| AI Model | Google Gemini 2.0 Flash |
 | Video Processing | FFmpeg + PIL (Pillow) |
-| Text Rendering | FFmpeg `drawtext` with Impact font |
+| Text Rendering | FFmpeg `drawtext` with Arial Bold font |
 | Box Rendering | PIL-generated rounded rectangle PNGs overlaid via FFmpeg |
 
 ---
@@ -41,7 +42,7 @@ An intelligent, full-stack web application that automatically identifies, extrac
 - Node.js 18+
 - FFmpeg installed and accessible (or via `imageio-ffmpeg`)
 - [Google AI Studio API Key](https://aistudio.google.com/)
-- Windows (font paths use `C:/Windows/Fonts/impact.ttf`)
+- Windows (font paths use `C:/Windows/Fonts/arialbd.ttf`)
 
 ### 1. Clone the Repository
 ```bash
@@ -127,16 +128,18 @@ ai-video-clipper/
 ### Text Overlay (CapCut Style)
 - **Rounded white box** generated as PNG using PIL (`ImageDraw.rounded_rectangle`)
 - Overlaid on video using FFmpeg `overlay` filter
-- Text rendered on top using FFmpeg `drawtext` with **Impact** font
+- Text rendered on top using FFmpeg `drawtext` with **Arial Bold** font (size 42)
 - Text split into lines of max 35 characters for readability
 
 ### Video Processing Pipeline
 ```
 Input Video
+  → -ss start -to end (precise seek before input)
   → scale to 1080x1920 (blurred background)
   → overlay original centered (clear subject)
-  → overlay rounded white PNG box
-  → drawtext (Impact font, black, centered)
+  → overlay rounded white PNG box (-loop 1 -t duration)
+  → drawtext (Arial Bold, black, centered)
+  → overlay watermark PNG (-loop 1 -t duration)
   → encode H.264 + AAC, SAR 1:1
   → Output MP4 (browser compatible)
 ```
@@ -147,6 +150,24 @@ Input Video
 - Each clip: `start_time`, `end_time`, `viral_caption`, `reason`
 - Max clip duration enforced at **60 seconds** (both prompt + backend validation)
 
+### Critical FFmpeg Fix — Clip Duration
+The most important fix in v4.0. When FFmpeg has multiple inputs (video + PNG box + watermark PNG),
+using `-loop 1` without `-t` causes the loop to run forever, making exported clips as long as the full video.
+
+**Wrong (causes full-length exports):**
+```
+ffmpeg -i video.mp4 -ss 10 -to 30 -loop 1 -i box.png -loop 1 -i watermark.png ...
+```
+
+**Correct (precise clip duration):**
+```
+ffmpeg -ss 10 -to 30 -i video.mp4 -loop 1 -t 20 -i box.png -loop 1 -t 20 -i watermark.png ...
+```
+
+Key rules:
+- `-ss` and `-to` must go **before** `-i video` (input seeking)
+- `-loop 1 -t {duration}` must be applied to **every** PNG/image input
+
 ---
 
 ## ⚠️ Known Issues & Bugs
@@ -154,20 +175,21 @@ Input Video
 ### Fixed
 | Bug | Fix |
 |-----|-----|
+| Exported clips were full video length instead of clip duration | `-ss/-to` moved before `-i`, added `-t duration` to all `-loop 1` image inputs |
 | Export showed "stuck at 100%" | Frontend checked for `"done"` but backend returns `"completed"` — fixed to check both |
 | `'ClipData' object has no attribute 'title'` | Used `getattr(clip, 'title', f'clip_{clip.id}')` fallback |
 | Video not playable in browser (SAR error) | Added `-sar "1:1"` to FFmpeg command |
-| Ghost text appearing behind text overlay | Simplified filter chain to drawbox → drawtext (removed redundant layers) |
-| White box not rendering (appeared gray) | Switched from `box=1` drawtext param to explicit `drawbox` filter with `color=white@0.95` |
-| Font path error in FFmpeg on Windows | Escaped colon: `C\\:/Windows/Fonts/impact.ttf` |
+| Ghost text appearing behind text overlay | Simplified filter chain to drawbox → drawtext |
+| White box not rendering (appeared gray) | Switched to explicit `drawbox` filter with `color=white@0.95` |
+| Font path error in FFmpeg on Windows | Escaped colon: `C\\:/Windows/Fonts/arialbd.ttf` |
 | Clips too long (90+ seconds) | Modified Gemini prompt + added backend validation for 60s max |
 | Videos cached, old version served | Added cache-busting timestamp to preview URLs |
+| Font not bold enough | Changed from Impact to Arial Bold (arialbd.ttf, size 42) — tested manually before applying |
 
 ### Active / Pending
 | Bug | Status |
 |-----|--------|
-| Exported clip duration doesn't match UI duration | 🔴 Under investigation — clip cut timing may be off |
-| Font boldness — Impact font applied but not visually confirmed | 🟡 Needs testing after server restart |
+| Text box size/font size needs fine tuning | 🟡 Font size hardcoded at 42, box borders could be smaller |
 
 ---
 
