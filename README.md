@@ -1,4 +1,4 @@
-# 🎬 AI Video Clipper v5.0
+# 🎬 AI Video Clipper v6.0
 
 An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos — styled like CapCut/TikTok clips.
 
@@ -9,18 +9,21 @@ An intelligent, full-stack web application that automatically identifies, extrac
 ## ✨ Features
 
 - **🧠 AI Analysis**: Uploads video to Gemini, which watches it and identifies the most engaging, funny, or dramatic moments automatically.
-- **✂️ Smart Clipping**: Extracts clips with precise timestamps, enforcing a **60-second max duration** per clip for viral optimization.
+- **✂️ Smart Clipping**: Extracts clips with precise timestamps, each with a different duration (up to 60s max) based on the moment.
 - **🎞️ Live Preview**: Play generated clips directly in the browser before exporting.
 - **🎨 CapCut-Style Overlay**:
-  - White rounded box (radius=16, tight padding) with black **Arial Bold** font text (size 42)
+  - White rounded box (radius=14) with black **Arial Bold** font text (size 42)
+  - Box width measured precisely with PIL `getlength()` — fits text exactly
+  - Max 3 lines, line 3 absorbs all remaining words — text never truncated
   - Blurred background (boxblur) with centered subject
-  - Multiline caption splitting (max 35 chars/line)
+  - Apostrophes replaced with backtick for FFmpeg compatibility
   - Emoji characters automatically stripped (FFmpeg drawtext limitation)
 - **💧 Watermark Support**: Upload your own logo/watermark and overlay it on all clips.
 - **📦 Selective Export**: Choose exactly which clips to render and download.
 - **📊 Real-time Progress**: Track upload, analysis, and export with live status bars.
 - **📱 9:16 Vertical Format**: Auto-crops and scales to vertical format optimized for TikTok, Reels, and Shorts.
 - **📄 Clips Info TXT**: After exporting, download a `clips_info.txt` file with each clip's title, timestamps, caption, and why it went viral.
+- **🚫 No overlay on preview**: Draggable text/watermark HTML elements hidden when preview image/video is active.
 
 ---
 
@@ -78,6 +81,11 @@ cd backend
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+> ⚠️ **Important:** If you make code changes, always kill and restart the backend manually. `--reload` on Windows does not always reload modules correctly.
+> ```bash
+> taskkill /F /IM python.exe
+> ```
+
 ### Terminal 2: Frontend
 ```bash
 cd frontend
@@ -98,6 +106,8 @@ Open your browser at `http://localhost:5173`
 6. **Download** — Find exported files in the `projects/` folder or download from the UI
 7. **Clips Info** — After export, click "📄 Download Clips Info (TXT)" to get a summary file with all clip details
 
+> 💡 **Tip for large videos:** For 30+ minute videos, compress to 720p first (HandBrake is free) to avoid Gemini upload limits (~2GB).
+
 ---
 
 ## 📁 Project Structure
@@ -114,7 +124,7 @@ ai-video-clipper/
 │   │   │   ├── clips.py             # /clips endpoints (analyze, preview, export)
 │   │   │   └── upload.py            # /upload endpoint
 │   │   └── services/
-│   │       ├── gemini_service.py    # Gemini API calls + clip parsing
+│   │       ├── gemini_service.py    # Gemini API calls + clip parsing + prompt
 │   │       ├── video_service.py     # Preview generation, rounded box, text overlay
 │   │       └── export_service.py   # Final clip export + clips_info.txt generation
 │   └── requirements.txt
@@ -130,13 +140,21 @@ ai-video-clipper/
 
 ### Text Overlay (CapCut Style)
 - **Rounded white box** generated as PNG using PIL (`ImageDraw.rounded_rectangle`)
-  - Corner radius: `16px`
+  - Corner radius: `14px`
   - Padding: `24px horizontal, 16px vertical`
-  - Width dynamically calculated from longest text line
+  - Width measured with `ImageFont.getlength()` — pixel-perfect fit
 - Overlaid on video using FFmpeg `overlay` filter
 - Text rendered on top using FFmpeg `drawtext` with **Arial Bold** font (size 42)
-- Text split into lines of max 35 characters for readability
+- Max **3 lines**, 40 chars per line. Line 3 absorbs all remaining words — no truncation
+- Apostrophes `'` replaced with backtick `` ` `` for FFmpeg compatibility
 - Non-ASCII characters (emojis) stripped before passing to FFmpeg
+
+### Gemini Caption Rules
+- **Max 10 words** per caption (strict, counted in prompt)
+- **Third person only** — "He's got the moves", "Watch her reaction"
+- No "I", "Me", "My", "POV: You..."
+- Written as if a fan account reporting on the creator
+- Clip duration: variable per clip, min set by user, max 60 seconds
 
 ### Video Processing Pipeline
 ```
@@ -150,12 +168,6 @@ Input Video
   → encode H.264 + AAC, SAR 1:1
   → Output MP4 (browser compatible)
 ```
-
-### AI Clip Detection
-- Video uploaded as binary to Gemini multimodal API
-- Prompt instructs Gemini to find 5-8 viral moments
-- Each clip: `start_time`, `end_time`, `viral_caption`, `reason`
-- Max clip duration enforced at **60 seconds** (both prompt + backend validation)
 
 ### clips_info.txt Format
 After export, a `clips_info.txt` is saved to `projects/{id}/exported/` and available for download:
@@ -194,34 +206,39 @@ Key rules:
 
 ## ⚠️ Known Issues & Bugs
 
+### Fixed in v6.0
+| Bug | Fix |
+|-----|-----|
+| Draggable text/watermark visible on top of preview | Hidden when `previewUrl` or `videoPreviewUrl` is set in App.jsx |
+| Text truncated on clips with long captions | Line 3 now absorbs all remaining words instead of cutting off |
+| Caption word limit not enforced | Gemini prompt changed to strict 10-word max; `split_text_into_lines` uses 40 chars/line |
+| All clips same duration | Gemini prompt updated to use variable durations up to 60s per moment |
+| Apostrophes `'` stripped causing wrong line splits | Replaced with backtick `` ` `` instead of removing — preserves word length |
+| Box width too wide/narrow | Switched from char-count estimate to PIL `getlength()` pixel measurement |
+| Border radius too large | Tested r=4, r=8, r=12, r=14 — user chose r=14 |
+
 ### Fixed in v5.0
 | Bug | Fix |
 |-----|-----|
 | Emoji characters showing as boxes in video overlay | Strip non-ASCII with `re.sub(r'[^\x00-\x7F]+', '', text)` before FFmpeg drawtext |
-| Box border radius too large on some clips | Reduced to `corner_radius=16`, tight padding (pad_x=24, pad_y=16) |
-| "Download Clips Info" button returned 404 | Endpoint now reads `clips_info.txt` directly from disk (not in-memory store) |
-| "Download Clips Info" button returned 405 Method Not Allowed | Moved endpoint to `/api/export-info/{project_id}` in `main.py` (was conflicting with `/clips/{id}/{clip_id}` route) |
-| Server lost projects after code change + auto-reload | uvicorn `--reload` restarts process, clearing in-memory store. Download endpoint now reads from disk path |
-| Gemini model 404 error | `gemini-3-pro-preview` deprecated. Changed to `gemini-2.0-flash` |
+| "Download Clips Info" button returned 404 | Endpoint reads `clips_info.txt` directly from disk |
+| "Download Clips Info" button returned 405 Method Not Allowed | Moved to `/api/export-info/{project_id}` in `main.py` |
+| Server lost projects after code change + auto-reload | Download endpoint reads from disk path instead of in-memory store |
+| Gemini model 404 error | `gemini-3-pro-preview` deprecated → changed to `gemini-2.0-flash` |
 
 ### Fixed in v4.0
 | Bug | Fix |
 |-----|-----|
-| Exported clips were full video length instead of clip duration | `-ss/-to` moved before `-i`, added `-t duration` to all `-loop 1` image inputs |
-| Export showed "stuck at 100%" | Frontend checked for `"done"` but backend returns `"completed"` — fixed to check both |
-| `'ClipData' object has no attribute 'title'` | Used `getattr(clip, 'title', f'clip_{clip.id}')` fallback |
+| Exported clips were full video length | `-ss/-to` moved before `-i`, added `-t duration` to all `-loop 1` image inputs |
+| Export showed "stuck at 100%" | Frontend checks both `"done"` and `"completed"` status |
 | Video not playable in browser (SAR error) | Added `-sar "1:1"` to FFmpeg command |
-| Ghost text appearing behind text overlay | Simplified filter chain to drawbox → drawtext |
-| White box not rendering (appeared gray) | Switched to explicit `drawbox` filter with `color=white@0.95` |
-| Font path error in FFmpeg on Windows | Escaped colon: `C\\:/Windows/Fonts/arialbd.ttf` |
-| Clips too long (90+ seconds) | Modified Gemini prompt + added backend validation for 60s max |
-| Videos cached, old version served | Added cache-busting timestamp to preview URLs |
-| Font not bold enough | Changed from Impact to Arial Bold (arialbd.ttf, size 42) — tested manually before applying |
+| Font not bold enough | Changed from Impact to Arial Bold (arialbd.ttf, size 42) |
 
 ### Active / Pending
 | Issue | Status |
 |-------|--------|
 | In-memory project store resets on server restart | 🟡 By design for desktop app; disk-based persistence not yet implemented |
+| `--reload` doesn't always apply changes on Windows | 🟡 Workaround: kill python.exe and restart manually after code changes |
 
 ---
 
