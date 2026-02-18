@@ -24,20 +24,23 @@ def create_rounded_box(width: int, height: int, corner_radius: int = 20) -> str:
 
 
 def split_text_into_lines(text: str, max_chars: int = 40) -> list:
-    """Split text into max 3 lines. Truncate to 15 words max."""
-    # Hard cap at 15 words to prevent overflow
-    words = text.split()[:15]
+    """Split text into exactly 3 lines max. Line 3 absorbs all remaining words."""
+    words = text.split()
     lines = []
     current = []
 
     for word in words:
-        test = " ".join(current + [word])
-        if len(test) <= max_chars:
+        if len(lines) == 2:
+            # On 3rd line: absorb all remaining words no matter what
             current.append(word)
         else:
-            if current:
-                lines.append(" ".join(current))
-            current = [word]
+            test = " ".join(current + [word])
+            if len(test) <= max_chars:
+                current.append(word)
+            else:
+                if current:
+                    lines.append(" ".join(current))
+                current = [word]
 
     if current:
         lines.append(" ".join(current))
