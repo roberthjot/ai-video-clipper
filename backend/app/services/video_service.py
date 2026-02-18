@@ -23,25 +23,29 @@ def create_rounded_box(width: int, height: int, corner_radius: int = 20) -> str:
     return output_path
 
 
-def split_text_into_lines(text: str, max_chars: int = 35) -> list:
-    """Split text into multiple lines."""
+def split_text_into_lines(text: str, max_chars: int = 40) -> list:
+    """Split text into max 3 lines of max_chars each."""
     words = text.split()
     lines = []
     current = []
 
     for word in words:
-        test = " ".join(current + [word])
-        if len(test) <= max_chars:
+        if len(lines) == 2:
+            # 3rd line: keep adding all remaining words regardless of length
             current.append(word)
         else:
-            if current:
-                lines.append(" ".join(current))
-            current = [word]
+            test = " ".join(current + [word])
+            if len(test) <= max_chars:
+                current.append(word)
+            else:
+                if current:
+                    lines.append(" ".join(current))
+                current = [word]
 
     if current:
         lines.append(" ".join(current))
 
-    return lines
+    return lines[:3]
 
 
 def get_video_duration(file_path: str) -> float:
