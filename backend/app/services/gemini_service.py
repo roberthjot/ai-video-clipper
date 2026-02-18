@@ -139,6 +139,10 @@ def analyze_video(
         if end - start > 60:
             end = start + 60
 
+        # Enforce minimum duration — extend end if too short
+        if end - start < min_duration:
+            end = start + min_duration
+
         clips.append(
             ClipData(
                 id=i + 1,
