@@ -130,10 +130,12 @@ def analyze_video(
 
     clips_raw = json.loads(raw_text)
 
+    print(f"[Gemini] min_duration={min_duration}, clips from Gemini: {len(clips_raw)}")
     clips = []
     for i, clip in enumerate(clips_raw):
         start = float(clip.get("start_time", 0))
         end = float(clip.get("end_time", 0))
+        original_duration = end - start
 
         # Enforce maximum duration of 60 seconds
         if end - start > 60:
@@ -143,13 +145,19 @@ def analyze_video(
         if end - start < min_duration:
             end = start + min_duration
 
+        print(f"[Gemini] Clip {i+1}: {start:.1f}-{end:.1f} ({original_duration:.1f}s raw -> {end-start:.1f}s enforced)")
+        # Clean caption: remove punctuation except commas, sentence case only
+        caption = clip.get("viral_caption", "")
+        caption = re.sub(r'[!?.]', '', caption).strip()
+        caption = caption[:1].upper() + caption[1:].lower() if caption else caption
+
         clips.append(
             ClipData(
                 id=i + 1,
                 start_time=start,
                 end_time=end,
                 description=clip.get("description", "clip"),
-                viral_caption=clip.get("viral_caption", ""),
+                viral_caption=caption,
                 viral_reason=clip.get("viral_reason", ""),
             )
         )

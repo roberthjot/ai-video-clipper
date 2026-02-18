@@ -46,6 +46,7 @@ async def upload_video(
     )
 
     projects[project_id] = project
+    print(f"[Upload] project={project_id} min_duration={min_duration} clip_count={clip_count}")
 
     return {
         "project_id": project_id,
