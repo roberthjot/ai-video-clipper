@@ -84,7 +84,7 @@ def analyze_video(
     - "start_time": (float) Start time in seconds.
     - "end_time": (float) End time in seconds.
     - "description": (string) A very short 3-5 word label for the clip (English).
-    - "viral_caption": (string) A descriptive, engaging text for the video overlay (English). Length: 15-30 words.
+    - "viral_caption": (string) A short, punchy text for the video overlay (English). MAXIMUM 12 words. Keep it concise.
     - "viral_reason": (string) A brief explanation of why this specific clip has viral potential.
     
     IMPORTANT:
