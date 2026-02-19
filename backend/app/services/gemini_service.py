@@ -113,7 +113,6 @@ def analyze_video(
         ],
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
-            response_mime_type="application/json",
             temperature=0.85,
         ),
     )
