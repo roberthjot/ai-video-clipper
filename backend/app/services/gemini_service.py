@@ -28,6 +28,32 @@ def wait_for_processing(file_obj) -> object:
         time.sleep(5)
 
 
+def delete_file(file_obj) -> None:
+    """Delete an uploaded file from Gemini storage to free quota."""
+    try:
+        client.files.delete(name=file_obj.name)
+        print(f"[Gemini] Deleted file: {file_obj.name}")
+    except Exception as e:
+        print(f"[Gemini] Failed to delete file {file_obj.name} (ignoring): {e}")
+
+
+def count_tokens(file_obj) -> int:
+    """Count tokens for an uploaded Gemini file. Returns 0 if it fails."""
+    try:
+        result = client.models.count_tokens(
+            model=settings.GEMINI_MODEL,
+            contents=[types.Content(role="user", parts=[
+                types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+            ])]
+        )
+        total = result.total_tokens
+        print(f"[Gemini] Token count: {total:,} / 1,048,576")
+        return total
+    except Exception as e:
+        print(f"[Gemini] Token count failed (ignoring): {e}")
+        return 0
+
+
 def analyze_video(
     file_obj,
     video_duration: float,
@@ -90,9 +116,11 @@ def analyze_video(
     IMPORTANT:
     1. Timestamps MUST be simple numbers (e.g. 10.5). Do NOT use leading zeros.
     2. Duration of each clip MUST be between {min_duration} and 60 seconds. Each clip can be a DIFFERENT duration — use as many seconds as the moment needs, up to 60 seconds maximum. Do NOT make all clips the same length.
-    3. ABSOLUTE LIMIT: The video is approximately {video_duration} seconds long.
-       - Focus your search from {start_time_offset} seconds to {video_duration} seconds.
-       - ALL "start_time" and "end_time" MUST be less than {video_duration}.
+    3. STRICT TIMESTAMP RULE: The video is EXACTLY {video_duration} seconds long ({video_duration/60:.1f} minutes).
+       - Every single "start_time" MUST be less than {video_duration - min_duration}.
+       - Every single "end_time" MUST be less than or equal to {video_duration}.
+       - Any clip with a timestamp beyond {video_duration} seconds is INVALID and will be rejected.
+       - Only find clips that actually exist in this video. Do NOT invent clips beyond the video length.
     """
 
     response = client.models.generate_content(
@@ -130,35 +158,101 @@ def analyze_video(
     clips_raw = json.loads(raw_text)
 
     print(f"[Gemini] min_duration={min_duration}, clips from Gemini: {len(clips_raw)}")
-    clips = []
-    for i, clip in enumerate(clips_raw):
-        start = float(clip.get("start_time", 0))
-        end = float(clip.get("end_time", 0))
-        original_duration = end - start
 
-        # Enforce maximum duration of 60 seconds
-        if end - start > 60:
-            end = start + 60
+    def build_clips(clips_raw, video_duration, min_duration):
+        clips = []
+        skipped = 0
+        for i, clip in enumerate(clips_raw):
+            start = float(clip.get("start_time", 0))
+            end = float(clip.get("end_time", 0))
+            original_duration = end - start
 
-        # Enforce minimum duration — extend end if too short
-        if end - start < min_duration:
-            end = start + min_duration
+            # Skip clips that start beyond the video
+            if start >= video_duration:
+                print(f"[Gemini] Clip {i+1}: SKIPPED — start_time {start:.1f}s exceeds video duration {video_duration:.1f}s")
+                skipped += 1
+                continue
 
-        print(f"[Gemini] Clip {i+1}: {start:.1f}-{end:.1f} ({original_duration:.1f}s raw -> {end-start:.1f}s enforced)")
-        # Clean caption: remove punctuation except commas, sentence case only
-        caption = clip.get("viral_caption", "")
-        caption = re.sub(r'[!?.]', '', caption).strip()
-        caption = caption[:1].upper() + caption[1:].lower() if caption else caption
+            # Clamp end_time to video duration
+            if end > video_duration:
+                end = video_duration
 
-        clips.append(
-            ClipData(
-                id=i + 1,
+            # Enforce maximum duration of 60 seconds
+            if end - start > 60:
+                end = start + 60
+
+            # Enforce minimum duration — extend end if too short
+            if end - start < min_duration:
+                end = start + min_duration
+                if end > video_duration:
+                    print(f"[Gemini] Clip {i+1}: SKIPPED — too close to end of video")
+                    skipped += 1
+                    continue
+
+            print(f"[Gemini] Clip {i+1}: {start:.1f}-{end:.1f} ({original_duration:.1f}s raw -> {end-start:.1f}s enforced)")
+
+            caption = clip.get("viral_caption", "")
+            caption = re.sub(r'[!?.]', '', caption).strip()
+            caption = caption[:1].upper() + caption[1:].lower() if caption else caption
+
+            clips.append(ClipData(
+                id=len(clips) + 1,
                 start_time=start,
                 end_time=end,
                 description=clip.get("description", "clip"),
                 viral_caption=caption,
                 viral_reason=clip.get("viral_reason", ""),
-            )
+            ))
+        return clips, skipped
+
+    clips, skipped = build_clips(clips_raw, video_duration, min_duration)
+
+    # If Gemini gave invalid clips, retry once asking for exactly the missing amount
+    if skipped > 0:
+        print(f"[Gemini] {skipped} clips were out of range. Retrying to get {skipped} more valid clips...")
+        retry_response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_uri(
+                            file_uri=file_obj.uri,
+                            mime_type=file_obj.mime_type,
+                        ),
+                        types.Part.from_text(
+                            text=(
+                                f"Find {skipped} more viral clips in this video. "
+                                f"CRITICAL: The video is EXACTLY {video_duration:.1f} seconds long. "
+                                f"ALL timestamps MUST be between 0 and {video_duration:.1f}. "
+                                f"Do NOT repeat clips already found near these timestamps: "
+                                f"{[f'{c.start_time:.0f}-{c.end_time:.0f}' for c in clips]}. "
+                                f"Return ONLY a raw JSON list."
+                            )
+                        ),
+                    ],
+                )
+            ],
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.7,
+            ),
         )
+        try:
+            retry_text = retry_response.text.strip()
+            if retry_text.startswith("```json"):
+                retry_text = retry_text[7:]
+            if retry_text.endswith("```"):
+                retry_text = retry_text[:-3]
+            retry_text = re.sub(r"\b0+(\d)", r"\1", retry_text)
+            retry_raw = json.loads(retry_text)
+            retry_clips, _ = build_clips(retry_raw, video_duration, min_duration)
+            # Renumber and append
+            for c in retry_clips:
+                c.id = len(clips) + 1
+                clips.append(c)
+            print(f"[Gemini] Retry gave {len(retry_clips)} valid clips. Total: {len(clips)}")
+        except Exception as e:
+            print(f"[Gemini] Retry failed (ignoring): {e}")
 
     return clips

@@ -18,6 +18,7 @@ class Project(BaseModel):
     video_duration: float = 0.0
     created_at: float = 0.0
     output_dir: str = ""
+    token_count: int = 0
 
     def model_post_init(self, __context):
         if self.created_at == 0.0:

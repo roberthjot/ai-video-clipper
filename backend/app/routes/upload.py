@@ -85,12 +85,16 @@ async def get_project_status(project_id: str):
     if project_id not in projects:
         raise HTTPException(status_code=404, detail="Project not found")
     p = projects[project_id]
+    token_info = ""
+    if p.token_count > 0:
+        pct_used = round(p.token_count / 1_048_576 * 100)
+        token_info = f" ({p.token_count:,} tokens — {pct_used}% of limit)"
     status_map = {
         "uploaded": {"phase": "uploaded", "message": "Video uploaded", "percent": 0},
         "uploading": {"phase": "uploading", "message": "Uploading to AI...", "percent": 15},
         "processing": {"phase": "processing", "message": "AI is processing video...", "percent": 35},
-        "analyzing": {"phase": "analyzing", "message": "AI is finding viral moments...", "percent": 65},
-        "ready": {"phase": "ready", "message": "Analysis complete!", "percent": 100},
+        "analyzing": {"phase": "analyzing", "message": f"AI is finding viral moments...{token_info}", "percent": 65},
+        "ready": {"phase": "ready", "message": f"Analysis complete!{token_info}", "percent": 100},
         "error": {"phase": "error", "message": "An error occurred", "percent": 0},
     }
     info = status_map.get(p.status, {"phase": p.status, "message": p.status, "percent": 0})

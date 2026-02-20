@@ -27,6 +27,7 @@ async def analyze_video(req: AnalyzeRequest):
 
     project = projects[req.project_id]
 
+    active_file = None
     try:
         project.status = "uploading"
         file_obj = await asyncio.to_thread(gemini_service.upload_video, project.video_path)
@@ -34,7 +35,20 @@ async def analyze_video(req: AnalyzeRequest):
         project.status = "processing"
         active_file = await asyncio.to_thread(gemini_service.wait_for_processing, file_obj)
 
+        # Check token count before analyzing — fail fast with clear message
         project.status = "analyzing"
+        token_count = await asyncio.to_thread(gemini_service.count_tokens, active_file)
+        project.token_count = token_count
+        MAX_TOKENS = 1_048_576
+        if token_count > MAX_TOKENS:
+            project.status = "error"
+            mins = int((project.video_duration or 0) / 60)
+            await asyncio.to_thread(gemini_service.delete_file, active_file)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video too large for AI: {token_count:,} tokens (max {MAX_TOKENS:,}). "
+                       f"Your video is {mins} min. Please use a video under 45 minutes."
+            )
         duration = req.duration_override or project.video_duration
 
         clips = await asyncio.to_thread(
@@ -56,11 +70,17 @@ async def analyze_video(req: AnalyzeRequest):
             "total": len(clips),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
         project.status = "error"
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Always clean up the Gemini file to free storage quota
+        if active_file is not None:
+            await asyncio.to_thread(gemini_service.delete_file, active_file)
 
 
 @router.get("/{project_id}/download-info")

@@ -1,0 +1,37 @@
+[
+  {
+    "start_time": 9.0,
+    "end_time": 26.0,
+    "description": "The artist emerges from a black Mercedes, surrounded by his crew, rapping and performing energetic dance moves.",
+    "viral_caption": "🔥 UK drill vibes! Mercedes, crew, and fresh moves. #DrillMusic #UKRap",
+    "viral_reason": "High energy, luxury car, strong group presence, and cool dance moves are visually appealing and trendy on short-form video platforms."
+  },
+  {
+    "start_time": 33.0,
+    "end_time": 50.0,
+    "description": "Shots of the Mercedes logo projection, followed by close-ups of the artist's diamond grills and iced-out chain, then back to group dancing.",
+    "viral_caption": "Grills so icy! Diamond chains and dance moves. #Bling #Grillz #HipHopFashion",
+    "viral_reason": "Close-ups of expensive jewelry (grills and chain) are highly engaging and aspirational content, often going viral for their flashiness."
+  },
+  {
+    "start_time": 50.0,
+    "end_time": 70.0,
+    "description": "The entire crew dancing in sync and individually, showing off their moves with the artist at the center, followed by a quick shot of the artist in the car.",
+    "viral_caption": "Squad goals! When the whole crew hits the dance floor. #DanceCrew #UKDrill #Energy",
+    "viral_reason": "Group dance sequences with high energy and coordinated moves are very popular and shareable, especially when the artist is leading."
+  },
+  {
+    "start_time": 76.0,
+    "end_time": 96.0,
+    "description": "Close-up shots of the artist rapping directly to the camera, flaunting his chain and grills, and making confident gestures.",
+    "viral_caption": "Undeniable swagger! Artist's confident flow and style. #Charisma #RapStar #WatchMeNow",
+    "viral_reason": "Direct camera address, confident demeanor, and showing off bling create a strong connection with viewers and highlight the artist's star power."
+  },
+  {
+    "start_time": 97.0,
+    "end_time": 119.0,
+    "description": "The artist and his crew perform synchronized dance moves in a well-lit outdoor setting at night, displaying camaraderie and energy.",
+    "viral_caption": "Vibing with the crew! Best dance moves from the block. #GoodVibes #DanceChallenge #Drill",
+    "viral_reason": "Synchronized dancing and the overall positive, energetic vibe of the group are highly re-watchable and can inspire dance challenges."
+  }
+]
