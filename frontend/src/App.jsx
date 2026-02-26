@@ -363,7 +363,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     watermark_y: 0.85,
     watermark_scale: 0.3,
     watermark_opacity: 0.9,
-    fg_scale: 1.0,
+    fill_mode: "fit",
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [progress, setProgress] = useState({ current: 0, total: 0, current_file: "" });
@@ -429,6 +429,18 @@ function EditorStep({ projectId, clips, onExportDone }) {
     setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
     // loadingVideo stays true until onCanPlay fires on the video element
   };
+
+  // Auto-refresh preview when fill_mode changes
+  useEffect(() => {
+    if (!previewUrl || !selectedClip) return;
+    const timer = setTimeout(async () => {
+      try {
+        await api.updateStyle(projectId, style);
+        setPreviewUrl(api.getPreviewUrl(projectId, selectedClip.id));
+      } catch (_) {}
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [style.fill_mode]);
 
   // Poll progress
   useEffect(() => {
@@ -739,16 +751,23 @@ function EditorStep({ projectId, clips, onExportDone }) {
             </div>
           </div>
 
-          {/* Video scale */}
+          {/* Video format */}
           <div className="control-section">
-            <h3>🎬 Video Size</h3>
-            <div className="slider-group">
-              <label>Scale <span>{(style.fg_scale * 100).toFixed(0)}%</span></label>
-              <input type="range" min={70} max={200} step={5} value={style.fg_scale * 100}
-                onChange={(e) => setStyle((s) => ({ ...s, fg_scale: parseInt(e.target.value) / 100 }))} />
+            <h3>🎬 Video Format</h3>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className={`btn ${style.fill_mode === "fit" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle((s) => ({ ...s, fill_mode: "fit" }))}>
+                Fit
+              </button>
+              <button
+                className={`btn ${style.fill_mode === "fill" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle((s) => ({ ...s, fill_mode: "fill" }))}>
+                Fill
+              </button>
             </div>
-            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-              100% = fill width · &gt;100% = bigger (sides crop) · &lt;100% = smaller
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+              Fit = full video visible · Fill = covers entire frame
             </p>
           </div>
 

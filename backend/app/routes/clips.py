@@ -170,7 +170,7 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             watermark_y=style.watermark_y,
             watermark_scale=style.watermark_scale,
             watermark_opacity=style.watermark_opacity,
-            fg_scale=style.fg_scale,
+            fill_mode=style.fill_mode,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Preview generation failed: {str(e)}")
@@ -222,7 +222,7 @@ async def preview_clip_video(project_id: str, clip_id: int):
             watermark_y=style.watermark_y,
             watermark_scale=style.watermark_scale,
             watermark_opacity=style.watermark_opacity,
-            fg_scale=style.fg_scale,
+            fill_mode=style.fill_mode,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Video preview failed: {str(e)}")
