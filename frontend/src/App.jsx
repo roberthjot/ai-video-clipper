@@ -235,7 +235,7 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
     setPlayingClip(clip);
     setLoadingVideo(true);
     setVideoUrl(api.getVideoPreviewUrl(projectId, clip.id));
-    setLoadingVideo(false);
+    // loadingVideo stays true until onCanPlay fires on the video element
   };
 
   return (
@@ -288,12 +288,25 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
             <p style={{ color: "var(--text-secondary)", marginBottom: 12, fontSize: 13 }}>
               {formatTime(playingClip.start_time)} — {formatTime(playingClip.end_time)} ({playingClip.duration.toFixed(0)}s)
             </p>
+            {loadingVideo && (
+              <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-muted)" }}>
+                <div className="loading-spinner" style={{ margin: "0 auto 12px" }}></div>
+                <p style={{ fontSize: 13 }}>Generating preview... (first time may take ~15s)</p>
+              </div>
+            )}
             {videoUrl && (
               <video
+                key={videoUrl}
                 controls
                 autoPlay
-                style={{ width: "100%", borderRadius: 10, background: "black", maxHeight: 400 }}
+                style={{ width: "100%", borderRadius: 10, background: "black", maxHeight: 400, display: loadingVideo ? "none" : "block" }}
                 src={videoUrl}
+                onCanPlay={() => setLoadingVideo(false)}
+                onError={() => {
+                  setLoadingVideo(false);
+                  alert("Failed to generate video preview. Try again.");
+                  setVideoUrl(null);
+                }}
               />
             )}
             <div className="btn-group">
@@ -413,7 +426,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     setLoadingVideo(true);
     setPreviewUrl(null);
     setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
-    setLoadingVideo(false);
+    // loadingVideo stays true until onCanPlay fires on the video element
   };
 
   // Poll progress
@@ -570,7 +583,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
         {/* Canvas Preview */}
         <div className="editor-canvas-container" ref={canvasRef}>
           <div className="editor-canvas">
-            {loadingPreview ? (
+            {(loadingPreview || loadingVideo) ? (
               <div style={{
                 width: "100%", height: "100%",
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -579,15 +592,25 @@ function EditorStep({ projectId, clips, onExportDone }) {
               }}>
                 <span style={{ fontSize: "40px" }}>⏳</span>
                 <span style={{ color: "var(--accent)", fontSize: "14px", fontWeight: "500" }}>
-                  Generating preview...
+                  {loadingVideo ? "Generating video preview..." : "Generating preview..."}
+                </span>
+                <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>
+                  First time may take ~15 seconds
                 </span>
               </div>
             ) : videoPreviewUrl ? (
               <video
+                key={videoPreviewUrl}
                 controls
                 autoPlay
                 src={videoPreviewUrl}
                 style={{ width: "100%", height: "100%", objectFit: "contain", background: "black", borderRadius: 8 }}
+                onCanPlay={() => setLoadingVideo(false)}
+                onError={() => {
+                  setLoadingVideo(false);
+                  alert("Failed to generate video preview. Try again.");
+                  setVideoPreviewUrl(null);
+                }}
               />
             ) : previewUrl ? (
               <img
@@ -619,7 +642,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
               </div>
             )}
 
-            {/* Draggable text - only show when no preview is active */}
+            {/* Draggable text position indicator - only show when no preview is active */}
             {selectedClip && !previewUrl && !videoPreviewUrl && (
               <div
                 className={`draggable-text ${dragging === "text" ? "dragging" : ""}`}
@@ -627,14 +650,15 @@ function EditorStep({ projectId, clips, onExportDone }) {
                   left: `${style.text_x * 100}%`,
                   top: `${style.text_y * 100}%`,
                   transform: "translate(-50%, -50%)",
-                  fontSize: `${Math.max(10, style.font_size * 0.35)}px`,
+                  fontSize: "12px",
                   color: style.text_color,
-                  WebkitTextStroke: `${style.text_stroke_width * 0.3}px ${style.text_stroke_color}`,
+                  WebkitTextStroke: `1px ${style.text_stroke_color}`,
+                  padding: "6px 12px",
+                  whiteSpace: "nowrap",
                 }}
                 onMouseDown={handleMouseDown("text")}
               >
-                {selectedClip.viral_caption.substring(0, 60)}
-                {selectedClip.viral_caption.length > 60 ? "..." : ""}
+                T caption
               </div>
             )}
 

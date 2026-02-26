@@ -82,45 +82,61 @@ def analyze_video(
         instruction = custom_prompt.strip()
     else:
         instruction = (
-            "Focus on EVERYTHING viral-worthy. Drama, emotions, funny moments, "
-            "confessions, or intensity. Prioritize clips with high viral potential. "
-            "Duration is flexible — longer clips are encouraged if the moment is worth it."
+            "Scan the ENTIRE video from start to finish. Pick only the moments that will make someone stop scrolling instantly. "
+            "Prioritize: shocking reveals, explosive arguments, emotional breakdowns, unexpected plot twists, "
+            "hilarious reactions, jaw-dropping confessions, and intense confrontations. "
+            "Skip boring transitions, slow dialogue, or anything that wouldn't hook someone in the first 2 seconds. "
+            "Each clip must start at the PEAK of the moment — not before it builds up."
         )
 
     system_prompt = f"""
-    You are an expert viral video editor specializing in TikTok content for an immense American audience. 
-    Your task is to watch the entire video provided and identify the BEST {target_clips} clips that have the highest potential to go viral.
-    
-    Target Audience: USA (English).
-    Platform: TikTok / Reels / Shorts.
-    
-    Goal: Identify exactly {target_clips} clips.
-    Constraint: Each clip MUST be at least {min_duration} seconds long.
-    
+    You are the #1 viral video editor on TikTok with 10 years of experience creating content that gets hundreds of millions of views.
+    Your job is to watch this video and extract the {target_clips} most explosive, attention-grabbing clips that will go viral on TikTok, Reels, and Shorts.
+
+    Target Audience: USA (English speakers).
+    Platform: TikTok / Instagram Reels / YouTube Shorts.
+
+    YOUR GOAL: Find exactly {target_clips} clips. Each clip MUST be at least {min_duration} seconds long.
+
+    WHAT MAKES A CLIP GO VIRAL:
+    - Hooks viewers in the first 2 seconds — starts at the peak of the action
+    - Creates an emotional reaction: shock, laughter, tears, anger, or disbelief
+    - Has a clear story arc even in a short clip
+    - Makes people want to comment, share, or watch again
+    - Feels like something people have never seen before
+
+    WHAT TO AVOID:
+    - Slow build-ups or boring introductions
+    - Clips that need context from earlier in the video
+    - Repetitive or similar moments — each clip must be UNIQUE
+    - Dead air, silence, or transitions
+
     INSTRUCTION: {instruction}
-    
-    IMPORTANT - CAPTION STYLE:
-    - The captions MUST be in **THIRD PERSON** (e.g., "She bought a car", "Look at her reaction").
-    - DO NOT use "I", "Me", "My", or "POV: You...".
-    - Write as if you are a fan account reporting on the creator.
-    
+
+    CAPTION RULES (CRITICAL):
+    - Write in THIRD PERSON only (e.g. "She finally told the truth" not "I told the truth")
+    - NO first person: no "I", "me", "my", "we"
+    - Maximum 10 words — short, punchy, scroll-stopping
+    - Write like a fan account teasing the drama
+    - NO punctuation of any kind: no periods, no commas, no exclamation marks, no question marks
+    - All lowercase EXCEPT the very first letter of the caption
+
     Output Format:
-    Return ONLY a raw JSON list of objects. Do not include markdown formatting (like ```json).
+    Return ONLY a raw JSON list. No markdown, no ```json, no explanation — just the JSON array.
     Each object must have:
     - "start_time": (float) Start time in seconds.
     - "end_time": (float) End time in seconds.
-    - "description": (string) A very short 3-5 word label for the clip (English).
-    - "viral_caption": (string) A short, punchy text for the video overlay (English). STRICT MAXIMUM 13 words. Count the words. Do NOT exceed 13 words under any circumstance.
-    - "viral_reason": (string) A brief explanation of why this specific clip has viral potential.
-    
-    IMPORTANT:
-    1. Timestamps MUST be simple numbers (e.g. 10.5). Do NOT use leading zeros.
-    2. Duration of each clip MUST be between {min_duration} and 60 seconds. Each clip can be a DIFFERENT duration — use as many seconds as the moment needs, up to 60 seconds maximum. Do NOT make all clips the same length.
-    3. STRICT TIMESTAMP RULE: The video is EXACTLY {video_duration} seconds long ({video_duration/60:.1f} minutes).
-       - Every single "start_time" MUST be less than {video_duration - min_duration}.
-       - Every single "end_time" MUST be less than or equal to {video_duration}.
-       - Any clip with a timestamp beyond {video_duration} seconds is INVALID and will be rejected.
-       - Only find clips that actually exist in this video. Do NOT invent clips beyond the video length.
+    - "description": (string) 3-5 word label for the clip (English).
+    - "viral_caption": (string) Short punchy overlay text. MAX 10 words. No punctuation.
+    - "viral_reason": (string) One sentence explaining the viral potential.
+
+    TIMESTAMP RULES (CRITICAL):
+    1. Use simple decimal numbers only (e.g. 10.5). NO leading zeros.
+    2. Clip duration MUST be between {min_duration} and 60 seconds. Vary the durations — not all clips the same length.
+    3. The video is EXACTLY {video_duration} seconds long ({video_duration/60:.1f} minutes).
+       - "start_time" MUST be less than {video_duration - min_duration}.
+       - "end_time" MUST be less than or equal to {video_duration}.
+       - Clips beyond {video_duration} seconds DO NOT EXIST and will be rejected.
     """
 
     response = client.models.generate_content(
@@ -146,6 +162,8 @@ def analyze_video(
     )
 
     # Parse response
+    if not response.text:
+        raise RuntimeError("Gemini returned an empty response. Try again.")
     raw_text = response.text.strip()
     if raw_text.startswith("```json"):
         raw_text = raw_text[7:]
@@ -192,7 +210,11 @@ def analyze_video(
             print(f"[Gemini] Clip {i+1}: {start:.1f}-{end:.1f} ({original_duration:.1f}s raw -> {end-start:.1f}s enforced)")
 
             caption = clip.get("viral_caption", "")
-            caption = re.sub(r'[!?.]', '', caption).strip()
+            # Remove all punctuation and symbols, keep only letters, numbers and spaces
+            caption = re.sub(r'[^\w\s]', '', caption).strip()
+            # Remove extra spaces
+            caption = re.sub(r'\s+', ' ', caption).strip()
+            # All lowercase except first letter
             caption = caption[:1].upper() + caption[1:].lower() if caption else caption
 
             clips.append(ClipData(

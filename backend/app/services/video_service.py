@@ -23,6 +23,21 @@ def create_rounded_box(width: int, height: int, corner_radius: int = 20) -> str:
     return output_path
 
 
+def sanitize_for_drawtext(text: str) -> str:
+    """Remove characters that break FFmpeg drawtext filter."""
+    import re as _re
+    safe = _re.sub(r'[^\x00-\x7F]+', '', text)   # strip non-ASCII
+    safe = safe.replace("\\", "")
+    safe = safe.replace("'", "`")
+    safe = safe.replace('"', "")
+    safe = safe.replace(",", "")   # commas separate FFmpeg filter options
+    safe = safe.replace(":", "")   # colons separate FFmpeg key=value pairs
+    safe = safe.replace("%", "")   # special char in drawtext
+    safe = safe.replace("[", "").replace("]", "")
+    safe = safe.replace("{", "").replace("}", "")
+    return safe.strip()
+
+
 def split_text_into_lines(text: str, max_chars: int = 40) -> list:
     """Split text into exactly 3 lines max. Line 3 absorbs all remaining words."""
     words = text.split()
@@ -95,9 +110,7 @@ def generate_preview_frame(
 
     # Add rounded box + text if caption exists
     if caption_text:
-        import re as _re
-        safe = caption_text.replace("'", "`").replace('"', "").replace("\\", "")
-        safe = _re.sub(r'[^\x00-\x7F]+', '', safe).strip()
+        safe = sanitize_for_drawtext(caption_text)
         lines = split_text_into_lines(safe)
 
         font_size_actual = 42
@@ -187,7 +200,7 @@ def generate_preview_clip(
     watermark_opacity: float = 0.9,
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
-    clip_duration = duration
+    clip_duration = min(duration, max_seconds)
     W, H = 1080, 1920
 
     # Build filter
@@ -198,9 +211,7 @@ def generate_preview_clip(
 
     # Add rounded box + text
     if caption_text:
-        import re as _re
-        safe = caption_text.replace("'", "`").replace('"', "").replace("\\", "")
-        safe = _re.sub(r'[^\x00-\x7F]+', '', safe).strip()
+        safe = sanitize_for_drawtext(caption_text)
         lines = split_text_into_lines(safe)
 
         font_size_actual = 42
