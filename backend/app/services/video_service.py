@@ -39,28 +39,28 @@ def sanitize_for_drawtext(text: str) -> str:
 
 
 def split_text_into_lines(text: str, max_chars: int = 40) -> list:
-    """Split text into exactly 3 lines max. Line 3 absorbs all remaining words."""
+    """Split text into up to 3 lines, each capped at max_chars. Extra words are dropped."""
     words = text.split()
     lines = []
     current = []
 
     for word in words:
-        if len(lines) == 2:
-            # On 3rd line: absorb all remaining words no matter what
+        if len(lines) == 3:
+            break
+        test = " ".join(current + [word])
+        if len(test) <= max_chars:
             current.append(word)
         else:
-            test = " ".join(current + [word])
-            if len(test) <= max_chars:
-                current.append(word)
-            else:
-                if current:
-                    lines.append(" ".join(current))
-                current = [word]
+            if current:
+                lines.append(" ".join(current))
+            if len(lines) == 3:
+                break
+            current = [word]
 
-    if current:
+    if current and len(lines) < 3:
         lines.append(" ".join(current))
 
-    return lines[:3]
+    return lines
 
 
 def get_video_duration(file_path: str) -> float:
@@ -111,11 +111,11 @@ def generate_preview_frame(
     # Add rounded box + text if caption exists
     if caption_text:
         safe = sanitize_for_drawtext(caption_text)
-        lines = split_text_into_lines(safe)
+        lines = split_text_into_lines(safe, max_chars=15)
 
-        font_size_actual = 62
-        pad_x, pad_y = 24, 16
-        line_gap = 8
+        font_size_actual = 100
+        pad_x, pad_y = 12, 8
+        line_gap = 5
         line_h = int(font_size_actual * 1.15)
         base_y = int(text_y * H)
 
@@ -137,7 +137,7 @@ def generate_preview_frame(
 
         for i, line in enumerate(lines):
             y = box_y + pad_y + i * (line_h + line_gap)
-            filter_parts.append(f"[{last}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize=42:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
+            filter_parts.append(f"[{last}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
             last = f"t{i}"
 
     # Watermark
@@ -212,11 +212,11 @@ def generate_preview_clip(
     # Add rounded box + text
     if caption_text:
         safe = sanitize_for_drawtext(caption_text)
-        lines = split_text_into_lines(safe)
+        lines = split_text_into_lines(safe, max_chars=15)
 
-        font_size_actual = 62
-        pad_x, pad_y = 24, 16
-        line_gap = 8
+        font_size_actual = 100
+        pad_x, pad_y = 12, 8
+        line_gap = 5
         line_h = int(font_size_actual * 1.15)
         base_y = int(text_y * H)
 

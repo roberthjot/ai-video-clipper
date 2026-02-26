@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v7.3] - 2026-02-25
+
+### Fixed
+- **Box grows when font grows**: `split_text_into_lines` was absorbing ALL remaining words onto line 3 with no character limit, causing very long line 3 → wide box. Now all 3 lines enforce `max_chars=15` and extra words are dropped. Box size is now independent of font size.
+
+### Changed
+- **Caption font size**: Increased from `95px` to `100px`. With the line-length fix, the box stays compact while text is visibly larger.
+
 ## [v7.2] - 2026-02-25
 
 ### Fixed
