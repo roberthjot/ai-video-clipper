@@ -39,7 +39,7 @@ def export_clip_with_style(
         safe = video_service.sanitize_for_drawtext(clip.viral_caption)
         lines = video_service.split_text_into_lines(safe)
 
-        font_size_actual = 48
+        font_size_actual = 62
         pad_x, pad_y = 24, 16
         line_gap = 8
         line_h = int(font_size_actual * 1.15)

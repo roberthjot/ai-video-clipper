@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v7.2] - 2026-02-25
+
+### Fixed
+- **Apostrophe still looks wrong**: Replaced U+2019 curly apostrophe with full removal — TikTok captions don't use apostrophes, avoids any FFmpeg font rendering issues.
+
+### Changed
+- **Caption font size**: Increased from `48px` to `62px` for stronger, more legible text on mobile.
+
 ## [v7.1] - 2026-02-25
 
 ### Fixed

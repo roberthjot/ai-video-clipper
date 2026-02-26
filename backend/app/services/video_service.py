@@ -28,7 +28,7 @@ def sanitize_for_drawtext(text: str) -> str:
     import re as _re
     safe = _re.sub(r'[^\x00-\x7F]+', '', text)   # strip non-ASCII
     safe = safe.replace("\\", "")
-    safe = safe.replace("'", "\u2019")  # curly apostrophe — safe for FFmpeg, looks correct
+    safe = safe.replace("'", "")  # remove apostrophes (TikTok captions don't use them)
     safe = safe.replace('"', "")
     safe = safe.replace(",", "")   # commas separate FFmpeg filter options
     safe = safe.replace(":", "")   # colons separate FFmpeg key=value pairs
@@ -113,7 +113,7 @@ def generate_preview_frame(
         safe = sanitize_for_drawtext(caption_text)
         lines = split_text_into_lines(safe)
 
-        font_size_actual = 48
+        font_size_actual = 62
         pad_x, pad_y = 24, 16
         line_gap = 8
         line_h = int(font_size_actual * 1.15)
@@ -214,7 +214,7 @@ def generate_preview_clip(
         safe = sanitize_for_drawtext(caption_text)
         lines = split_text_into_lines(safe)
 
-        font_size_actual = 48
+        font_size_actual = 62
         pad_x, pad_y = 24, 16
         line_gap = 8
         line_h = int(font_size_actual * 1.15)
