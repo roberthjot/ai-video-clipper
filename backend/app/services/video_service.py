@@ -103,6 +103,8 @@ def generate_preview_frame(
         fg_filter = f"scale=-2:{H}"
     elif fill_mode == "zoom":
         fg_filter = f"scale=-2:{int(H * 0.9)}"
+    elif fill_mode == "small":
+        fg_filter = f"scale=-2:{int(H * 0.78)}"
     else:
         fg_filter = f"scale={W}:-2"
 
@@ -214,6 +216,8 @@ def generate_preview_clip(
         fg_filter = f"scale=-2:{H}"
     elif fill_mode == "zoom":
         fg_filter = f"scale=-2:{int(H * 0.9)}"
+    elif fill_mode == "small":
+        fg_filter = f"scale=-2:{int(H * 0.78)}"
     else:
         fg_filter = f"scale={W}:-2"
 

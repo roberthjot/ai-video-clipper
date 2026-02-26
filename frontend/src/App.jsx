@@ -701,6 +701,21 @@ function EditorStep({ projectId, clips, onExportDone }) {
               </div>
             )}
 
+            {/* Center guide line - only show when watermark is visible and no preview active */}
+            {watermarkPreview && !previewUrl && !videoPreviewUrl && (
+              <div style={{
+                position: "absolute",
+                left: "50%",
+                top: 0,
+                bottom: 0,
+                width: "1px",
+                background: "repeating-linear-gradient(to bottom, rgba(255,255,255,0.7) 0px, rgba(255,255,255,0.7) 6px, transparent 6px, transparent 12px)",
+                transform: "translateX(-50%)",
+                pointerEvents: "none",
+                zIndex: 1,
+              }} />
+            )}
+
             {/* Draggable watermark - only show when no preview is active */}
             {watermarkPreview && !previewUrl && !videoPreviewUrl && (
               <div
@@ -710,6 +725,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
                   top: `${style.watermark_y * 100}%`,
                   transform: "translate(-50%, -50%)",
                   opacity: style.watermark_opacity,
+                  zIndex: 2,
                 }}
                 onMouseDown={handleMouseDown("watermark")}
               >
@@ -761,7 +777,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
           {/* Video format */}
           <div className="control-section">
             <h3>🎬 Video Format</h3>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
                 className={`btn ${style.fill_mode === "fit" ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setStyle((s) => ({ ...s, fill_mode: "fit" }))}>
@@ -777,9 +793,14 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 onClick={() => setStyle((s) => ({ ...s, fill_mode: "fill" }))}>
                 Fill
               </button>
+              <button
+                className={`btn ${style.fill_mode === "small" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle((s) => ({ ...s, fill_mode: "small" }))}>
+                Small
+              </button>
             </div>
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-              Fit = full video · Zoom = grande · Fill = frame completo
+              Fit = full · Zoom = grande · Fill = frame completo · Small = reducido
             </p>
           </div>
 

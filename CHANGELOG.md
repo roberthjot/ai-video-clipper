@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v7.8] - 2026-02-26
+
+### Added
+- **"Small" video format mode**: Fourth fill_mode option that scales the video to 78% of the frame height (1497px), creating a noticeable blur border on all sides without shrinking the content too much. Sits between Zoom (90% height) and Fit (full width) in visual size.
+- **Watermark center guide line**: When a watermark is uploaded and no preview is active, a vertical dashed white line appears at the horizontal center of the canvas (50%). Helps align the watermark logo precisely to center without guesswork. The line is purely visual (pointer-events: none) and disappears when preview is active.
+
+### Changed
+- **Video Format buttons**: Added `flexWrap: wrap` so the four buttons (Fit / Zoom / Fill / Small) wrap cleanly on narrow panels.
+- **Format description**: Updated hint text to `Fit = full · Zoom = grande · Fill = frame completo · Small = reducido`.
+
 ## [v7.4] - 2026-02-26
 
 ### Fixed

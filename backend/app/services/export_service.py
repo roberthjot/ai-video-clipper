@@ -32,6 +32,8 @@ def export_clip_with_style(
         fg_filter = f"scale=-2:{H}"
     elif style.fill_mode == "zoom":
         fg_filter = f"scale=-2:{int(H * 0.9)}"
+    elif style.fill_mode == "small":
+        fg_filter = f"scale=-2:{int(H * 0.78)}"
     else:
         fg_filter = f"scale={W}:-2"
 

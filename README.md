@@ -22,6 +22,8 @@ An intelligent, full-stack web application that automatically identifies, extrac
 - **📦 Selective Export**: Choose exactly which clips to render and download.
 - **📊 Real-time Progress**: Track upload, analysis, and export with live status bars.
 - **📱 9:16 Vertical Format**: Auto-crops and scales to vertical format optimized for TikTok, Reels, and Shorts.
+- **🔲 4 Video Format Modes**: Fit (full width) · Zoom (90% height) · Small (78% height, blur borders) · Fill (full frame, no borders).
+- **📐 Watermark Center Guide**: Dashed vertical line at canvas center appears while positioning the watermark logo — ensures perfect horizontal alignment.
 - **📄 Clips Info TXT**: After exporting, download a `clips_info.txt` file with each clip's title, timestamps, caption, and why it went viral.
 - **🚫 No overlay on preview**: Draggable text/watermark HTML elements hidden when preview image/video is active.
 
@@ -205,6 +207,12 @@ Key rules:
 ---
 
 ## ⚠️ Known Issues & Bugs
+
+### Fixed in v7.8
+| Feature | Detail |
+|---------|--------|
+| "Small" video format | `scale=-2:{int(H * 0.78)}` — 78% of frame height, visible blur borders on all sides |
+| Watermark center guide | Dashed vertical line at `left: 50%` on canvas when watermark is loaded and no preview active |
 
 ### Fixed in v6.0
 | Bug | Fix |
