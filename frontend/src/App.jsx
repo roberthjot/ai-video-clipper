@@ -432,11 +432,18 @@ function EditorStep({ projectId, clips, onExportDone }) {
 
   // Auto-refresh preview when fill_mode changes
   useEffect(() => {
-    if (!previewUrl || !selectedClip) return;
+    if (!selectedClip) return;
+    const hasPreview = previewUrl || videoPreviewUrl;
+    if (!hasPreview) return;
     const timer = setTimeout(async () => {
       try {
         await api.updateStyle(projectId, style);
-        setPreviewUrl(api.getPreviewUrl(projectId, selectedClip.id));
+        if (videoPreviewUrl) {
+          setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
+        }
+        if (previewUrl) {
+          setPreviewUrl(api.getPreviewUrl(projectId, selectedClip.id));
+        }
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
