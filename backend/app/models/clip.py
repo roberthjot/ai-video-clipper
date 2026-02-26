@@ -28,6 +28,9 @@ class StyleConfig(BaseModel):
     text_stroke_color: str = "#000000"
     text_stroke_width: int = 5  # Thicker stroke for better visibility
 
+    # Video scale (foreground video size within 1080x1920 frame)
+    fg_scale: float = 1.0  # 1.0 = fill width, 1.5 = 50% bigger (sides crop), 0.7 = smaller
+
     # Watermark
     watermark_path: Optional[str] = None
     watermark_x: float = 0.5   # 0-1 relative position (center)

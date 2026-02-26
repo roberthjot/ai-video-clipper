@@ -28,8 +28,9 @@ def export_clip_with_style(
     """Export clip with blur + rounded box + text + watermark."""
     W, H = 1080, 1920
     duration = clip.end_time - clip.start_time
+    fg_w = int(W * style.fg_scale)
 
-    filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+    filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]scale={fg_w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
     current_label = "v"
     input_index = 1
     rounded_box_path = None

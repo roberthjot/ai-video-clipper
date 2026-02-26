@@ -94,14 +94,16 @@ def generate_preview_frame(
     watermark_y: float = 0.85,
     watermark_scale: float = 0.3,
     watermark_opacity: float = 0.9,
+    fg_scale: float = 1.0,
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
     W, H = 1080, 1920
+    fg_w = int(W * fg_scale)
 
     filter_parts = []
     filter_parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg]")
-    filter_parts.append(f"[0:v]scale={W}:-2[fg]")
+    filter_parts.append(f"[0:v]scale={fg_w}:-2[fg]")
     filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
 
     last = "v"
@@ -198,13 +200,15 @@ def generate_preview_clip(
     watermark_y: float = 0.85,
     watermark_scale: float = 0.3,
     watermark_opacity: float = 0.9,
+    fg_scale: float = 1.0,
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
     W, H = 1080, 1920
+    fg_w = int(W * fg_scale)
 
     # Build filter
-    filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+    filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]scale={fg_w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
     last_label = "v"
     input_index = 1
     rounded_box_path = None

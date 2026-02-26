@@ -477,7 +477,7 @@ body {
   border-radius: 16px;
   overflow: hidden;
   aspect-ratio: 9/16;
-  max-height: 700px;
+  max-height: 860px;
 }
 
 .editor-canvas {

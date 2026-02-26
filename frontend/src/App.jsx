@@ -363,6 +363,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     watermark_y: 0.85,
     watermark_scale: 0.3,
     watermark_opacity: 0.9,
+    fg_scale: 1.0,
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [progress, setProgress] = useState({ current: 0, total: 0, current_file: "" });
@@ -736,6 +737,19 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 {loadingVideo ? "⏳ Loading..." : "▶ Play Clip"}
               </button>
             </div>
+          </div>
+
+          {/* Video scale */}
+          <div className="control-section">
+            <h3>🎬 Video Size</h3>
+            <div className="slider-group">
+              <label>Scale <span>{(style.fg_scale * 100).toFixed(0)}%</span></label>
+              <input type="range" min={70} max={200} step={5} value={style.fg_scale * 100}
+                onChange={(e) => setStyle((s) => ({ ...s, fg_scale: parseInt(e.target.value) / 100 }))} />
+            </div>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+              100% = fill width · &gt;100% = bigger (sides crop) · &lt;100% = smaller
+            </p>
           </div>
 
           {/* Text controls */}
