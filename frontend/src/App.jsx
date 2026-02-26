@@ -768,13 +768,18 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 Fit
               </button>
               <button
+                className={`btn ${style.fill_mode === "zoom" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle((s) => ({ ...s, fill_mode: "zoom" }))}>
+                Zoom
+              </button>
+              <button
                 className={`btn ${style.fill_mode === "fill" ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setStyle((s) => ({ ...s, fill_mode: "fill" }))}>
                 Fill
               </button>
             </div>
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-              Fit = full video visible · Fill = covers entire frame
+              Fit = full video · Zoom = grande · Fill = frame completo
             </p>
           </div>
 

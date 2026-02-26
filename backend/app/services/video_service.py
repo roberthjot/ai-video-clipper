@@ -99,7 +99,12 @@ def generate_preview_frame(
 ) -> str:
     """Generate preview frame (JPEG)."""
     W, H = 1080, 1920
-    fg_filter = f"scale=-2:{H}" if fill_mode == "fill" else f"scale={W}:-2"
+    if fill_mode == "fill":
+        fg_filter = f"scale=-2:{H}"
+    elif fill_mode == "zoom":
+        fg_filter = f"scale=-2:{int(H * 0.9)}"
+    else:
+        fg_filter = f"scale={W}:-2"
 
     filter_parts = []
     filter_parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg]")
@@ -205,7 +210,12 @@ def generate_preview_clip(
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
     W, H = 1080, 1920
-    fg_filter = f"scale=-2:{H}" if fill_mode == "fill" else f"scale={W}:-2"
+    if fill_mode == "fill":
+        fg_filter = f"scale=-2:{H}"
+    elif fill_mode == "zoom":
+        fg_filter = f"scale=-2:{int(H * 0.9)}"
+    else:
+        fg_filter = f"scale={W}:-2"
 
     # Build filter
     filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
