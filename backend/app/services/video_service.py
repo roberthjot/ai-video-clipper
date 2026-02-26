@@ -111,9 +111,9 @@ def generate_preview_frame(
     # Add rounded box + text if caption exists
     if caption_text:
         safe = sanitize_for_drawtext(caption_text)
-        lines = split_text_into_lines(safe, max_chars=15)
+        lines = split_text_into_lines(safe, max_chars=25)
 
-        font_size_actual = 100
+        font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
         line_h = int(font_size_actual * 1.15)
@@ -212,9 +212,9 @@ def generate_preview_clip(
     # Add rounded box + text
     if caption_text:
         safe = sanitize_for_drawtext(caption_text)
-        lines = split_text_into_lines(safe, max_chars=15)
+        lines = split_text_into_lines(safe, max_chars=25)
 
-        font_size_actual = 100
+        font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
         line_h = int(font_size_actual * 1.15)

@@ -37,9 +37,9 @@ def export_clip_with_style(
     # Add rounded box + text
     if clip.viral_caption:
         safe = video_service.sanitize_for_drawtext(clip.viral_caption)
-        lines = video_service.split_text_into_lines(safe, max_chars=15)
+        lines = video_service.split_text_into_lines(safe, max_chars=25)
 
-        font_size_actual = 100
+        font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
         line_h = int(font_size_actual * 1.15)

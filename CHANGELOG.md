@@ -2,7 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v7.3] - 2026-02-25
+## [v7.4] - 2026-02-26
+
+### Fixed
+- **Caption splits into 3 lines unnecessarily**: `max_chars` was 15, too short for typical captions like "He came with a different energy" or "He said his whole crew is ready for anything". These would hit 3 lines when 2 would look cleaner. Increased `max_chars` from 15 → 25 so lines are wider and captions distribute naturally into 1–2 lines instead of 3.
+
+### Changed
+- **Caption line length**: `max_chars=25` across preview frame, preview clip, and export. Box adapts wider (CapCut-style) and uses fewer lines, matching the reference style.
+
+## [v7.3] - 2026-02-26
 
 ### Fixed
 - **Box grows when font grows**: `split_text_into_lines` was absorbing ALL remaining words onto line 3 with no character limit, causing very long line 3 → wide box. Now all 3 lines enforce `max_chars=15` and extra words are dropped. Box size is now independent of font size.
