@@ -139,6 +139,8 @@ def analyze_video(
        - Clips beyond {video_duration} seconds DO NOT EXIST and will be rejected.
     """
 
+    print(f"[Gemini] Analyzing video: duration={video_duration:.1f}s, target={target_clips} clips, min_duration={min_duration}s")
+
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[
@@ -157,6 +159,7 @@ def analyze_video(
         ],
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
+            response_mime_type="application/json",
             temperature=0.85,
         ),
     )
@@ -180,7 +183,12 @@ def analyze_video(
     def build_clips(clips_raw, video_duration, min_duration):
         clips = []
         skipped = 0
-        for i, clip in enumerate(clips_raw):
+        last_accepted_start = -9999.0  # For deduplication
+
+        # Sort by start_time so deduplication is consistent
+        sorted_raw = sorted(clips_raw, key=lambda c: float(c.get("start_time", 0)))
+
+        for i, clip in enumerate(sorted_raw):
             start = float(clip.get("start_time", 0))
             end = float(clip.get("end_time", 0))
             original_duration = end - start
@@ -207,6 +215,13 @@ def analyze_video(
                     skipped += 1
                     continue
 
+            # Deduplication: skip if too close to the last accepted clip
+            if start - last_accepted_start < min_duration:
+                print(f"[Gemini] Clip {i+1}: SKIPPED (duplicate) — starts {start:.1f}s, last accepted at {last_accepted_start:.1f}s (gap < {min_duration}s)")
+                skipped += 1
+                continue
+
+            last_accepted_start = start
             print(f"[Gemini] Clip {i+1}: {start:.1f}-{end:.1f} ({original_duration:.1f}s raw -> {end-start:.1f}s enforced)")
 
             caption = clip.get("viral_caption", "")
@@ -257,6 +272,7 @@ def analyze_video(
             ],
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
+                response_mime_type="application/json",
                 temperature=0.7,
             ),
         )

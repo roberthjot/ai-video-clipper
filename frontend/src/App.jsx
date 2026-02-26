@@ -583,7 +583,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
         {/* Canvas Preview */}
         <div className="editor-canvas-container" ref={canvasRef}>
           <div className="editor-canvas">
-            {(loadingPreview || loadingVideo) ? (
+            {loadingPreview ? (
               <div style={{
                 width: "100%", height: "100%",
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -592,26 +592,45 @@ function EditorStep({ projectId, clips, onExportDone }) {
               }}>
                 <span style={{ fontSize: "40px" }}>⏳</span>
                 <span style={{ color: "var(--accent)", fontSize: "14px", fontWeight: "500" }}>
-                  {loadingVideo ? "Generating video preview..." : "Generating preview..."}
+                  Generating preview...
                 </span>
                 <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>
                   First time may take ~15 seconds
                 </span>
               </div>
             ) : videoPreviewUrl ? (
-              <video
-                key={videoPreviewUrl}
-                controls
-                autoPlay
-                src={videoPreviewUrl}
-                style={{ width: "100%", height: "100%", objectFit: "contain", background: "black", borderRadius: 8 }}
-                onCanPlay={() => setLoadingVideo(false)}
-                onError={() => {
-                  setLoadingVideo(false);
-                  alert("Failed to generate video preview. Try again.");
-                  setVideoPreviewUrl(null);
-                }}
-              />
+              <>
+                {loadingVideo && (
+                  <div style={{
+                    width: "100%", height: "100%",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: "linear-gradient(180deg, #1a1a2e 0%, #0a0a0f 100%)",
+                    flexDirection: "column", gap: "12px",
+                    position: "absolute", top: 0, left: 0, zIndex: 2,
+                  }}>
+                    <span style={{ fontSize: "40px" }}>⏳</span>
+                    <span style={{ color: "var(--accent)", fontSize: "14px", fontWeight: "500" }}>
+                      Generating video preview...
+                    </span>
+                    <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>
+                      First time may take ~15 seconds
+                    </span>
+                  </div>
+                )}
+                <video
+                  key={videoPreviewUrl}
+                  controls
+                  autoPlay
+                  src={videoPreviewUrl}
+                  style={{ width: "100%", height: "100%", objectFit: "contain", background: "black", borderRadius: 8, display: loadingVideo ? "none" : "block" }}
+                  onCanPlay={() => setLoadingVideo(false)}
+                  onError={() => {
+                    setLoadingVideo(false);
+                    alert("Failed to generate video preview. Try again.");
+                    setVideoPreviewUrl(null);
+                  }}
+                />
+              </>
             ) : previewUrl ? (
               <img
                 src={previewUrl}

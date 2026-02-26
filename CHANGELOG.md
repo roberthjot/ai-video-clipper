@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v6.9] - 2026-02-25
+
+### Fixed
+- **All clips same duration / clustered at start**: Gemini was returning near-zero raw durations (e.g., `0.2s`) for all clips because `response_mime_type="application/json"` was missing from `GenerateContentConfig`. Without it, the model returned plain text that happened to parse, but with garbage timestamps. Added `response_mime_type="application/json"` to both the main call and the retry call.
+- **Duplicate/overlapping clips**: Even with valid timestamps, clips could start very close together. Added deduplication in `build_clips`: clips are now sorted by `start_time` and any clip whose start is within `min_duration` seconds of the last accepted clip is skipped.
+- **Video preview stuck forever on "Generating video preview..."**: Introduced a deadlock in the previous session — `(loadingPreview || loadingVideo)` blocked the `<video>` element from rendering, so `onCanPlay` never fired. Fixed by separating the two states: `loadingPreview` hides the video canvas, but `loadingVideo` renders the `<video>` hidden with an overlay spinner so `onCanPlay` can fire and clear the spinner.
+
+### Changed
+- **Debug logging**: Added `[Gemini] Analyzing video: duration=Xs, target=N clips, min_duration=Xs` log line at the start of each analysis for easier diagnosis.
+
 ## [v6.8] - 2026-02-25
 
 ### Fixed
