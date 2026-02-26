@@ -950,7 +950,7 @@ function App() {
           <span className="icon">🎬</span>
           AI Video Clipper
         </div>
-        <span className="app-version">v2.0</span>
+        <span className="app-version">v7.8</span>
       </header>
 
       <main className="app-main">

@@ -1,8 +1,8 @@
-# 🎬 AI Video Clipper v6.0
+# 🎬 AI Video Clipper v7.8
 
 An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos — styled like CapCut/TikTok clips.
 
-**Powered by:** Google Gemini 2.0 Flash + FFmpeg + PIL
+**Powered by:** Google Gemini 2.5 Pro + FFmpeg + PIL
 
 ---
 
@@ -12,11 +12,11 @@ An intelligent, full-stack web application that automatically identifies, extrac
 - **✂️ Smart Clipping**: Extracts clips with precise timestamps, each with a different duration (up to 60s max) based on the moment.
 - **🎞️ Live Preview**: Play generated clips directly in the browser before exporting.
 - **🎨 CapCut-Style Overlay**:
-  - White rounded box (radius=14) with black **Arial Bold** font text (size 42)
+  - White rounded box (radius=14) with black **Calibri Bold** font text (72px)
   - Box width measured precisely with PIL `getlength()` — fits text exactly
-  - Max 3 lines, line 3 absorbs all remaining words — text never truncated
+  - Max 3 lines, 25 chars per line — clean 1–2 line distribution for short captions
   - Blurred background (boxblur) with centered subject
-  - Apostrophes replaced with backtick for FFmpeg compatibility
+  - Apostrophes removed entirely (TikTok captions don't use them)
   - Emoji characters automatically stripped (FFmpeg drawtext limitation)
 - **💧 Watermark Support**: Upload your own logo/watermark and overlay it on all clips.
 - **📦 Selective Export**: Choose exactly which clips to render and download.
@@ -35,9 +35,9 @@ An intelligent, full-stack web application that automatically identifies, extrac
 |-------|-----------|
 | Frontend | React + Vite (vanilla CSS) |
 | Backend | Python + FastAPI + Uvicorn |
-| AI Model | Google Gemini 2.0 Flash |
+| AI Model | Google Gemini 2.5 Pro |
 | Video Processing | FFmpeg + PIL (Pillow) |
-| Text Rendering | FFmpeg `drawtext` with Arial Bold font |
+| Text Rendering | FFmpeg `drawtext` with Calibri Bold font |
 | Box Rendering | PIL-generated rounded rectangle PNGs overlaid via FFmpeg |
 
 ---
@@ -49,7 +49,7 @@ An intelligent, full-stack web application that automatically identifies, extrac
 - Node.js 18+
 - FFmpeg installed and accessible (or via `imageio-ffmpeg`)
 - [Google AI Studio API Key](https://aistudio.google.com/)
-- Windows (font paths use `C:/Windows/Fonts/arialbd.ttf`)
+- Windows (font paths use `C:/Windows/Fonts/calibrib.ttf`)
 
 ### 1. Clone the Repository
 ```bash
@@ -143,18 +143,27 @@ ai-video-clipper/
 ### Text Overlay (CapCut Style)
 - **Rounded white box** generated as PNG using PIL (`ImageDraw.rounded_rectangle`)
   - Corner radius: `14px`
-  - Padding: `24px horizontal, 16px vertical`
+  - Padding: `12px horizontal, 8px vertical`
   - Width measured with `ImageFont.getlength()` — pixel-perfect fit
 - Overlaid on video using FFmpeg `overlay` filter
-- Text rendered on top using FFmpeg `drawtext` with **Arial Bold** font (size 42)
-- Max **3 lines**, 40 chars per line. Line 3 absorbs all remaining words — no truncation
-- Apostrophes `'` replaced with backtick `` ` `` for FFmpeg compatibility
+- Text rendered on top using FFmpeg `drawtext` with **Calibri Bold** font (72px)
+- Max **3 lines**, 25 chars per line — short captions naturally fit in 1–2 lines
+- Apostrophes removed entirely (TikTok style, avoids FFmpeg parsing issues)
 - Non-ASCII characters (emojis) stripped before passing to FFmpeg
+
+### Video Format Modes
+| Mode | FFmpeg Scale | Result |
+|------|-------------|--------|
+| `fit` | `scale={W}:-2` | Full width (1080px), letterboxed |
+| `zoom` | `scale=-2:{H*0.9}` | 90% of frame height, slight blur border |
+| `small` | `scale=-2:{H*0.78}` | 78% of frame height, visible blur borders |
+| `fill` | `scale=-2:{H}` | Full frame height, no blur border visible |
 
 ### Gemini Caption Rules
 - **Max 10 words** per caption (strict, counted in prompt)
-- **Third person only** — "He's got the moves", "Watch her reaction"
+- **Third person only** — "He got the moves", "Watch her reaction"
 - No "I", "Me", "My", "POV: You..."
+- No punctuation, all lowercase
 - Written as if a fan account reporting on the creator
 - Clip duration: variable per clip, min set by user, max 60 seconds
 
@@ -165,7 +174,7 @@ Input Video
   → scale to 1080x1920 (blurred background)
   → overlay original centered (clear subject)
   → overlay rounded white PNG box (-loop 1 -t duration)
-  → drawtext (Arial Bold, black, centered)
+  → drawtext (Calibri Bold, black, centered)
   → overlay watermark PNG (-loop 1 -t duration)
   → encode H.264 + AAC, SAR 1:1
   → Output MP4 (browser compatible)
@@ -208,20 +217,30 @@ Key rules:
 
 ## ⚠️ Known Issues & Bugs
 
-### Fixed in v7.8
+### Added in v7.8
 | Feature | Detail |
 |---------|--------|
-| "Small" video format | `scale=-2:{int(H * 0.78)}` — 78% of frame height, visible blur borders on all sides |
+| "Small" video format | `scale=-2:{H*0.78}` — 78% of frame height, visible blur borders on all sides |
 | Watermark center guide | Dashed vertical line at `left: 50%` on canvas when watermark is loaded and no preview active |
+
+### Fixed in v7.x
+| Version | Fix |
+|---------|-----|
+| v7.4 | `max_chars` increased 15 → 25 so captions fit in 1–2 lines instead of 3 |
+| v7.3 | Box width no longer grows unbounded when font increases |
+| v7.2 | Apostrophes removed entirely instead of replaced (TikTok style) |
+| v7.1 | Switched from Arial Bold to Calibri Bold; font size 42 → 48 → 100px |
+| v7.0 | Gemini model updated from deprecated `gemini-2.5-pro-exp` to stable `gemini-2.5-pro` |
+| v6.9 | Fixed Gemini returning near-zero timestamps; fixed video preview deadlock; added clip deduplication |
+| v6.8 | Fixed FFmpeg text crash on special chars; fixed preview not playing; rewrote Gemini prompt |
 
 ### Fixed in v6.0
 | Bug | Fix |
 |-----|-----|
 | Draggable text/watermark visible on top of preview | Hidden when `previewUrl` or `videoPreviewUrl` is set in App.jsx |
 | Text truncated on clips with long captions | Line 3 now absorbs all remaining words instead of cutting off |
-| Caption word limit not enforced | Gemini prompt changed to strict 10-word max; `split_text_into_lines` uses 40 chars/line |
+| Caption word limit not enforced | Gemini prompt changed to strict 10-word max |
 | All clips same duration | Gemini prompt updated to use variable durations up to 60s per moment |
-| Apostrophes `'` stripped causing wrong line splits | Replaced with backtick `` ` `` instead of removing — preserves word length |
 | Box width too wide/narrow | Switched from char-count estimate to PIL `getlength()` pixel measurement |
 | Border radius too large | Tested r=4, r=8, r=12, r=14 — user chose r=14 |
 
@@ -230,9 +249,7 @@ Key rules:
 |-----|-----|
 | Emoji characters showing as boxes in video overlay | Strip non-ASCII with `re.sub(r'[^\x00-\x7F]+', '', text)` before FFmpeg drawtext |
 | "Download Clips Info" button returned 404 | Endpoint reads `clips_info.txt` directly from disk |
-| "Download Clips Info" button returned 405 Method Not Allowed | Moved to `/api/export-info/{project_id}` in `main.py` |
 | Server lost projects after code change + auto-reload | Download endpoint reads from disk path instead of in-memory store |
-| Gemini model 404 error | `gemini-3-pro-preview` deprecated → changed to `gemini-2.0-flash` |
 
 ### Fixed in v4.0
 | Bug | Fix |
@@ -240,7 +257,6 @@ Key rules:
 | Exported clips were full video length | `-ss/-to` moved before `-i`, added `-t duration` to all `-loop 1` image inputs |
 | Export showed "stuck at 100%" | Frontend checks both `"done"` and `"completed"` status |
 | Video not playable in browser (SAR error) | Added `-sar "1:1"` to FFmpeg command |
-| Font not bold enough | Changed from Impact to Arial Bold (arialbd.ttf, size 42) |
 
 ### Active / Pending
 | Issue | Status |
