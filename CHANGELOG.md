@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v7.0] - 2026-02-25
+
+### Fixed
+- **Gemini model deprecated**: `gemini-2.5-pro-exp-03-25` was shut down by Google without notice. Updated to the stable release `gemini-2.5-pro`.
+
 ## [v6.9] - 2026-02-25
 
 ### Fixed
