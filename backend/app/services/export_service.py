@@ -39,7 +39,7 @@ def export_clip_with_style(
         safe = video_service.sanitize_for_drawtext(clip.viral_caption)
         lines = video_service.split_text_into_lines(safe)
 
-        font_size_actual = 42
+        font_size_actual = 48
         pad_x, pad_y = 24, 16
         line_gap = 8
         line_h = int(font_size_actual * 1.15)
@@ -47,7 +47,7 @@ def export_clip_with_style(
 
         try:
             from PIL import ImageFont as _IF
-            _fnt = _IF.truetype('C:/Windows/Fonts/arialbd.ttf', font_size_actual)
+            _fnt = _IF.truetype('C:/Windows/Fonts/calibrib.ttf', font_size_actual)
             max_line_px = max(_fnt.getlength(line) for line in lines)
         except Exception:
             max_line_px = max(len(line) for line in lines) * font_size_actual * 0.55
@@ -63,7 +63,7 @@ def export_clip_with_style(
 
         for i, line in enumerate(lines):
             y = box_y + pad_y + i * (line_h + line_gap)
-            filter_complex += f";[{current_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
+            filter_complex += f";[{current_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
             current_label = f"t{i}"
 
     # Watermark

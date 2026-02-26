@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v7.1] - 2026-02-25
+
+### Fixed
+- **Apostrophe renders as backtick**: `sanitize_for_drawtext()` was replacing `'` with `` ` `` to avoid breaking FFmpeg. Replaced with Unicode curly apostrophe `'` (U+2019) which is visually correct and safe for FFmpeg filter parsing.
+
+### Changed
+- **Caption font**: Switched from Arial Bold (`arialbd.ttf`) to Calibri Bold (`calibrib.ttf`) — rounder, more modern, closer to CapCut's caption style.
+- **Caption font size**: Increased from `42px` to `48px` for better readability on mobile screens.
+
 ## [v7.0] - 2026-02-25
 
 ### Fixed

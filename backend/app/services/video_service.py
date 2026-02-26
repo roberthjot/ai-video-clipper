@@ -28,7 +28,7 @@ def sanitize_for_drawtext(text: str) -> str:
     import re as _re
     safe = _re.sub(r'[^\x00-\x7F]+', '', text)   # strip non-ASCII
     safe = safe.replace("\\", "")
-    safe = safe.replace("'", "`")
+    safe = safe.replace("'", "\u2019")  # curly apostrophe — safe for FFmpeg, looks correct
     safe = safe.replace('"', "")
     safe = safe.replace(",", "")   # commas separate FFmpeg filter options
     safe = safe.replace(":", "")   # colons separate FFmpeg key=value pairs
@@ -113,7 +113,7 @@ def generate_preview_frame(
         safe = sanitize_for_drawtext(caption_text)
         lines = split_text_into_lines(safe)
 
-        font_size_actual = 42
+        font_size_actual = 48
         pad_x, pad_y = 24, 16
         line_gap = 8
         line_h = int(font_size_actual * 1.15)
@@ -121,7 +121,7 @@ def generate_preview_frame(
 
         try:
             from PIL import ImageFont as _IF
-            _fnt = _IF.truetype('C:/Windows/Fonts/arialbd.ttf', font_size_actual)
+            _fnt = _IF.truetype('C:/Windows/Fonts/calibrib.ttf', font_size_actual)
             max_line_px = max(_fnt.getlength(line) for line in lines)
         except Exception:
             max_line_px = max(len(line) for line in lines) * font_size_actual * 0.55
@@ -137,7 +137,7 @@ def generate_preview_frame(
 
         for i, line in enumerate(lines):
             y = box_y + pad_y + i * (line_h + line_gap)
-            filter_parts.append(f"[{last}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize=42:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
+            filter_parts.append(f"[{last}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize=42:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
             last = f"t{i}"
 
     # Watermark
@@ -214,7 +214,7 @@ def generate_preview_clip(
         safe = sanitize_for_drawtext(caption_text)
         lines = split_text_into_lines(safe)
 
-        font_size_actual = 42
+        font_size_actual = 48
         pad_x, pad_y = 24, 16
         line_gap = 8
         line_h = int(font_size_actual * 1.15)
@@ -222,7 +222,7 @@ def generate_preview_clip(
 
         try:
             from PIL import ImageFont as _IF
-            _fnt = _IF.truetype('C:/Windows/Fonts/arialbd.ttf', font_size_actual)
+            _fnt = _IF.truetype('C:/Windows/Fonts/calibrib.ttf', font_size_actual)
             max_line_px = max(_fnt.getlength(line) for line in lines)
         except Exception:
             max_line_px = max(len(line) for line in lines) * font_size_actual * 0.55
@@ -238,7 +238,7 @@ def generate_preview_clip(
 
         for i, line in enumerate(lines):
             y = box_y + pad_y + i * (line_h + line_gap)
-            filter_complex += f";[{last_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/arialbd.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
+            filter_complex += f";[{last_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
             last_label = f"t{i}"
 
     end_time = start_time + clip_duration
