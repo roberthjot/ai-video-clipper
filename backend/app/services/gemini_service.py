@@ -226,6 +226,8 @@ def analyze_video(
             print(f"[Gemini] Clip {i+1}: {start:.1f}-{end:.1f} ({original_duration:.1f}s raw -> {end-start:.1f}s enforced)")
 
             caption = clip.get("viral_caption", "")
+            # Normalize curly/smart apostrophes (U+2018, U+2019) to straight apostrophe
+            caption = caption.replace('\u2019', "'").replace('\u2018', "'")
             # Remove punctuation/symbols but keep apostrophes (for contractions like he's, don't)
             caption = re.sub(r"[^\w\s']", '', caption).strip()
             # Remove extra spaces
