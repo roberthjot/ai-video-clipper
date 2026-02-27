@@ -24,19 +24,19 @@ def create_rounded_box(width: int, height: int, corner_radius: int = 20) -> str:
 
 
 def sanitize_for_drawtext(text: str) -> str:
-    """Sanitize text for FFmpeg drawtext filter (text= wrapped in double quotes)."""
+    """Sanitize text for FFmpeg drawtext filter (text= wrapped in single quotes)."""
     import re as _re
     # Normalize curly apostrophes to straight BEFORE stripping non-ASCII
     safe = text.replace('\u2019', "'").replace('\u2018', "'")
     safe = _re.sub(r'[^\x00-\x7F]+', '', safe)   # strip non-ASCII (emojis, etc.)
-    safe = safe.replace("\\", "")  # backslash is FFmpeg escape char — remove from content
-    safe = safe.replace('"', "")   # double-quote is our text= delimiter — must remove
+    safe = safe.replace("\\", "")  # remove backslashes from original text first
+    safe = safe.replace('"', "")   # remove double-quotes
     safe = safe.replace(",", "")   # commas separate FFmpeg filter options
     safe = safe.replace(":", "")   # colons separate FFmpeg key=value pairs
     safe = safe.replace("%", "")   # special char in drawtext
     safe = safe.replace("[", "").replace("]", "")
     safe = safe.replace("{", "").replace("}", "")
-    # Apostrophes (') are safe inside double-quoted FFmpeg text= strings — no escaping needed
+    safe = safe.replace("'", "\\'")  # escape apostrophes for single-quoted FFmpeg text= value
     return safe.strip()
 
 
@@ -148,7 +148,7 @@ def generate_preview_frame(
 
         for i, line in enumerate(lines):
             y = box_y + pad_y + i * (line_h + line_gap)
-            filter_parts.append(f"[{last}]drawtext=text=\"{line}\":fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
+            filter_parts.append(f"[{last}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
             last = f"t{i}"
 
     # Watermark
@@ -258,7 +258,7 @@ def generate_preview_clip(
 
         for i, line in enumerate(lines):
             y = box_y + pad_y + i * (line_h + line_gap)
-            filter_complex += f";[{last_label}]drawtext=text=\"{line}\":fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
+            filter_complex += f";[{last_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
             last_label = f"t{i}"
 
     end_time = start_time + clip_duration
