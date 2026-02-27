@@ -71,7 +71,7 @@ def export_clip_with_style(
 
         for i, line in enumerate(lines):
             y = box_y + pad_y + i * (line_h + line_gap)
-            filter_complex += f";[{current_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
+            filter_complex += f";[{current_label}]drawtext=text=\"{line}\":fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
             current_label = f"t{i}"
 
     # Watermark
