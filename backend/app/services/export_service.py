@@ -42,37 +42,24 @@ def export_clip_with_style(
     input_index = 1
     rounded_box_path = None
 
-    # Add rounded box + text
+    # Add caption overlay (PIL renders box + text — no FFmpeg drawtext needed)
     if clip.viral_caption:
-        safe = video_service.sanitize_for_drawtext(clip.viral_caption)
-        lines = video_service.split_text_into_lines(safe, max_chars=25)
+        lines = video_service.split_text_into_lines(clip.viral_caption, max_chars=25)
 
         font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
-        line_h = int(font_size_actual * 1.15)
         base_y = int(style.text_y * H)
 
-        try:
-            from PIL import ImageFont as _IF
-            _fnt = _IF.truetype('C:/Windows/Fonts/calibrib.ttf', font_size_actual)
-            max_line_px = max(_fnt.getlength(line) for line in lines)
-        except Exception:
-            max_line_px = max(len(line) for line in lines) * font_size_actual * 0.55
-        box_w = min(W - 80, int(max_line_px + pad_x * 2))
-        box_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad_y * 2
+        rounded_box_path, box_w, box_h = video_service.create_caption_overlay(
+            lines, font_size=font_size_actual, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
+        )
         box_x = (W - box_w) // 2
         box_y = base_y - pad_y
 
-        rounded_box_path = video_service.create_rounded_box(box_w, box_h, corner_radius=14)
         filter_complex += f";[{current_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
         current_label = "boxed"
         input_index += 1
-
-        for i, line in enumerate(lines):
-            y = box_y + pad_y + i * (line_h + line_gap)
-            filter_complex += f";[{current_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
-            current_label = f"t{i}"
 
     # Watermark
     has_watermark = style.watermark_path and os.path.exists(style.watermark_path)

@@ -173,6 +173,8 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             fill_mode=style.fill_mode,
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Preview generation failed: {str(e)}")
 
     if not os.path.exists(preview_path):

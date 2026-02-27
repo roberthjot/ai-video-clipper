@@ -225,8 +225,8 @@ def analyze_video(
             print(f"[Gemini] Clip {i+1}: {start:.1f}-{end:.1f} ({original_duration:.1f}s raw -> {end-start:.1f}s enforced)")
 
             caption = clip.get("viral_caption", "")
-            # Remove all punctuation and symbols, keep only letters, numbers and spaces
-            caption = re.sub(r'[^\w\s]', '', caption).strip()
+            # Remove punctuation/symbols but keep apostrophes (for contractions like he's, don't)
+            caption = re.sub(r"[^\w\s']", '', caption).strip()
             # Remove extra spaces
             caption = re.sub(r'\s+', ' ', caption).strip()
             # All lowercase except first letter

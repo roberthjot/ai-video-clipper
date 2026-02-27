@@ -6,38 +6,50 @@ from PIL import Image, ImageDraw
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def create_rounded_box(width: int, height: int, corner_radius: int = 20) -> str:
-    """Create a white rounded rectangle PNG."""
+def create_caption_overlay(lines: list, font_size: int = 72,
+                            pad_x: int = 12, pad_y: int = 8,
+                            line_gap: int = 5) -> tuple:
+    """Render white rounded box + text with PIL. Returns (png_path, box_w, box_h).
+    Using PIL avoids all FFmpeg drawtext escaping issues (apostrophes, quotes, etc).
+    """
+    import time
+    from PIL import ImageFont as _IF
+
+    W_vid = 1080
+    font_path = 'C:/Windows/Fonts/calibrib.ttf'
+    try:
+        font = _IF.truetype(font_path, font_size)
+    except Exception:
+        font = _IF.load_default()
+
+    line_h = int(font_size * 1.15)
+
+    try:
+        max_line_px = max(font.getlength(line) for line in lines) if lines else 0
+    except Exception:
+        max_line_px = max(len(line) for line in lines) * font_size * 0.55 if lines else 0
+
+    box_w = min(W_vid - 80, int(max_line_px + pad_x * 2))
+    box_h = line_h * len(lines) + line_gap * max(len(lines) - 1, 0) + pad_y * 2
+
+    img = Image.new('RGBA', (box_w, box_h), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle([(0, 0), (box_w, box_h)], radius=14, fill=(255, 255, 255, 242))
+
+    for i, line in enumerate(lines):
+        y = pad_y + i * (line_h + line_gap)
+        try:
+            tw = int(font.getlength(line))
+        except Exception:
+            tw = int(len(line) * font_size * 0.55)
+        x = (box_w - tw) // 2
+        draw.text((x, y), line, font=font, fill=(0, 0, 0, 255))
+
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
-    output_path = os.path.join(temp_dir, f"box_{width}x{height}.png")
-
-    img = Image.new('RGBA', (width, height), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle(
-        [(0, 0), (width, height)],
-        radius=corner_radius,
-        fill=(255, 255, 255, 242)
-    )
-    img.save(output_path)
-    return output_path
-
-
-def sanitize_for_drawtext(text: str) -> str:
-    """Sanitize text for FFmpeg drawtext filter (text= wrapped in single quotes)."""
-    import re as _re
-    # Normalize curly apostrophes to straight BEFORE stripping non-ASCII
-    safe = text.replace('\u2019', "'").replace('\u2018', "'")
-    safe = _re.sub(r'[^\x00-\x7F]+', '', safe)   # strip non-ASCII (emojis, etc.)
-    safe = safe.replace("\\", "")  # remove backslashes from original text first
-    safe = safe.replace('"', "")   # remove double-quotes
-    safe = safe.replace(",", "")   # commas separate FFmpeg filter options
-    safe = safe.replace(":", "")   # colons separate FFmpeg key=value pairs
-    safe = safe.replace("%", "")   # special char in drawtext
-    safe = safe.replace("[", "").replace("]", "")
-    safe = safe.replace("{", "").replace("}", "")
-    safe = safe.replace("'", "\\'")  # escape apostrophes for single-quoted FFmpeg text= value
-    return safe.strip()
+    png_path = os.path.join(temp_dir, f"caption_{int(time.time() * 1000)}.png")
+    img.save(png_path)
+    return png_path, box_w, box_h
 
 
 def split_text_into_lines(text: str, max_chars: int = 40) -> list:
@@ -119,37 +131,24 @@ def generate_preview_frame(
     input_index = 1
     rounded_box_path = None
 
-    # Add rounded box + text if caption exists
+    # Add caption overlay (PIL renders box + text — no FFmpeg drawtext needed)
     if caption_text:
-        safe = sanitize_for_drawtext(caption_text)
-        lines = split_text_into_lines(safe, max_chars=25)
+        lines = split_text_into_lines(caption_text, max_chars=25)
 
         font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
-        line_h = int(font_size_actual * 1.15)
         base_y = int(text_y * H)
 
-        try:
-            from PIL import ImageFont as _IF
-            _fnt = _IF.truetype('C:/Windows/Fonts/calibrib.ttf', font_size_actual)
-            max_line_px = max(_fnt.getlength(line) for line in lines)
-        except Exception:
-            max_line_px = max(len(line) for line in lines) * font_size_actual * 0.55
-        box_w = min(W - 80, int(max_line_px + pad_x * 2))
-        box_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad_y * 2
+        rounded_box_path, box_w, box_h = create_caption_overlay(
+            lines, font_size=font_size_actual, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
+        )
         box_x = (W - box_w) // 2
         box_y = base_y - pad_y
 
-        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=14)
         filter_parts.append(f"[{last}][{input_index}:v]overlay={box_x}:{box_y}[boxed]")
         last = "boxed"
         input_index += 1
-
-        for i, line in enumerate(lines):
-            y = box_y + pad_y + i * (line_h + line_gap)
-            filter_parts.append(f"[{last}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]")
-            last = f"t{i}"
 
     # Watermark
     if watermark_path and os.path.exists(watermark_path):
@@ -177,10 +176,13 @@ def generate_preview_frame(
         output_path,
     ])
 
+    print(f"[FFmpeg CMD] {' '.join(cmd)}")
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
-    except:
-        pass
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
+    except subprocess.CalledProcessError as e:
+        print(f"[FFmpeg ERROR] returncode={e.returncode}")
+        print(f"[FFmpeg STDERR] {e.stderr}")
+        raise RuntimeError(f"FFmpeg failed: {e.stderr[-500:] if e.stderr else 'no stderr'}")
     finally:
         if rounded_box_path and os.path.exists(rounded_box_path):
             try:
@@ -229,37 +231,24 @@ def generate_preview_clip(
     input_index = 1
     rounded_box_path = None
 
-    # Add rounded box + text
+    # Add caption overlay (PIL renders box + text — no FFmpeg drawtext needed)
     if caption_text:
-        safe = sanitize_for_drawtext(caption_text)
-        lines = split_text_into_lines(safe, max_chars=25)
+        lines = split_text_into_lines(caption_text, max_chars=25)
 
         font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
-        line_h = int(font_size_actual * 1.15)
         base_y = int(text_y * H)
 
-        try:
-            from PIL import ImageFont as _IF
-            _fnt = _IF.truetype('C:/Windows/Fonts/calibrib.ttf', font_size_actual)
-            max_line_px = max(_fnt.getlength(line) for line in lines)
-        except Exception:
-            max_line_px = max(len(line) for line in lines) * font_size_actual * 0.55
-        box_w = min(W - 80, int(max_line_px + pad_x * 2))
-        box_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad_y * 2
+        rounded_box_path, box_w, box_h = create_caption_overlay(
+            lines, font_size=font_size_actual, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
+        )
         box_x = (W - box_w) // 2
         box_y = base_y - pad_y
 
-        rounded_box_path = create_rounded_box(box_w, box_h, corner_radius=14)
         filter_complex += f";[{last_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"
         last_label = "boxed"
         input_index += 1
-
-        for i, line in enumerate(lines):
-            y = box_y + pad_y + i * (line_h + line_gap)
-            filter_complex += f";[{last_label}]drawtext=text='{line}':fontfile='C\\:/Windows/Fonts/calibrib.ttf':fontsize={font_size_actual}:fontcolor=black:x=(w-text_w)/2:y={y}[t{i}]"
-            last_label = f"t{i}"
 
     end_time = start_time + clip_duration
     cmd = [FFMPEG_EXE, "-ss", str(start_time), "-to", str(end_time), "-i", video_path]

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v8.0] - 2026-02-27
+
+### Fixed
+- **Apostrophes now render correctly in ALL cases**: Replaced FFmpeg `drawtext` filter entirely with PIL-based text rendering. FFmpeg's filter-graph parser treats `'` as a quoting delimiter at the filter-graph level, making it impossible to reliably embed apostrophes via any escape sequence (`\'`, `"..."`, backslash, etc.). All attempts were empirically verified to fail. The solution is to render the white rounded box AND the caption text as a single PNG image using PIL/Pillow, then overlay it via FFmpeg's `overlay` filter. This means captions like "He's got the whole team behind him on this" now render perfectly with no workarounds.
+- **`gemini_service.py` was stripping apostrophes**: The regex `re.sub(r'[^\w\s]', '', caption)` matched `'` as a non-word/non-space character and removed it, turning "he's" into "hes". Fixed to `re.sub(r"[^\w\s']", '', caption)` to explicitly exclude `'` from stripping.
+- **Silent FFmpeg failures**: `generate_preview_frame` had `except: pass` around the FFmpeg subprocess call, silently swallowing all errors. The "Preview file not generated" error gave no hint of the actual FFmpeg failure. Fixed to `except subprocess.CalledProcessError` with proper error logging and `raise RuntimeError`.
+
+### Changed
+- **Caption rendering architecture**: `create_rounded_box()` + FFmpeg `drawtext` replaced by new `create_caption_overlay()` function. The new function renders both the white rounded rectangle (r=14) and the text (Calibri Bold 72px, centered, black) directly onto a transparent PNG using PIL, then returns the path for FFmpeg to use as an image overlay. No drawtext filter is used anywhere in the pipeline.
+- **`sanitize_for_drawtext()` no longer called**: The function still exists in `video_service.py` but is no longer referenced since drawtext is eliminated.
+
 ## [v7.9] - 2026-02-27
 
 ### Fixed
