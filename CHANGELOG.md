@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v7.9] - 2026-02-27
+
+### Fixed
+- **Apostrophes now render correctly in captions**: Instead of removing apostrophes entirely (making "don't" → "dont"), they are now escaped as `\'` for FFmpeg's drawtext parser. FFmpeg interprets `\'` as a literal `'` inside a quoted text value, so words like "he's", "don't", "that's" render correctly in the video.
+- **Curly apostrophes from Gemini (U+2019 `'`) normalized**: Gemini sometimes outputs the curly/smart apostrophe `'` instead of the straight one `'`. These were previously stripped by the non-ASCII filter before any conversion could happen. Now they are converted to `'` first, then properly escaped for FFmpeg.
+
 ## [v7.8] - 2026-02-26
 
 ### Added

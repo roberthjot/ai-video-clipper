@@ -1,4 +1,4 @@
-# 🎬 AI Video Clipper v7.8
+# 🎬 AI Video Clipper v7.9
 
 An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos — styled like CapCut/TikTok clips.
 
@@ -16,7 +16,7 @@ An intelligent, full-stack web application that automatically identifies, extrac
   - Box width measured precisely with PIL `getlength()` — fits text exactly
   - Max 3 lines, 25 chars per line — clean 1–2 line distribution for short captions
   - Blurred background (boxblur) with centered subject
-  - Apostrophes removed entirely (TikTok captions don't use them)
+  - Apostrophes escaped as `\'` for FFmpeg — renders as `'` in the video (he's, don't, that's)
   - Emoji characters automatically stripped (FFmpeg drawtext limitation)
 - **💧 Watermark Support**: Upload your own logo/watermark and overlay it on all clips.
 - **📦 Selective Export**: Choose exactly which clips to render and download.
@@ -148,7 +148,7 @@ ai-video-clipper/
 - Overlaid on video using FFmpeg `overlay` filter
 - Text rendered on top using FFmpeg `drawtext` with **Calibri Bold** font (72px)
 - Max **3 lines**, 25 chars per line — short captions naturally fit in 1–2 lines
-- Apostrophes removed entirely (TikTok style, avoids FFmpeg parsing issues)
+- Apostrophes escaped as `\'` for FFmpeg — renders correctly as `'` in the final video
 - Non-ASCII characters (emojis) stripped before passing to FFmpeg
 
 ### Video Format Modes

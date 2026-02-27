@@ -24,17 +24,20 @@ def create_rounded_box(width: int, height: int, corner_radius: int = 20) -> str:
 
 
 def sanitize_for_drawtext(text: str) -> str:
-    """Remove characters that break FFmpeg drawtext filter."""
+    """Sanitize text for FFmpeg drawtext filter."""
     import re as _re
-    safe = _re.sub(r'[^\x00-\x7F]+', '', text)   # strip non-ASCII
-    safe = safe.replace("\\", "")
-    safe = safe.replace("'", "")  # remove apostrophes (TikTok captions don't use them)
+    # Normalize curly apostrophes to straight BEFORE stripping non-ASCII
+    safe = text.replace('\u2019', "'").replace('\u2018', "'")
+    safe = _re.sub(r'[^\x00-\x7F]+', '', safe)   # strip remaining non-ASCII (emojis, etc.)
+    safe = safe.replace("\\", "")                  # remove backslashes from user text
     safe = safe.replace('"', "")
     safe = safe.replace(",", "")   # commas separate FFmpeg filter options
     safe = safe.replace(":", "")   # colons separate FFmpeg key=value pairs
     safe = safe.replace("%", "")   # special char in drawtext
     safe = safe.replace("[", "").replace("]", "")
     safe = safe.replace("{", "").replace("}", "")
+    # Escape apostrophe for FFmpeg drawtext (must be AFTER backslash removal)
+    safe = safe.replace("'", "\\'")
     return safe.strip()
 
 
