@@ -119,6 +119,7 @@ def analyze_video(
     - Maximum 10 words — short, punchy, scroll-stopping
     - Write like a fan account teasing the drama
     - NO punctuation of any kind: no periods, no commas, no exclamation marks, no question marks
+    - Apostrophes in contractions ARE allowed: he's, she's, don't, can't, won't, it's, that's, they're — use them naturally
     - All lowercase EXCEPT the very first letter of the caption
 
     Output Format:
