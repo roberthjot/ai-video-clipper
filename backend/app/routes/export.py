@@ -28,6 +28,26 @@ async def upload_watermark(project_id: str, watermark: UploadFile = File(...)):
     return {"status": "uploaded", "path": wm_path}
 
 
+@router.post("/split-image/{project_id}")
+async def upload_split_image(project_id: str, image: UploadFile = File(...)):
+    """Upload a static image for split-screen bottom panel."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    os.makedirs(project.output_dir, exist_ok=True)
+
+    img_path = os.path.join(project.output_dir, "split_image.png")
+    with open(img_path, "wb") as f:
+        content = await image.read()
+        f.write(content)
+
+    project.style.split_image_path = img_path
+    project.style.split_screen_enabled = True
+    return {"status": "uploaded", "path": img_path}
+
+
 @router.put("/style/{project_id}")
 async def update_style(project_id: str, style: StyleConfig):
     """Update visual style configuration."""
@@ -38,6 +58,8 @@ async def update_style(project_id: str, style: StyleConfig):
     project = projects[project_id]
     if style.watermark_path is None and project.style.watermark_path:
         style.watermark_path = project.style.watermark_path
+    if style.split_image_path is None and project.style.split_image_path:
+        style.split_image_path = project.style.split_image_path
 
     project.style = style
     return {"status": "updated", "style": style.model_dump()}

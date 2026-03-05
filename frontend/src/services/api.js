@@ -84,6 +84,19 @@ export async function uploadWatermark(projectId, file) {
     return res.json();
 }
 
+export async function uploadSplitImage(projectId, file) {
+    const formData = new FormData();
+    formData.append("image", file);
+
+    const res = await fetch(`${API_BASE}/export/split-image/${projectId}`, {
+        method: "POST",
+        body: formData,
+    });
+
+    if (!res.ok) throw new Error("Split image upload failed");
+    return res.json();
+}
+
 export async function updateStyle(projectId, style) {
     const res = await fetch(`${API_BASE}/export/style/${projectId}`, {
         method: "PUT",

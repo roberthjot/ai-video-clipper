@@ -352,18 +352,21 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
 function EditorStep({ projectId, clips, onExportDone }) {
   const [watermarkFile, setWatermarkFile] = useState(null);
   const [watermarkPreview, setWatermarkPreview] = useState(null);
+  const [splitImagePreview, setSplitImagePreview] = useState(null);
   const [style, setStyle] = useState({
     text_x: 0.5,
     text_y: 0.15,
-    font_size: 70,  // Larger font for better readability
+    font_size: 70,
     text_color: "#FFFFFF",
     text_stroke_color: "#000000",
-    text_stroke_width: 5,  // Thicker stroke for better visibility
+    text_stroke_width: 5,
     watermark_x: 0.5,
     watermark_y: 0.85,
     watermark_scale: 0.3,
     watermark_opacity: 0.9,
     fill_mode: "fit",
+    split_screen_enabled: false,
+    split_ratio: 0.5,
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [progress, setProgress] = useState({ current: 0, total: 0, current_file: "" });
@@ -401,6 +404,23 @@ function EditorStep({ projectId, clips, onExportDone }) {
     } catch (err) {
       console.error("Watermark upload failed:", err);
     }
+  };
+
+  const handleSplitImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSplitImagePreview(URL.createObjectURL(file));
+    setStyle(s => ({ ...s, split_screen_enabled: true }));
+    try {
+      await api.uploadSplitImage(projectId, file);
+    } catch (err) {
+      console.error("Split image upload failed:", err);
+    }
+  };
+
+  const handleRemoveSplitImage = () => {
+    setSplitImagePreview(null);
+    setStyle(s => ({ ...s, split_screen_enabled: false }));
   };
 
   const handlePreview = async () => {
@@ -447,7 +467,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode]);
+  }, [style.fill_mode, style.split_screen_enabled, style.split_ratio]);
 
   // Poll progress
   useEffect(() => {
@@ -802,6 +822,60 @@ function EditorStep({ projectId, clips, onExportDone }) {
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
               Fit = full · Zoom = grande · Fill = frame completo · Small = reducido
             </p>
+          </div>
+
+          {/* Split Screen */}
+          <div className="control-section">
+            <h3>📐 Split Screen</h3>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
+              Video arriba + imagen abajo
+            </p>
+            <label className={`watermark-upload ${splitImagePreview ? "has-image" : ""}`} htmlFor="split-img-input"
+              style={{ marginBottom: 10 }}>
+              {splitImagePreview ? (
+                <img src={splitImagePreview} alt="Split" style={{ maxHeight: 80 }} />
+              ) : (
+                <span style={{ color: "var(--text-muted)" }}>Click to upload image (PNG/JPG)</span>
+              )}
+              <input id="split-img-input" type="file" accept="image/*" hidden onChange={handleSplitImageUpload} />
+            </label>
+
+            {splitImagePreview && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                  <label style={{ fontSize: 13, color: "var(--text-secondary)" }}>Enabled</label>
+                  <input
+                    type="checkbox"
+                    checked={style.split_screen_enabled}
+                    onChange={(e) => setStyle(s => ({ ...s, split_screen_enabled: e.target.checked }))}
+                    style={{ accentColor: "var(--accent)" }}
+                  />
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 11, padding: "3px 8px", marginLeft: "auto" }}
+                    onClick={handleRemoveSplitImage}
+                  >
+                    Remove
+                  </button>
+                </div>
+                {style.split_screen_enabled && (
+                  <div className="slider-group">
+                    <label>
+                      Video / Image
+                      <span>{Math.round(style.split_ratio * 100)}% / {Math.round((1 - style.split_ratio) * 100)}%</span>
+                    </label>
+                    <input
+                      type="range" min={30} max={70}
+                      value={Math.round(style.split_ratio * 100)}
+                      onChange={(e) => setStyle(s => ({ ...s, split_ratio: parseInt(e.target.value) / 100 }))}
+                    />
+                    <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                      Video: {Math.round(1920 * style.split_ratio)}px · Image: {Math.round(1920 * (1 - style.split_ratio))}px
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {/* Text controls */}

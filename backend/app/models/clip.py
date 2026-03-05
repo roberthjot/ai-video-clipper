@@ -38,6 +38,11 @@ class StyleConfig(BaseModel):
     watermark_scale: float = 0.8  # 0-1 scale
     watermark_opacity: float = 0.9  # 0-1 opacity
 
+    # Split-screen (video top + image bottom)
+    split_screen_enabled: bool = False
+    split_image_path: Optional[str] = None
+    split_ratio: float = 0.5  # fraction of canvas height for video (0.3-0.7)
+
 
 class ProjectConfig(BaseModel):
     """Configuration for a clip extraction project."""

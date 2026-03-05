@@ -109,36 +109,63 @@ def generate_preview_frame(
     watermark_scale: float = 0.3,
     watermark_opacity: float = 0.9,
     fill_mode: str = "fit",
+    split_screen_enabled: bool = False,
+    split_image_path: str = None,
+    split_ratio: float = 0.5,
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
     W, H = 1080, 1920
+
+    # Determine if split-screen is active
+    use_split = split_screen_enabled and split_image_path and os.path.exists(split_image_path)
+
+    if use_split:
+        ratio = max(0.3, min(0.7, split_ratio))
+        video_h = int(H * ratio)
+        image_h = H - video_h
+        target_h = video_h
+    else:
+        target_h = H
+
+    # Build fg_filter based on fill_mode and target height
     if fill_mode == "fill":
-        fg_filter = f"scale=-2:{H}"
+        fg_filter = f"scale={W}:{target_h}:force_original_aspect_ratio=increase,crop={W}:{target_h}"
     elif fill_mode == "zoom":
-        fg_filter = f"scale=-2:{int(H * 0.9)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.9)}"
     elif fill_mode == "small":
-        fg_filter = f"scale=-2:{int(H * 0.78)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.78)}"
     else:
         fg_filter = f"scale={W}:-2"
 
     filter_parts = []
-    filter_parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg]")
-    filter_parts.append(f"[0:v]{fg_filter}[fg]")
-    filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
+    input_index = 1  # [0] = video
+
+    if use_split:
+        # Video portion with blur bg sized to video_h
+        filter_parts.append(f"[0:v]scale={W}:{video_h}:force_original_aspect_ratio=increase,crop={W}:{video_h},boxblur=12:2[bg]")
+        filter_parts.append(f"[0:v]{fg_filter}[fg]")
+        filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part]")
+        # Image portion: scale to fill, crop to exact size, match pixel format
+        filter_parts.append(f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part]")
+        # Stack vertically
+        filter_parts.append("[video_part][img_part]vstack=inputs=2[v]")
+        input_index = 2  # [0]=video, [1]=split image
+    else:
+        filter_parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg]")
+        filter_parts.append(f"[0:v]{fg_filter}[fg]")
+        filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
 
     last = "v"
-    input_index = 1
     rounded_box_path = None
 
-    # Add caption overlay (PIL renders box + text — no FFmpeg drawtext needed)
+    # Caption overlay — Y position relative to video portion in split mode
     if caption_text:
         lines = split_text_into_lines(caption_text, max_chars=25)
-
         font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
-        base_y = int(text_y * H)
+        base_y = int(text_y * target_h)
 
         rounded_box_path, box_w, box_h = create_caption_overlay(
             lines, font_size=font_size_actual, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
@@ -150,16 +177,19 @@ def generate_preview_frame(
         last = "boxed"
         input_index += 1
 
-    # Watermark
+    # Watermark — Y position relative to video portion in split mode
     if watermark_path and os.path.exists(watermark_path):
         wm_w = max(50, int(W * watermark_scale))
         wx = int(watermark_x * W)
-        wy = int(watermark_y * H)
+        wy = int(watermark_y * target_h)
         filter_parts.append(f"[{input_index}:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={watermark_opacity}[wm]")
         filter_parts.append(f"[{last}][wm]overlay={wx}-(overlay_w/2):{wy}-(overlay_h/2)[final]")
         last = "final"
 
     cmd = [FFMPEG_EXE, "-ss", str(timestamp), "-i", video_path]
+
+    if use_split:
+        cmd.extend(["-i", split_image_path])
 
     if rounded_box_path:
         cmd.extend(["-loop", "1", "-i", rounded_box_path])
@@ -212,33 +242,60 @@ def generate_preview_clip(
     watermark_scale: float = 0.3,
     watermark_opacity: float = 0.9,
     fill_mode: str = "fit",
+    split_screen_enabled: bool = False,
+    split_image_path: str = None,
+    split_ratio: float = 0.5,
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
     W, H = 1080, 1920
+
+    # Determine if split-screen is active
+    use_split = split_screen_enabled and split_image_path and os.path.exists(split_image_path)
+
+    if use_split:
+        ratio = max(0.3, min(0.7, split_ratio))
+        video_h = int(H * ratio)
+        image_h = H - video_h
+        target_h = video_h
+    else:
+        target_h = H
+
+    # Build fg_filter based on fill_mode and target height
     if fill_mode == "fill":
-        fg_filter = f"scale=-2:{H}"
+        fg_filter = f"scale={W}:{target_h}:force_original_aspect_ratio=increase,crop={W}:{target_h}"
     elif fill_mode == "zoom":
-        fg_filter = f"scale=-2:{int(H * 0.9)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.9)}"
     elif fill_mode == "small":
-        fg_filter = f"scale=-2:{int(H * 0.78)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.78)}"
     else:
         fg_filter = f"scale={W}:-2"
 
     # Build filter
-    filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
-    last_label = "v"
     input_index = 1
+
+    if use_split:
+        filter_complex = (
+            f"[0:v]scale={W}:{video_h}:force_original_aspect_ratio=increase,crop={W}:{video_h},boxblur=12:2[bg];"
+            f"[0:v]{fg_filter}[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part];"
+            f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
+            f"[video_part][img_part]vstack=inputs=2[v]"
+        )
+        input_index = 2
+    else:
+        filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+
+    last_label = "v"
     rounded_box_path = None
 
-    # Add caption overlay (PIL renders box + text — no FFmpeg drawtext needed)
+    # Caption overlay — Y relative to video portion in split mode
     if caption_text:
         lines = split_text_into_lines(caption_text, max_chars=25)
-
         font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
-        base_y = int(text_y * H)
+        base_y = int(text_y * target_h)
 
         rounded_box_path, box_w, box_h = create_caption_overlay(
             lines, font_size=font_size_actual, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
@@ -252,6 +309,9 @@ def generate_preview_clip(
 
     end_time = start_time + clip_duration
     cmd = [FFMPEG_EXE, "-ss", str(start_time), "-to", str(end_time), "-i", video_path]
+
+    if use_split:
+        cmd.extend(["-loop", "1", "-t", str(clip_duration), "-i", split_image_path])
 
     if rounded_box_path:
         cmd.extend(["-loop", "1", "-t", str(clip_duration), "-i", rounded_box_path])
@@ -271,7 +331,7 @@ def generate_preview_clip(
         output_path,
     ])
 
-    print(f"[Preview] Generating {clip_duration}s clip with {len(lines) if caption_text else 0} text lines")
+    print(f"[Preview] Generating {clip_duration}s clip with {len(lines) if caption_text else 0} text lines, split={use_split}")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
     if rounded_box_path and os.path.exists(rounded_box_path):

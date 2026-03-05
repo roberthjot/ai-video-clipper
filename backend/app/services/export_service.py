@@ -25,31 +25,55 @@ def export_clip_with_style(
     style: StyleConfig,
     output_path: str,
 ) -> str:
-    """Export clip with blur + rounded box + text + watermark."""
+    """Export clip with blur + rounded box + text + watermark + optional split-screen."""
     W, H = 1080, 1920
     duration = clip.end_time - clip.start_time
+
+    # Determine if split-screen is active
+    use_split = style.split_screen_enabled and style.split_image_path and os.path.exists(style.split_image_path)
+
+    if use_split:
+        ratio = max(0.3, min(0.7, style.split_ratio))
+        video_h = int(H * ratio)
+        image_h = H - video_h
+        target_h = video_h
+    else:
+        target_h = H
+
+    # Build fg_filter based on fill_mode and target height
     if style.fill_mode == "fill":
-        fg_filter = f"scale=-2:{H}"
+        fg_filter = f"scale={W}:{target_h}:force_original_aspect_ratio=increase,crop={W}:{target_h}"
     elif style.fill_mode == "zoom":
-        fg_filter = f"scale=-2:{int(H * 0.9)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.9)}"
     elif style.fill_mode == "small":
-        fg_filter = f"scale=-2:{int(H * 0.78)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.78)}"
     else:
         fg_filter = f"scale={W}:-2"
 
-    filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
-    current_label = "v"
     input_index = 1
+
+    if use_split:
+        filter_complex = (
+            f"[0:v]scale={W}:{video_h}:force_original_aspect_ratio=increase,crop={W}:{video_h},boxblur=12:2[bg];"
+            f"[0:v]{fg_filter}[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part];"
+            f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
+            f"[video_part][img_part]vstack=inputs=2[v]"
+        )
+        input_index = 2
+    else:
+        filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+
+    current_label = "v"
     rounded_box_path = None
 
-    # Add caption overlay (PIL renders box + text — no FFmpeg drawtext needed)
+    # Caption overlay — Y relative to video portion in split mode
     if clip.viral_caption:
         lines = video_service.split_text_into_lines(clip.viral_caption, max_chars=25)
-
         font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
-        base_y = int(style.text_y * H)
+        base_y = int(style.text_y * target_h)
 
         rounded_box_path, box_w, box_h = video_service.create_caption_overlay(
             lines, font_size=font_size_actual, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
@@ -61,12 +85,12 @@ def export_clip_with_style(
         current_label = "boxed"
         input_index += 1
 
-    # Watermark
+    # Watermark — Y relative to video portion in split mode
     has_watermark = style.watermark_path and os.path.exists(style.watermark_path)
     if has_watermark:
         wm_w = max(50, int(W * style.watermark_scale))
         wx = int(style.watermark_x * W)
-        wy = int(style.watermark_y * H)
+        wy = int(style.watermark_y * target_h)
         filter_complex += f";[{input_index}:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={style.watermark_opacity}[wm]"
         filter_complex += f";[{current_label}][wm]overlay={wx}-(overlay_w/2):{wy}-(overlay_h/2)[watermarked]"
         current_label = "watermarked"
@@ -77,6 +101,9 @@ def export_clip_with_style(
         FFMPEG_EXE,
         "-ss", str(clip.start_time), "-to", str(clip.end_time), "-i", video_path,
     ]
+
+    if use_split:
+        cmd.extend(["-loop", "1", "-t", str(duration), "-i", style.split_image_path])
 
     if rounded_box_path:
         cmd.extend(["-loop", "1", "-t", str(duration), "-i", rounded_box_path])
@@ -99,7 +126,7 @@ def export_clip_with_style(
     ])
 
     try:
-        print(f"[Export] Clip {clip.id}: Exporting...")
+        print(f"[Export] Clip {clip.id}: Exporting... split={use_split}")
         result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
         print(f"[Export] Clip {clip.id}: Success!")
     except subprocess.CalledProcessError as e:

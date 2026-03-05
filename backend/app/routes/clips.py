@@ -171,6 +171,9 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             watermark_scale=style.watermark_scale,
             watermark_opacity=style.watermark_opacity,
             fill_mode=style.fill_mode,
+            split_screen_enabled=style.split_screen_enabled,
+            split_image_path=style.split_image_path,
+            split_ratio=style.split_ratio,
         )
     except Exception as e:
         import traceback
@@ -225,6 +228,9 @@ async def preview_clip_video(project_id: str, clip_id: int):
             watermark_scale=style.watermark_scale,
             watermark_opacity=style.watermark_opacity,
             fill_mode=style.fill_mode,
+            split_screen_enabled=style.split_screen_enabled,
+            split_image_path=style.split_image_path,
+            split_ratio=style.split_ratio,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Video preview failed: {str(e)}")
