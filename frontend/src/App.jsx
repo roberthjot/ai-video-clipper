@@ -467,7 +467,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.split_screen_enabled, style.split_ratio]);
+  }, [style.fill_mode, style.split_screen_enabled, style.split_ratio, style.text_y]);
 
   // Poll progress
   useEffect(() => {
@@ -882,6 +882,19 @@ function EditorStep({ projectId, clips, onExportDone }) {
           <div className="control-section">
             <h3>📝 Text Overlay</h3>
             <div className="slider-group">
+              <label>
+                Caption Position
+                <span>
+                  {style.text_y <= 0.25 ? "⬆ Top" : style.text_y >= 0.65 ? "⬇ Bottom" : "↕ Middle"} · {Math.round(style.text_y * 100)}%
+                </span>
+              </label>
+              <input
+                type="range" min={5} max={95}
+                value={Math.round(style.text_y * 100)}
+                onChange={(e) => setStyle((s) => ({ ...s, text_y: parseInt(e.target.value) / 100 }))}
+              />
+            </div>
+            <div className="slider-group">
               <label>Font Size <span>{style.font_size}px</span></label>
               <input type="range" min={20} max={100} value={style.font_size}
                 onChange={(e) => setStyle((s) => ({ ...s, font_size: parseInt(e.target.value) }))} />
@@ -1024,7 +1037,7 @@ function App() {
           <span className="icon">🎬</span>
           AI Video Clipper
         </div>
-        <span className="app-version">v7.9</span>
+        <span className="app-version">v9.0</span>
       </header>
 
       <main className="app-main">

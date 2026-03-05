@@ -14,7 +14,7 @@ settings.validate()
 app = FastAPI(
     title="AI Video Clipper",
     description="AI-powered viral clip extraction tool",
-    version="2.0.0",
+    version="9.0.0",
 )
 
 # CORS for local development (allow all localhost ports)
@@ -34,7 +34,7 @@ app.include_router(export.router)
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "version": "2.0.0"}
+    return {"status": "ok", "version": "9.0.0"}
 
 
 @app.get("/api/export-info/{project_id}")
