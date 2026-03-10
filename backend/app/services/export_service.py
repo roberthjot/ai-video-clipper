@@ -95,6 +95,20 @@ def export_clip_with_style(
         filter_complex += f";[{current_label}][wm]overlay={wx}-(overlay_w/2):{wy}-(overlay_h/2)[watermarked]"
         current_label = "watermarked"
 
+    # Anti-detect filters (optional, export only)
+    extra_vf = []
+    if style.flip_horizontal:
+        extra_vf.append("hflip")
+    if style.zoom_uniquify:
+        zoom_w = int(W * 1.02)
+        zoom_h = int(H * 1.02)
+        extra_vf.append(f"scale={zoom_w}:{zoom_h},crop={W}:{H}")
+    if style.boost_contrast:
+        extra_vf.append("eq=contrast=1.05:brightness=0.02:saturation=1.05")
+    if extra_vf:
+        filter_complex += f";[{current_label}]{','.join(extra_vf)}[uniquified]"
+        current_label = "uniquified"
+
     filter_complex += f";[{current_label}]format=yuv420p[out]"
 
     cmd = [
@@ -121,9 +135,10 @@ def export_clip_with_style(
         "-crf", "23",
         "-sar", "1:1",
         "-movflags", "+faststart",
-        "-y", "-loglevel", "warning",
-        output_path,
     ])
+    if style.strip_metadata:
+        cmd.extend(["-map_metadata", "-1"])
+    cmd.extend(["-y", "-loglevel", "warning", output_path])
 
     try:
         print(f"[Export] Clip {clip.id}: Exporting... split={use_split}")

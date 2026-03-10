@@ -43,6 +43,12 @@ class StyleConfig(BaseModel):
     split_image_path: Optional[str] = None
     split_ratio: float = 0.5  # fraction of canvas height for video (0.3-0.7)
 
+    # Anti-detect / uniquify (export only, not applied to preview)
+    strip_metadata: bool = False
+    flip_horizontal: bool = False
+    zoom_uniquify: bool = False   # zoom +2% to break fingerprint
+    boost_contrast: bool = False  # subtle eq boost
+
 
 class ProjectConfig(BaseModel):
     """Configuration for a clip extraction project."""

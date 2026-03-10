@@ -365,6 +365,10 @@ function EditorStep({ projectId, clips, onExportDone }) {
     watermark_scale: 0.3,
     watermark_opacity: 0.9,
     fill_mode: "fit",
+    strip_metadata: false,
+    flip_horizontal: false,
+    zoom_uniquify: false,
+    boost_contrast: false,
     split_screen_enabled: false,
     split_ratio: 0.5,
   });
@@ -946,6 +950,40 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 </div>
               </>
             )}
+          </div>
+
+          {/* Anti-detect */}
+          <div className="control-section">
+            <h3>🛡️ Anti-Detect</h3>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
+              Solo afecta el export final · No modifica el preview
+            </p>
+            <div className="btn-group" style={{ flexWrap: "wrap", gap: 6 }}>
+              <button
+                className={`btn ${style.strip_metadata ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle(s => ({ ...s, strip_metadata: !s.strip_metadata }))}
+                title="Elimina metadatos EXIF/MP4 del archivo">
+                🧹 Strip Metadata
+              </button>
+              <button
+                className={`btn ${style.flip_horizontal ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle(s => ({ ...s, flip_horizontal: !s.flip_horizontal }))}
+                title="Espejo horizontal del video">
+                🔄 Flip
+              </button>
+              <button
+                className={`btn ${style.zoom_uniquify ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle(s => ({ ...s, zoom_uniquify: !s.zoom_uniquify }))}
+                title="Zoom +2% sutil para romper el fingerprint">
+                🔍 Zoom +2%
+              </button>
+              <button
+                className={`btn ${style.boost_contrast ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle(s => ({ ...s, boost_contrast: !s.boost_contrast }))}
+                title="Leve ajuste de contraste y brillo">
+                ✨ Boost
+              </button>
+            </div>
           </div>
 
           {/* Clip Selection for Export */}
