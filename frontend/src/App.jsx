@@ -954,34 +954,40 @@ function EditorStep({ projectId, clips, onExportDone }) {
 
           {/* Anti-detect */}
           <div className="control-section">
-            <h3>🛡️ Anti-Detect</h3>
+            <h3>🛡️ Anti-Detect
+              {[style.strip_metadata, style.flip_horizontal, style.zoom_uniquify, style.boost_contrast].filter(Boolean).length > 0 && (
+                <span style={{ fontSize: 11, background: "var(--accent)", color: "#fff", borderRadius: 10, padding: "1px 7px", marginLeft: 8 }}>
+                  {[style.strip_metadata, style.flip_horizontal, style.zoom_uniquify, style.boost_contrast].filter(Boolean).length} activo{[style.strip_metadata, style.flip_horizontal, style.zoom_uniquify, style.boost_contrast].filter(Boolean).length > 1 ? "s" : ""}
+                </span>
+              )}
+            </h3>
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
-              Solo afecta el export final · No modifica el preview
+              Se aplican al exportar · No modifican el preview
             </p>
             <div className="btn-group" style={{ flexWrap: "wrap", gap: 6 }}>
               <button
                 className={`btn ${style.strip_metadata ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setStyle(s => ({ ...s, strip_metadata: !s.strip_metadata }))}
                 title="Elimina metadatos EXIF/MP4 del archivo">
-                🧹 Strip Metadata
+                {style.strip_metadata ? "✓ " : ""}🧹 Strip Metadata
               </button>
               <button
                 className={`btn ${style.flip_horizontal ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setStyle(s => ({ ...s, flip_horizontal: !s.flip_horizontal }))}
                 title="Espejo horizontal del video">
-                🔄 Flip
+                {style.flip_horizontal ? "✓ " : ""}🔄 Flip
               </button>
               <button
                 className={`btn ${style.zoom_uniquify ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setStyle(s => ({ ...s, zoom_uniquify: !s.zoom_uniquify }))}
                 title="Zoom +2% sutil para romper el fingerprint">
-                🔍 Zoom +2%
+                {style.zoom_uniquify ? "✓ " : ""}🔍 Zoom +2%
               </button>
               <button
                 className={`btn ${style.boost_contrast ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setStyle(s => ({ ...s, boost_contrast: !s.boost_contrast }))}
                 title="Leve ajuste de contraste y brillo">
-                ✨ Boost
+                {style.boost_contrast ? "✓ " : ""}✨ Boost
               </button>
             </div>
           </div>
