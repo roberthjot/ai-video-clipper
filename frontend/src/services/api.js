@@ -143,3 +143,35 @@ export function getVideoPreviewUrl(projectId, clipId) {
 export function getDownloadUrl(projectId, filename) {
     return `${API_BASE}/export/download/${projectId}/${filename}`;
 }
+
+export async function startInstagramExport(projectId, selectedClipIds = null) {
+    let url = `${API_BASE}/export/instagram-render/${projectId}`;
+    if (selectedClipIds && selectedClipIds.length > 0) {
+        const params = selectedClipIds.map(id => `clip_ids=${id}`).join("&");
+        url += `?${params}`;
+    }
+    const res = await fetch(url, { method: "POST" });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Instagram export failed");
+    }
+    return res.json();
+}
+
+export async function getInstagramProgress(projectId) {
+    const res = await fetch(`${API_BASE}/export/instagram-progress/${projectId}`);
+    if (!res.ok) throw new Error("Failed to get instagram progress");
+    return res.json();
+}
+
+export function getInstagramDownloadUrl(projectId, filename) {
+    return `${API_BASE}/export/instagram-download/${projectId}/${filename}`;
+}
+
+export function getInstagramVideoPreviewUrl(projectId, clipId) {
+    return `${API_BASE}/clips/${projectId}/${clipId}/instagram-video-preview?t=${Date.now()}`;
+}
+
+export function getInstagramPreviewUrl(projectId, clipId) {
+    return `${API_BASE}/clips/${projectId}/${clipId}/instagram-preview?t=${Date.now()}`;
+}

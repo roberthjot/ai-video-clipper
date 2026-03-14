@@ -111,6 +111,64 @@ async def get_export_progress(project_id: str):
     return progress
 
 
+@router.post("/instagram-render/{project_id}")
+async def render_instagram_clips(project_id: str, clip_ids: list[int] = Query(default=None)):
+    """Start instagram export in background."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    if not project.clips:
+        raise HTTPException(status_code=400, detail="No clips to export.")
+
+    if clip_ids:
+        clips_to_export = [c for c in project.clips if c.id in clip_ids]
+    else:
+        clips_to_export = project.clips
+
+    if not clips_to_export:
+        raise HTTPException(status_code=400, detail="No matching clips found.")
+
+    export_dir = os.path.join(project.output_dir, "instagram_exported")
+
+    export_service.export_all_instagram_clips_background(
+        project_id=project_id,
+        video_path=project.video_path,
+        clips=clips_to_export,
+        style=project.style,
+        output_dir=export_dir,
+    )
+
+    return {
+        "status": "started",
+        "total": len(clips_to_export),
+        "message": "Instagram export started. Poll /api/export/instagram-progress/{project_id}",
+    }
+
+
+@router.get("/instagram-progress/{project_id}")
+async def get_instagram_progress(project_id: str):
+    """Poll instagram export progress."""
+    return export_service.get_instagram_progress(project_id)
+
+
+@router.get("/instagram-download/{project_id}/{filename}")
+async def download_instagram_clip(project_id: str, filename: str):
+    """Download an instagram exported clip."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    file_path = os.path.join(project.output_dir, "instagram_exported", filename)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(file_path, media_type="video/mp4", filename=filename)
+
+
 @router.get("/download/{project_id}/{filename}")
 async def download_clip(project_id: str, filename: str):
     """Download an exported clip."""

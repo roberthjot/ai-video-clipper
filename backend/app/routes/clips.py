@@ -174,6 +174,8 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             split_screen_enabled=style.split_screen_enabled,
             split_image_path=style.split_image_path,
             split_ratio=style.split_ratio,
+            flip_horizontal=style.flip_horizontal,
+            boost_contrast=style.boost_contrast,
         )
     except Exception as e:
         import traceback
@@ -231,6 +233,8 @@ async def preview_clip_video(project_id: str, clip_id: int):
             split_screen_enabled=style.split_screen_enabled,
             split_image_path=style.split_image_path,
             split_ratio=style.split_ratio,
+            flip_horizontal=style.flip_horizontal,
+            boost_contrast=style.boost_contrast,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Video preview failed: {str(e)}")
@@ -239,3 +243,102 @@ async def preview_clip_video(project_id: str, clip_id: int):
         raise HTTPException(status_code=500, detail="Video preview not generated")
 
     return FileResponse(video_preview_path, media_type="video/mp4")
+
+
+@router.get("/{project_id}/{clip_id}/instagram-preview")
+async def preview_clip_instagram_frame(project_id: str, clip_id: int):
+    """Generate a static JPEG in Instagram post format: white bg + caption text + video below."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    clip = None
+    for c in project.clips:
+        if c.id == clip_id:
+            clip = c
+            break
+
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    os.makedirs(project.output_dir, exist_ok=True)
+    ig_frame_path = os.path.join(project.output_dir, f"ig_preview_clip_{clip_id}.jpg")
+    timestamp = clip.start_time + (clip.duration / 2)
+    style = project.style
+
+    try:
+        await asyncio.to_thread(
+            video_service.generate_instagram_preview_frame,
+            video_path=project.video_path,
+            timestamp=timestamp,
+            output_path=ig_frame_path,
+            caption_text=clip.viral_caption,
+            fill_mode=style.ig_fill_mode,
+            ig_top_padding=style.ig_top_padding,
+            watermark_path=style.watermark_path,
+            watermark_x=style.watermark_x,
+            watermark_y=style.watermark_y,
+            ig_watermark_y=style.ig_watermark_y,
+            watermark_scale=style.watermark_scale,
+            watermark_opacity=style.watermark_opacity,
+            flip_horizontal=style.flip_horizontal,
+            boost_contrast=style.boost_contrast,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Instagram preview failed: {str(e)}")
+
+    if not os.path.exists(ig_frame_path):
+        raise HTTPException(status_code=500, detail="Instagram preview not generated")
+
+    return FileResponse(ig_frame_path, media_type="image/jpeg")
+
+
+@router.get("/{project_id}/{clip_id}/instagram-video-preview")
+async def preview_clip_instagram(project_id: str, clip_id: int):
+    """Generate and return a short Instagram-format video preview of a clip."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    clip = None
+    for c in project.clips:
+        if c.id == clip_id:
+            clip = c
+            break
+
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    os.makedirs(project.output_dir, exist_ok=True)
+    ig_preview_path = os.path.join(project.output_dir, f"ig_preview_clip_{clip_id}.mp4")
+
+    style = project.style
+
+    try:
+        await asyncio.to_thread(
+            video_service.generate_instagram_preview_clip,
+            video_path=project.video_path,
+            start_time=clip.start_time,
+            duration=clip.duration,
+            output_path=ig_preview_path,
+            caption_text=clip.viral_caption,
+            fill_mode=style.fill_mode,
+            watermark_path=style.watermark_path,
+            watermark_x=style.watermark_x,
+            watermark_y=style.watermark_y,
+            watermark_scale=style.watermark_scale,
+            watermark_opacity=style.watermark_opacity,
+            flip_horizontal=style.flip_horizontal,
+            boost_contrast=style.boost_contrast,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Instagram preview failed: {str(e)}")
+
+    if not os.path.exists(ig_preview_path):
+        raise HTTPException(status_code=500, detail="Instagram preview not generated")
+
+    return FileResponse(ig_preview_path, media_type="video/mp4")

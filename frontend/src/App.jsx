@@ -365,6 +365,9 @@ function EditorStep({ projectId, clips, onExportDone }) {
     watermark_scale: 0.3,
     watermark_opacity: 0.9,
     fill_mode: "fit",
+    ig_fill_mode: "fit",
+    ig_top_padding: 130,
+    ig_watermark_y: 0.85,
     strip_metadata: false,
     flip_horizontal: false,
     zoom_uniquify: false,
@@ -373,6 +376,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     split_ratio: 0.5,
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
+  const [exportMode, setExportMode] = useState("tiktok"); // "tiktok" | "instagram"
   const [progress, setProgress] = useState({ current: 0, total: 0, current_file: "" });
   const [exportedFiles, setExportedFiles] = useState([]);
   const [selectedClip, setSelectedClip] = useState(clips[0] || null);
@@ -454,7 +458,20 @@ function EditorStep({ projectId, clips, onExportDone }) {
     // loadingVideo stays true until onCanPlay fires on the video element
   };
 
-  // Auto-refresh preview when fill_mode changes
+  const handlePlayInstagram = async () => {
+    if (!selectedClip) return;
+    setLoadingPreview(true);
+    setVideoPreviewUrl(null);
+    try {
+      await api.updateStyle(projectId, style);
+      setPreviewUrl(api.getInstagramPreviewUrl(projectId, selectedClip.id));
+    } catch (err) {
+      alert("Failed to generate IG preview: " + err.message);
+    }
+    setLoadingPreview(false);
+  };
+
+  // Auto-refresh preview when style changes
   useEffect(() => {
     if (!selectedClip) return;
     const hasPreview = previewUrl || videoPreviewUrl;
@@ -466,12 +483,17 @@ function EditorStep({ projectId, clips, onExportDone }) {
           setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
         }
         if (previewUrl) {
-          setPreviewUrl(api.getPreviewUrl(projectId, selectedClip.id));
+          const isIg = previewUrl.includes("instagram-preview");
+          setPreviewUrl(
+            isIg
+              ? api.getInstagramPreviewUrl(projectId, selectedClip.id)
+              : api.getPreviewUrl(projectId, selectedClip.id)
+          );
         }
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.split_screen_enabled, style.split_ratio, style.text_y]);
+  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast]);
 
   // Poll progress
   useEffect(() => {
@@ -479,7 +501,9 @@ function EditorStep({ projectId, clips, onExportDone }) {
 
     const interval = setInterval(async () => {
       try {
-        const p = await api.getExportProgress(projectId);
+        const p = exportMode === "instagram"
+          ? await api.getInstagramProgress(projectId)
+          : await api.getExportProgress(projectId);
         setProgress(p);
 
         if (p.status === "completed" || p.status === "done") {
@@ -493,19 +517,24 @@ function EditorStep({ projectId, clips, onExportDone }) {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [exportStatus, projectId]);
+  }, [exportStatus, exportMode, projectId]);
 
-  const handleExport = async () => {
+  const handleExport = async (mode = "tiktok") => {
     const idsToExport = Array.from(selectedClipIds);
     if (idsToExport.length === 0) {
       alert("Please select at least one clip to export.");
       return;
     }
+    setExportMode(mode);
     setExportStatus("exporting");
     setProgress({ current: 0, total: idsToExport.length, current_file: "Starting...", status: "exporting" });
     try {
       await api.updateStyle(projectId, style);
-      await api.startExport(projectId, idsToExport);
+      if (mode === "instagram") {
+        await api.startInstagramExport(projectId, idsToExport);
+      } else {
+        await api.startExport(projectId, idsToExport);
+      }
       // Polling will handle the rest via useEffect
     } catch (err) {
       alert("Export failed: " + err.message);
@@ -553,7 +582,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     return (
       <div className="loading-container">
         <div className="loading-spinner"></div>
-        <h3>Exporting clips... {pct}%</h3>
+        <h3>{exportMode === "instagram" ? "📸 Exporting Instagram clips..." : "Exporting clips..."} {pct}%</h3>
         <p>
           Clip {progress.current} / {progress.total}
           {progress.current_file ? ` — ${progress.current_file}` : ""}
@@ -570,7 +599,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     return (
       <div className="export-results">
         <div className="success-icon">✅</div>
-        <h2>Export Complete!</h2>
+        <h2>{exportMode === "instagram" ? "📸 Instagram Export Complete!" : "Export Complete!"}</h2>
         <p>
           {exportedFiles.length} / {clips.length} clips exported successfully.
         </p>
@@ -589,7 +618,9 @@ function EditorStep({ projectId, clips, onExportDone }) {
             }}>
               <span>📎 {f}</span>
               <a
-                href={api.getDownloadUrl(projectId, f)}
+                href={exportMode === "instagram"
+                  ? api.getInstagramDownloadUrl(projectId, f)
+                  : api.getDownloadUrl(projectId, f)}
                 download
                 style={{ color: "var(--accent)", textDecoration: "none", fontSize: "12px" }}
               >
@@ -788,12 +819,25 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 </option>
               ))}
             </select>
-            <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button className="btn btn-secondary" onClick={handlePreview} disabled={loadingPreview}>
                 {loadingPreview ? "⏳ Generating..." : "👁️ Preview"}
               </button>
               <button className="btn btn-primary" onClick={handlePlayVideo} disabled={loadingVideo} style={{ fontSize: 13 }}>
                 {loadingVideo ? "⏳ Loading..." : "▶ Play Clip"}
+              </button>
+              <button
+                className="btn"
+                onClick={handlePlayInstagram}
+                disabled={loadingPreview}
+                style={{
+                  fontSize: 12,
+                  background: "linear-gradient(135deg, #833ab4 0%, #fd1d1d 50%, #fcb045 100%)",
+                  color: "#fff",
+                  border: "none",
+                }}
+              >
+                {loadingPreview ? "⏳" : "📸 IG"}
               </button>
             </div>
           </div>
@@ -826,6 +870,58 @@ function EditorStep({ projectId, clips, onExportDone }) {
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
               Fit = full · Zoom = grande · Fill = frame completo · Small = reducido
             </p>
+          </div>
+
+          {/* IG Video Size */}
+          <div className="control-section">
+            <h3>📸 IG Video Size</h3>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {["fit", "medium", "zoom", "fill", "small"].map((m) => (
+                <button
+                  key={m}
+                  className={`btn ${style.ig_fill_mode === m ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => setStyle((s) => ({ ...s, ig_fill_mode: m }))}>
+                  {m === "medium" ? "Medium" : m.charAt(0).toUpperCase() + m.slice(1)}
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+              Fit = pequeño · Medium = un poco más grande · Zoom = grande · Fill = completo · Small = reducido
+            </p>
+            <div style={{ marginTop: 14 }}>
+              <label style={{ fontSize: 12, display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span>Posición del texto IG</span>
+                <span style={{ color: "var(--text-muted)" }}>
+                  {style.ig_top_padding <= 100 ? "⬆ Arriba" : style.ig_top_padding >= 280 ? "⬇ Abajo" : "↕ Centro"}
+                </span>
+              </label>
+              <input
+                type="range"
+                min="40"
+                max="400"
+                step="10"
+                value={style.ig_top_padding}
+                onChange={(e) => setStyle((s) => ({ ...s, ig_top_padding: parseInt(e.target.value) }))}
+                style={{ width: "100%" }}
+              />
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <label style={{ fontSize: 12, display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span>Marca de agua IG</span>
+                <span style={{ color: "var(--text-muted)" }}>
+                  {style.ig_watermark_y <= 0.25 ? "⬆ Arriba" : style.ig_watermark_y >= 0.75 ? "⬇ Abajo" : "↕ Centro"}
+                </span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={style.ig_watermark_y}
+                onChange={(e) => setStyle((s) => ({ ...s, ig_watermark_y: parseFloat(e.target.value) }))}
+                style={{ width: "100%" }}
+              />
+            </div>
           </div>
 
           {/* Split Screen */}
@@ -1028,9 +1124,22 @@ function EditorStep({ projectId, clips, onExportDone }) {
           </div>
 
           {/* Export Button */}
-          <div className="btn-group">
-            <button className="btn btn-success" onClick={handleExport} disabled={selectedClipIds.size === 0}>
+          <div className="btn-group" style={{ flexDirection: "column", gap: 8 }}>
+            <button className="btn btn-success" onClick={() => handleExport("tiktok")} disabled={selectedClipIds.size === 0}>
               📦 Export {selectedClipIds.size} Clip{selectedClipIds.size !== 1 ? "s" : ""}
+            </button>
+            <button
+              className="btn"
+              onClick={() => handleExport("instagram")}
+              disabled={selectedClipIds.size === 0}
+              style={{
+                background: "linear-gradient(135deg, #833ab4 0%, #fd1d1d 50%, #fcb045 100%)",
+                color: "#fff",
+                border: "none",
+                opacity: selectedClipIds.size === 0 ? 0.5 : 1,
+              }}
+            >
+              📸 Export Instagram ({selectedClipIds.size})
             </button>
           </div>
         </div>

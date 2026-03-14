@@ -31,6 +31,11 @@ class StyleConfig(BaseModel):
     # Video fill mode: "fit" = fill width (full video visible), "fill" = fill full frame (sides crop)
     fill_mode: str = "fit"
 
+    # IG-specific fill mode (independent from TikTok fill_mode)
+    ig_fill_mode: str = "fit"
+    ig_top_padding: int = 130  # pixels from top to caption text in IG preview
+    ig_watermark_y: float = 0.85  # IG-specific watermark Y position (0-1 relative to video zone)
+
     # Watermark
     watermark_path: Optional[str] = None
     watermark_x: float = 0.5   # 0-1 relative position (center)
