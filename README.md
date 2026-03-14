@@ -1,6 +1,6 @@
-# 🎬 AI Video Clipper v7.9
+# 🎬 AI Video Clipper v9.1
 
-An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos — styled like CapCut/TikTok clips.
+An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos — styled like CapCut/TikTok clips with a dedicated Instagram post export mode.
 
 **Powered by:** Google Gemini 2.5 Pro + FFmpeg + PIL
 
@@ -8,24 +8,43 @@ An intelligent, full-stack web application that automatically identifies, extrac
 
 ## ✨ Features
 
+### Core
 - **🧠 AI Analysis**: Uploads video to Gemini, which watches it and identifies the most engaging, funny, or dramatic moments automatically.
 - **✂️ Smart Clipping**: Extracts clips with precise timestamps, each with a different duration (up to 60s max) based on the moment.
-- **🎞️ Live Preview**: Play generated clips directly in the browser before exporting.
-- **🎨 CapCut-Style Overlay**:
-  - White rounded box (radius=14) with black **Calibri Bold** font text (72px)
-  - Box width measured precisely with PIL `getlength()` — fits text exactly
-  - Max 3 lines, 25 chars per line — clean 1–2 line distribution for short captions
-  - Blurred background (boxblur) with centered subject
-  - Apostrophes escaped as `\'` for FFmpeg — renders as `'` in the video (he's, don't, that's)
-  - Emoji characters automatically stripped (FFmpeg drawtext limitation)
-- **💧 Watermark Support**: Upload your own logo/watermark and overlay it on all clips.
-- **📦 Selective Export**: Choose exactly which clips to render and download.
+- **🎞️ Live Preview**: Play generated clips directly in the browser with full styling applied before exporting.
 - **📊 Real-time Progress**: Track upload, analysis, and export with live status bars.
 - **📱 9:16 Vertical Format**: Auto-crops and scales to vertical format optimized for TikTok, Reels, and Shorts.
-- **🔲 4 Video Format Modes**: Fit (full width) · Zoom (90% height) · Small (78% height, blur borders) · Fill (full frame, no borders).
-- **📐 Watermark Center Guide**: Dashed vertical line at canvas center appears while positioning the watermark logo — ensures perfect horizontal alignment.
-- **📄 Clips Info TXT**: After exporting, download a `clips_info.txt` file with each clip's title, timestamps, caption, and why it went viral.
-- **🚫 No overlay on preview**: Draggable text/watermark HTML elements hidden when preview image/video is active.
+- **📄 Clips Info TXT**: After exporting, download a `clips_info.txt` with each clip's title, timestamps, caption, and why it went viral.
+
+### TikTok Export
+- **🎨 CapCut-Style Overlay**: White rounded box (r=14) with black **Calibri Bold** font (72px), PIL-rendered — no FFmpeg drawtext, apostrophes fully supported.
+- **🔲 4 Video Format Modes**: Fit · Zoom · Fill · Small
+- **📍 Caption Position Slider**: Move text anywhere from 5% to 95% of the frame height.
+- **💧 Watermark Support**: Upload logo, drag to position, adjust opacity and scale.
+- **📐 Split-Screen Mode**: Video (top) + static image (bottom), adjustable 30/70 ratio slider.
+
+### 📸 Instagram Export (v9.1)
+- **Static JPEG Preview**: Press 📸 IG to generate a white-background Instagram post image instantly.
+- **White Canvas Format**: 1080×1920 white bg, **Calibri Bold** caption text at top, video centered in lower zone.
+- **5 IG Video Size Modes** (independent from TikTok):
+  | Mode | Scale | Description |
+  |------|-------|-------------|
+  | Fit | `scale=1080:-2` | Full width, small for landscape |
+  | Medium | `scale=-2:715` | ~18% bigger than Fit |
+  | Zoom | `scale=-2:990` | 90% of video zone |
+  | Fill | `scale=1080:1100` | Fills full zone, crops sides |
+  | Small | `scale=-2:858` | 78% of zone |
+- **IG Text Position Slider**: Move caption text up/down (40–400px from top) without changing video size.
+- **IG Watermark Slider**: Separate watermark Y position for IG, independent from TikTok.
+- **Fixed Video Zone**: Video zone is always 1100px tall (y=740–1840), video size never changes with text position.
+- **Canvas Centering**: Video frame is always centered in the full 1920px canvas; text pushes it down only if they'd overlap.
+- **IG Export**: Exports video clips in IG post format (white bg + text + centered video) as MP4 files.
+
+### 🛡️ Anti-Detect (Export Only)
+- **Strip Metadata**: Removes all EXIF/MP4 metadata (`-map_metadata -1`)
+- **Flip Horizontal**: Mirror the video (`hflip`)
+- **Zoom Uniquify**: Scale +2% then crop back to 1080×1920 to break fingerprint
+- **Boost Contrast**: Subtle `eq=contrast=1.05:brightness=0.02:saturation=1.05`
 
 ---
 
@@ -37,8 +56,8 @@ An intelligent, full-stack web application that automatically identifies, extrac
 | Backend | Python + FastAPI + Uvicorn |
 | AI Model | Google Gemini 2.5 Pro |
 | Video Processing | FFmpeg + PIL (Pillow) |
-| Text Rendering | FFmpeg `drawtext` with Calibri Bold font |
-| Box Rendering | PIL-generated rounded rectangle PNGs overlaid via FFmpeg |
+| Text Rendering | PIL `ImageDraw` with Calibri Bold — 100% PIL, no FFmpeg drawtext |
+| Box Rendering | PIL rounded rectangle PNGs overlaid via FFmpeg |
 
 ---
 
@@ -47,7 +66,7 @@ An intelligent, full-stack web application that automatically identifies, extrac
 ### Prerequisites
 - Python 3.10+
 - Node.js 18+
-- FFmpeg installed and accessible (or via `imageio-ffmpeg`)
+- FFmpeg (via `imageio-ffmpeg`, auto-installed)
 - [Google AI Studio API Key](https://aistudio.google.com/)
 - Windows (font paths use `C:/Windows/Fonts/calibrib.ttf`)
 
@@ -64,7 +83,7 @@ pip install -r requirements.txt
 
 # Create .env file
 cp .env.example .env
-# Edit .env and set your GOOGLE_API_KEY
+# Edit .env and add your GOOGLE_API_KEY
 ```
 
 ### 3. Frontend Setup
@@ -77,24 +96,25 @@ npm install
 
 ## 🏃 Running the App
 
-### Terminal 1: Backend
+### Terminal 1 — Backend
 ```bash
 cd backend
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-> ⚠️ **Important:** If you make code changes, always kill and restart the backend manually. `--reload` on Windows does not always reload modules correctly.
+> ⚠️ **Windows reload issue:** `--reload` doesn't always apply changes. After any backend edit, kill and restart manually:
 > ```bash
 > taskkill /F /IM python.exe
+> python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 > ```
 
-### Terminal 2: Frontend
+### Terminal 2 — Frontend
 ```bash
 cd frontend
 npm run dev
 ```
 
-Open your browser at `http://localhost:5173`
+Open `http://localhost:5173`
 
 ---
 
@@ -103,12 +123,13 @@ Open your browser at `http://localhost:5173`
 1. **Upload** a video file (MP4, MOV, etc.)
 2. **Analyze** — Gemini AI watches the video and identifies viral moments
 3. **Review** — See clips with timestamps and AI-generated captions
-4. **Preview** — Watch each clip in the browser with full styling applied
-5. **Export** — Select clips and export them as styled MP4 files
-6. **Download** — Find exported files in the `projects/` folder or download from the UI
-7. **Clips Info** — After export, click "📄 Download Clips Info (TXT)" to get a summary file with all clip details
+4. **Edit** — Adjust caption position, fill mode, watermark, anti-detect options
+5. **Preview** — Click `👁 Preview` for a TikTok-style still, `▶ Play Clip` for video, `📸 IG` for Instagram post preview
+6. **Export TikTok** — Export selected clips as vertical 9:16 MP4s with CapCut-style overlay
+7. **Export Instagram** — Export selected clips in white-bg Instagram post format
+8. **Download** — Find files in `projects/{id}/exported/` or `projects/{id}/instagram_exported/`
 
-> 💡 **Tip for large videos:** For 30+ minute videos, compress to 720p first (HandBrake is free) to avoid Gemini upload limits (~2GB).
+> 💡 **Tip for large videos:** Compress to 720p first (HandBrake is free) to stay under Gemini's ~2GB upload limit.
 
 ---
 
@@ -118,21 +139,24 @@ Open your browser at `http://localhost:5173`
 ai-video-clipper/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                  # FastAPI entry point, CORS, /api/export-info endpoint
+│   │   ├── main.py                  # FastAPI entry point, CORS
 │   │   ├── config.py                # Settings (API key, paths, Gemini model)
 │   │   ├── models/
 │   │   │   └── clip.py              # ClipData, StyleConfig Pydantic models
 │   │   ├── routes/
-│   │   │   ├── clips.py             # /clips endpoints (analyze, preview, export)
+│   │   │   ├── clips.py             # /clips endpoints (analyze, preview, instagram-preview)
+│   │   │   ├── export.py            # /export endpoints (TikTok + Instagram render/progress)
 │   │   │   └── upload.py            # /upload endpoint
 │   │   └── services/
 │   │       ├── gemini_service.py    # Gemini API calls + clip parsing + prompt
-│   │       ├── video_service.py     # Preview generation, rounded box, text overlay
-│   │       └── export_service.py   # Final clip export + clips_info.txt generation
+│   │       ├── video_service.py     # TikTok preview, IG preview frame, PIL overlays
+│   │       └── export_service.py   # TikTok export, Instagram export, background threads
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
-│       └── App.jsx                  # Full React UI (upload, review, export, download TXT)
+│       ├── App.jsx                  # Full React UI
+│       └── services/
+│           └── api.js               # API client (all endpoints)
 └── README.md
 ```
 
@@ -140,136 +164,143 @@ ai-video-clipper/
 
 ## 🔧 Key Implementation Details
 
-### Text Overlay (CapCut Style)
-- **Rounded white box** generated as PNG using PIL (`ImageDraw.rounded_rectangle`)
-  - Corner radius: `14px`
-  - Padding: `12px horizontal, 8px vertical`
-  - Width measured with `ImageFont.getlength()` — pixel-perfect fit
-- Overlaid on video using FFmpeg `overlay` filter
-- Text rendered on top using FFmpeg `drawtext` with **Calibri Bold** font (72px)
-- Max **3 lines**, 25 chars per line — short captions naturally fit in 1–2 lines
-- Apostrophes escaped as `\'` for FFmpeg — renders correctly as `'` in the final video
-- Non-ASCII characters (emojis) stripped before passing to FFmpeg
+### Caption Rendering (100% PIL — No FFmpeg drawtext)
+All text is rendered in Python using PIL before FFmpeg ever runs:
+- `create_caption_overlay()` → RGBA PNG with white rounded box + black Calibri Bold text
+- PNG passed to FFmpeg as `-loop 1` input and overlaid with `overlay` filter
+- **Benefit**: apostrophes, quotes, special characters all work with zero escaping
 
-### Video Format Modes
-| Mode | FFmpeg Scale | Result |
-|------|-------------|--------|
-| `fit` | `scale={W}:-2` | Full width (1080px), letterboxed |
-| `zoom` | `scale=-2:{H*0.9}` | 90% of frame height, slight blur border |
-| `small` | `scale=-2:{H*0.78}` | 78% of frame height, visible blur borders |
-| `fill` | `scale=-2:{H}` | Full frame height, no blur border visible |
+### TikTok Video Pipeline
+```
+Input → -ss start -to end
+  → scale 1080×1920 (boxblur bg)
+  → overlay subject centered
+  → overlay PIL caption PNG
+  → overlay watermark PNG
+  → [anti-detect filters if enabled]
+  → format=yuv420p → H.264 + AAC output
+```
+
+### Instagram Post Pipeline
+```
+Python:
+  create_instagram_frame_bg(caption, top_padding)
+    → 1080×1920 white PNG, Calibri Bold text at top_padding Y
+    → video zone always fixed: top=740, height=1100
+
+FFmpeg:
+  [0:v] scale per ig_fill_mode → [fg]
+  [1:v=white_frame][fg] overlay=(W-w)/2 : overlay_y → [with_video]
+  overlay_y = max(text_bottom, (H-h)/2) clamped to canvas
+            (no-comma arithmetic: max(a,b)=(a+b+abs(a-b))/2)
+  → [watermark overlay if enabled]
+  → [anti-detect filters if enabled]
+  → format=yuv420p → H.264 + AAC output
+```
+
+**Key design decisions:**
+- Video zone height (`IG_VIDEO_H = 1100`) is a **constant** — never changes when text slider moves
+- Video is centered in the **full 1920px canvas** (`paste_y = (H-h)//2`), clamped only to avoid text overlap
+- FFmpeg `min()`/`max()` are replaced with comma-free arithmetic to avoid filter parsing errors
+
+### IG Fill Modes
+| Mode | Filter | video_h=1100 result |
+|------|--------|---------------------|
+| fit | `scale=1080:-2` | ~607px for 16:9 source |
+| medium | `scale=-2:715` | 715px (~18% bigger than fit) |
+| zoom | `scale=-2:990` | 990px (90% of zone) |
+| fill | `scale=1080:1100,crop` | 1100px (full zone, sides crop) |
+| small | `scale=-2:858` | 858px (78% of zone) |
+
+### Split-Screen Mode
+```
+[0:v] scale+crop+boxblur → [bg] (video_h tall)
+[0:v] fg_filter          → [fg]
+[bg][fg] overlay         → [video_part] (yuv420p)
+[1:v=split_img] scale+crop → [img_part] (yuv420p)
+[video_part][img_part] vstack=2 → full 1080×1920
+```
+
+### Anti-Detect Filter Chain (export only)
+Applied as `extra_vf` before `format=yuv420p[out]`:
+```
+hflip                                    # flip_horizontal
+scale=1102:1958,crop=1080:1920           # zoom_uniquify (+2%)
+eq=contrast=1.05:brightness=0.02:saturation=1.05  # boost_contrast
+```
 
 ### Gemini Caption Rules
-- **Max 10 words** per caption (strict, counted in prompt)
-- **Third person only** — "He got the moves", "Watch her reaction"
+- Max **10 words** per caption
+- **Third person** — "He got the moves", "Watch her reaction"
 - No "I", "Me", "My", "POV: You..."
 - No punctuation, all lowercase
-- Written as if a fan account reporting on the creator
-- Clip duration: variable per clip, min set by user, max 60 seconds
-
-### Video Processing Pipeline
-```
-Input Video
-  → -ss start -to end (precise seek BEFORE input)
-  → scale to 1080x1920 (blurred background)
-  → overlay original centered (clear subject)
-  → overlay rounded white PNG box (-loop 1 -t duration)
-  → drawtext (Calibri Bold, black, centered)
-  → overlay watermark PNG (-loop 1 -t duration)
-  → encode H.264 + AAC, SAR 1:1
-  → Output MP4 (browser compatible)
-```
-
-### clips_info.txt Format
-After export, a `clips_info.txt` is saved to `projects/{id}/exported/` and available for download:
-```
-============================================================
-AI VIDEO CLIPPER - CLIPS INFO
-============================================================
-
-CLIP 1 - Clip Title Here
-Timestamps : 0:05 - 0:25 (20s)
-Caption    : Your viral caption text here
-Why viral  : Reason why this moment is engaging
-
-------------------------------------------------------------
-```
-
-### Critical FFmpeg Fix — Clip Duration
-When FFmpeg has multiple inputs (video + PNG box + watermark PNG),
-using `-loop 1` without `-t` causes the loop to run forever, making exported clips as long as the full video.
-
-**Wrong (causes full-length exports):**
-```
-ffmpeg -i video.mp4 -ss 10 -to 30 -loop 1 -i box.png -loop 1 -i watermark.png ...
-```
-
-**Correct (precise clip duration):**
-```
-ffmpeg -ss 10 -to 30 -i video.mp4 -loop 1 -t 20 -i box.png -loop 1 -t 20 -i watermark.png ...
-```
-
-Key rules:
-- `-ss` and `-to` must go **before** `-i video` (input seeking)
-- `-loop 1 -t {duration}` must be applied to **every** PNG/image input
+- Written as a fan account reporting on the creator
 
 ---
 
-## ⚠️ Known Issues & Bugs
+## 🔌 API Endpoints
 
-### Added in v7.8
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/upload` | Upload video, return project_id |
+| `POST` | `/api/clips/analyze` | Analyze video with Gemini |
+| `GET` | `/api/status/{project_id}` | Poll analysis progress |
+| `PUT` | `/api/export/style/{project_id}` | Update style config |
+| `GET` | `/api/clips/{pid}/{cid}/preview` | Generate TikTok preview JPEG |
+| `GET` | `/api/clips/{pid}/{cid}/preview-video` | Generate TikTok preview MP4 |
+| `GET` | `/api/clips/{pid}/{cid}/instagram-preview` | Generate IG post preview JPEG |
+| `POST` | `/api/export/start/{project_id}` | Start TikTok background export |
+| `GET` | `/api/export/progress/{project_id}` | Poll TikTok export progress |
+| `POST` | `/api/export/instagram-render/{project_id}` | Start Instagram background export |
+| `GET` | `/api/export/instagram-progress/{project_id}` | Poll Instagram export progress |
+| `POST` | `/api/export/split-image/{project_id}` | Upload split-screen image |
+| `GET` | `/api/export-info/{project_id}` | Download clips_info.txt |
+
+---
+
+## ⚠️ Known Issues & Changelog
+
+### v9.1 — Instagram Export
+| Change | Detail |
+|--------|--------|
+| Instagram post export | White bg + caption text + centered video, 5 fill modes |
+| Fixed IG export 0/5 clips | FFmpeg `min(max())` commas break filter_complex — replaced with `(a+b±abs(a-b))/2` arithmetic |
+| Fixed video size changes with text | `IG_VIDEO_H=1100` constant, video zone never changes |
+| Fixed video not centered | `paste_y = max(text_bottom, (H-h)//2)` centers in full canvas |
+| IG watermark slider | Independent from TikTok watermark_y |
+| Medium fill mode | 65% of zone height, ~18% bigger than Fit for landscape video |
+
+### v9.0 — Split Screen + Anti-Detect
 | Feature | Detail |
 |---------|--------|
-| "Small" video format | `scale=-2:{H*0.78}` — 78% of frame height, visible blur borders on all sides |
-| Watermark center guide | Dashed vertical line at `left: 50%` on canvas when watermark is loaded and no preview active |
+| Split-screen mode | Video (top) + static image (bottom), vstack pipeline |
+| Anti-detect | Strip metadata, flip, zoom+2%, contrast boost |
+| Caption position slider | `text_y` ratio 0.0–1.0 relative to target height |
 
-### Fixed in v7.x
+### v8.x — PIL Caption Rendering
+| Version | Change |
+|---------|--------|
+| v8.0 | Switched from FFmpeg drawtext to 100% PIL rendering — apostrophes now work |
+| v8.0 | `create_caption_overlay()` generates RGBA PNG, overlaid via FFmpeg |
+
+### v7.x — Stability
 | Version | Fix |
 |---------|-----|
-| v7.4 | `max_chars` increased 15 → 25 so captions fit in 1–2 lines instead of 3 |
-| v7.3 | Box width no longer grows unbounded when font increases |
-| v7.2 | Apostrophes removed entirely instead of replaced (TikTok style) |
-| v7.1 | Switched from Arial Bold to Calibri Bold; font size 42 → 48 → 100px |
-| v7.0 | Gemini model updated from deprecated `gemini-2.5-pro-exp` to stable `gemini-2.5-pro` |
-| v6.9 | Fixed Gemini returning near-zero timestamps; fixed video preview deadlock; added clip deduplication |
-| v6.8 | Fixed FFmpeg text crash on special chars; fixed preview not playing; rewrote Gemini prompt |
-
-### Fixed in v6.0
-| Bug | Fix |
-|-----|-----|
-| Draggable text/watermark visible on top of preview | Hidden when `previewUrl` or `videoPreviewUrl` is set in App.jsx |
-| Text truncated on clips with long captions | Line 3 now absorbs all remaining words instead of cutting off |
-| Caption word limit not enforced | Gemini prompt changed to strict 10-word max |
-| All clips same duration | Gemini prompt updated to use variable durations up to 60s per moment |
-| Box width too wide/narrow | Switched from char-count estimate to PIL `getlength()` pixel measurement |
-| Border radius too large | Tested r=4, r=8, r=12, r=14 — user chose r=14 |
-
-### Fixed in v5.0
-| Bug | Fix |
-|-----|-----|
-| Emoji characters showing as boxes in video overlay | Strip non-ASCII with `re.sub(r'[^\x00-\x7F]+', '', text)` before FFmpeg drawtext |
-| "Download Clips Info" button returned 404 | Endpoint reads `clips_info.txt` directly from disk |
-| Server lost projects after code change + auto-reload | Download endpoint reads from disk path instead of in-memory store |
-
-### Fixed in v4.0
-| Bug | Fix |
-|-----|-----|
-| Exported clips were full video length | `-ss/-to` moved before `-i`, added `-t duration` to all `-loop 1` image inputs |
-| Export showed "stuck at 100%" | Frontend checks both `"done"` and `"completed"` status |
-| Video not playable in browser (SAR error) | Added `-sar "1:1"` to FFmpeg command |
+| v7.4 | `max_chars` 15 → 25 for better line distribution |
+| v7.0 | Gemini model updated to stable `gemini-2.5-pro` |
+| v6.9 | Fixed near-zero timestamps, preview deadlock, clip deduplication |
 
 ### Active / Pending
 | Issue | Status |
 |-------|--------|
-| In-memory project store resets on server restart | 🟡 By design for desktop app; disk-based persistence not yet implemented |
-| `--reload` doesn't always apply changes on Windows | 🟡 Workaround: kill python.exe and restart manually after code changes |
+| In-memory project store resets on server restart | 🟡 By design; disk persistence not implemented |
+| `--reload` unreliable on Windows | 🟡 Kill python.exe and restart manually after backend changes |
 
 ---
 
 ## 🌍 Environment Variables
 
-Create a `.env` file in `backend/`:
-
+Create `backend/.env`:
 ```env
 GOOGLE_API_KEY=your_gemini_api_key_here
 ```
