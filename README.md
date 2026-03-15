@@ -267,6 +267,7 @@ eq=contrast=1.05:brightness=0.02:saturation=1.05  # boost_contrast
 | Fixed IG export 0/5 clips | FFmpeg `min(max())` commas break filter_complex — replaced with `(a+b±abs(a-b))/2` arithmetic |
 | Fixed video size changes with text | `IG_VIDEO_H=1100` constant, video zone never changes |
 | Fixed video not centered | `paste_y = max(text_bottom, (H-h)//2)` centers in full canvas |
+| Fixed blank first frame on IG export | Added `setpts=PTS-STARTPTS` to video filter — input seeking keyframe delay caused [0:v] to arrive 1 frame late while white PNG was already at t=0 |
 | IG watermark slider | Independent from TikTok watermark_y |
 | Medium fill mode | 65% of zone height, ~18% bigger than Fit for landscape video |
 
