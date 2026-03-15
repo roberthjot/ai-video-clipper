@@ -276,8 +276,10 @@ def export_instagram_clip(
     inner = f"({tb}+(H-h)/2+abs({tb}-(H-h)/2))/2"
     # overlay_y = min(inner, cb - h)
     overlay_y = f"(({inner})+({cb}-h)-abs(({inner})-({cb}-h)))/2"
+    # setpts=PTS-STARTPTS forces video timestamps to start at exactly 0,
+    # preventing a blank white first frame caused by input-seek keyframe delay
     filter_complex = (
-        f"[0:v]{fg_filter}[fg];"
+        f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
         f"[1:v][fg]overlay=(W-w)/2:{overlay_y}[with_video]"
     )
 
