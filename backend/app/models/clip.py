@@ -70,3 +70,35 @@ class ExportRequest(BaseModel):
     project_id: str
     style: StyleConfig
     clip_ids: Optional[list[int]] = None  # None = export all
+
+
+# ─── Live Stream Models ───────────────────────────────────────────────────────
+
+class StreamSegment(BaseModel):
+    """One recorded segment from a live stream."""
+    index: int
+    file_path: str = ""
+    status: str = "pending"   # pending | recording | analyzing | done | failed
+    project_id: str = ""      # reuses existing project system
+    clips: list = []          # List[ClipData] — stored as dicts for JSON compat
+    error: str = ""
+    duration_recorded: float = 0.0
+
+
+class StreamSession(BaseModel):
+    """A live stream clipping session."""
+    session_id: str
+    url: str
+    platform: str = ""        # "twitch" | "kick" | "other"
+    segment_minutes: int = 10
+    clips_per_segment: int = 5
+    status: str = "idle"      # idle | recording | stopped | error
+    segments: list[StreamSegment] = []
+    created_at: str = ""
+
+
+class StreamStartRequest(BaseModel):
+    """Request body to start a stream session."""
+    url: str
+    segment_minutes: int = 10
+    clips_per_segment: int = 5

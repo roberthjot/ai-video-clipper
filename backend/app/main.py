@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse as FastFileResponse
 import os
 from .config import settings
-from .routes import upload, clips, export
+from .routes import upload, clips, export, stream
 from .routes.upload import get_project_store
 
 # Validate settings on startup
@@ -30,6 +30,7 @@ app.add_middleware(
 app.include_router(upload.router)
 app.include_router(clips.router)
 app.include_router(export.router)
+app.include_router(stream.router, prefix="/api/stream", tags=["stream"])
 
 
 @app.get("/api/health")

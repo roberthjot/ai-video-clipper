@@ -175,3 +175,40 @@ export function getInstagramVideoPreviewUrl(projectId, clipId) {
 export function getInstagramPreviewUrl(projectId, clipId) {
     return `${API_BASE}/clips/${projectId}/${clipId}/instagram-preview?t=${Date.now()}`;
 }
+
+// ─── Live Stream API ──────────────────────────────────────────────────────────
+
+export async function startStream(url, segmentMinutes, clipsPerSegment) {
+    const res = await fetch(`${API_BASE}/stream/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            url,
+            segment_minutes: segmentMinutes,
+            clips_per_segment: clipsPerSegment,
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Failed to start stream");
+    }
+    return res.json();
+}
+
+export async function stopStream(sessionId) {
+    const res = await fetch(`${API_BASE}/stream/stop/${sessionId}`, { method: "POST" });
+    if (!res.ok) throw new Error("Failed to stop stream");
+    return res.json();
+}
+
+export async function getStreamStatus(sessionId) {
+    const res = await fetch(`${API_BASE}/stream/status/${sessionId}`);
+    if (!res.ok) throw new Error("Failed to get stream status");
+    return res.json();
+}
+
+export async function listStreamSessions() {
+    const res = await fetch(`${API_BASE}/stream/sessions`);
+    if (!res.ok) throw new Error("Failed to list sessions");
+    return res.json();
+}
