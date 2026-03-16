@@ -1152,30 +1152,66 @@ function EditorStep({ projectId, clips, onExportDone }) {
 // ================================================
 // LIVE STREAM CLIPPER
 // ================================================
+function SegmentTimer({ startedAt, totalMinutes }) {
+  const [elapsed, setElapsed] = useState(0);
+  const totalSecs = totalMinutes * 60;
+
+  useEffect(() => {
+    if (!startedAt) return;
+    const update = () => {
+      const diff = (Date.now() - new Date(startedAt).getTime()) / 1000;
+      setElapsed(Math.min(diff, totalSecs));
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [startedAt, totalSecs]);
+
+  const remaining = Math.max(0, totalSecs - elapsed);
+  const pct = Math.min(100, (elapsed / totalSecs) * 100);
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+  return (
+    <div style={{ flex: 1 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+        <span style={{ color: "#f87171", fontWeight: 600 }}>🔴 Grabando</span>
+        <span style={{ color: "var(--text-muted)" }}>{fmt(remaining)} restantes</span>
+      </div>
+      <div style={{ background: "var(--bg-primary)", borderRadius: 4, height: 6, overflow: "hidden" }}>
+        <div style={{
+          height: "100%", borderRadius: 4,
+          background: "linear-gradient(90deg, #a78bfa, #ec4899)",
+          width: `${pct}%`,
+          transition: "width 1s linear",
+        }} />
+      </div>
+    </div>
+  );
+}
+
 function LiveStreamStep() {
   const [url, setUrl] = useState("");
   const [segmentMinutes, setSegmentMinutes] = useState(10);
-  const [clipsPerSegment, setClipsPerSegment] = useState(5);
   const [sessionId, setSessionId] = useState(null);
   const [sessionData, setSessionData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const pollRef = useRef(null);
 
-  // Poll status every 5s while session active
+  // Poll status every 3s while session active
   useEffect(() => {
     if (!sessionId) return;
-    pollRef.current = setInterval(async () => {
+    const poll = async () => {
       try {
         const data = await api.getStreamStatus(sessionId);
         setSessionData(data);
         if (data.status === "stopped" || data.status === "error") {
           clearInterval(pollRef.current);
         }
-      } catch (e) {
-        // ignore transient errors
-      }
-    }, 5000);
+      } catch (e) { /* ignore transient */ }
+    };
+    poll();
+    pollRef.current = setInterval(poll, 3000);
     return () => clearInterval(pollRef.current);
   }, [sessionId]);
 
@@ -1184,12 +1220,10 @@ function LiveStreamStep() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.startStream(url.trim(), segmentMinutes, clipsPerSegment);
+      const res = await api.startStream(url.trim(), segmentMinutes, 5);
       setSessionId(res.session_id);
-      setSessionData({ session_id: res.session_id, status: res.status, segments: [], total_clips: 0 });
-    } catch (e) {
-      setError(e.message);
-    }
+      setSessionData({ session_id: res.session_id, status: res.status, segments: [], ready_count: 0 });
+    } catch (e) { setError(e.message); }
     setLoading(false);
   };
 
@@ -1198,9 +1232,7 @@ function LiveStreamStep() {
     try {
       await api.stopStream(sessionId);
       setSessionData((prev) => ({ ...prev, status: "stopping" }));
-    } catch (e) {
-      setError(e.message);
-    }
+    } catch (e) { setError(e.message); }
   };
 
   const handleReset = () => {
@@ -1212,20 +1244,16 @@ function LiveStreamStep() {
   };
 
   const isActive = sessionData && (sessionData.status === "recording" || sessionData.status === "starting");
-
-  const segmentStatusIcon = (s) => {
-    if (s.status === "recording") return "🔴";
-    if (s.status === "analyzing") return "⏳";
-    if (s.status === "done") return "✅";
-    if (s.status === "failed") return "❌";
-    if (s.status === "skipped") return "⏭️";
-    return "🕐";
-  };
+  const segments = sessionData?.segments ?? [];
+  const readyCount = sessionData?.ready_count ?? 0;
 
   return (
     <div style={{ maxWidth: 700, margin: "0 auto", padding: "24px 16px" }}>
       <div className="card" style={{ marginBottom: 20 }}>
-        <h2 style={{ marginBottom: 16, fontSize: 18 }}>🔴 Live Stream Clipper</h2>
+        <h2 style={{ marginBottom: 4, fontSize: 18 }}>🔴 Live Stream Clipper</h2>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 20 }}>
+          Graba segmentos del stream → descárgalos → súbelos al Video Clipper para sacar clips con Gemini
+        </p>
 
         {!sessionId ? (
           <>
@@ -1236,140 +1264,131 @@ function LiveStreamStep() {
               <input
                 type="text"
                 className="input"
-                placeholder="https://twitch.tv/nombre_del_canal"
+                placeholder="https://twitch.tv/nombre_del_canal  o  https://kick.com/nombre"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleStart()}
                 style={{ width: "100%", marginBottom: 0 }}
               />
             </div>
 
-            <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "var(--text-muted)" }}>
-                  Duración por segmento
-                </label>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {[5, 7, 10, 15].map((m) => (
-                    <button
-                      key={m}
-                      className={`btn ${segmentMinutes === m ? "btn-primary" : "btn-secondary"}`}
-                      style={{ flex: 1, padding: "6px 0", fontSize: 13 }}
-                      onClick={() => setSegmentMinutes(m)}
-                    >{m} min</button>
-                  ))}
-                </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "var(--text-muted)" }}>
+                Duración por segmento
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[5, 7, 10, 15].map((m) => (
+                  <button
+                    key={m}
+                    className={`btn ${segmentMinutes === m ? "btn-primary" : "btn-secondary"}`}
+                    style={{ flex: 1, fontSize: 13 }}
+                    onClick={() => setSegmentMinutes(m)}
+                  >{m} min</button>
+                ))}
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "var(--text-muted)" }}>
-                  Clips por segmento
-                </label>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {[3, 5, 7].map((n) => (
-                    <button
-                      key={n}
-                      className={`btn ${clipsPerSegment === n ? "btn-primary" : "btn-secondary"}`}
-                      style={{ flex: 1, padding: "6px 0", fontSize: 13 }}
-                      onClick={() => setClipsPerSegment(n)}
-                    >{n}</button>
-                  ))}
-                </div>
-              </div>
+              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+                5 min = clips más rápido · 10-15 min = más contexto para Gemini · Grabado en 720p
+              </p>
             </div>
 
             {error && <p style={{ color: "#f87171", marginBottom: 12, fontSize: 13 }}>{error}</p>}
             <button className="btn btn-primary" onClick={handleStart} disabled={loading} style={{ width: "100%" }}>
-              {loading ? "⏳ Conectando..." : "▶ Iniciar captura"}
+              {loading ? "⏳ Conectando al stream..." : "▶ Iniciar grabación"}
             </button>
-            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
-              Graba segmentos de {segmentMinutes} min y los analiza con Gemini automáticamente · Se fuerza 720p para mantener el tamaño bajo el límite de Gemini (2GB)
-            </p>
           </>
         ) : (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+            {/* Status header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16,
+              background: "var(--bg-secondary)", borderRadius: 10, padding: "10px 14px" }}>
               <div style={{
-                width: 12, height: 12, borderRadius: "50%",
-                background: isActive ? "#22c55e" : sessionData?.status === "stopped" ? "#6b7280" : "#f87171",
-                boxShadow: isActive ? "0 0 8px #22c55e" : "none",
+                width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+                background: isActive ? "#f87171" : "#6b7280",
+                boxShadow: isActive ? "0 0 0 3px rgba(248,113,113,0.3)" : "none",
+                animation: isActive ? "pulse 1.5s infinite" : "none",
               }} />
-              <span style={{ fontSize: 14, fontWeight: 600 }}>
-                {isActive ? "Grabando en vivo" : sessionData?.status === "stopping" ? "Deteniendo..." : "Sesión finalizada"}
+              <span style={{ fontSize: 13, fontWeight: 600 }}>
+                {isActive ? "En vivo" : sessionData?.status === "stopping" ? "Deteniendo..." : "Finalizado"}
               </span>
-              <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: "auto" }}>
-                {url}
-              </span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{url}</span>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 16, flexShrink: 0 }}>
+                <span style={{ fontSize: 13 }}>
+                  <b>{segments.length}</b> <span style={{ color: "var(--text-muted)", fontSize: 11 }}>segmentos</span>
+                </span>
+                <span style={{ fontSize: 13 }}>
+                  <b style={{ color: "#22c55e" }}>{readyCount}</b> <span style={{ color: "var(--text-muted)", fontSize: 11 }}>listos</span>
+                </span>
+              </div>
             </div>
 
-            <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-              <div className="card" style={{ flex: 1, textAlign: "center", padding: "12px 8px", background: "var(--bg-secondary)" }}>
-                <div style={{ fontSize: 22, fontWeight: 700 }}>{sessionData?.segments?.length ?? 0}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Segmentos</div>
+            {/* Error from backend */}
+            {sessionData?.error && (
+              <div style={{ background: "#450a0a", border: "1px solid #f87171", borderRadius: 8,
+                padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#fca5a5" }}>
+                ❌ {sessionData.error}
               </div>
-              <div className="card" style={{ flex: 1, textAlign: "center", padding: "12px 8px", background: "var(--bg-secondary)" }}>
-                <div style={{ fontSize: 22, fontWeight: 700 }}>{sessionData?.total_clips ?? 0}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Clips encontrados</div>
-              </div>
-              <div className="card" style={{ flex: 1, textAlign: "center", padding: "12px 8px", background: "var(--bg-secondary)" }}>
-                <div style={{ fontSize: 22, fontWeight: 700 }}>{segmentMinutes}m</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Por segmento</div>
-              </div>
-            </div>
+            )}
 
             {/* Segments list */}
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-              {(sessionData?.segments ?? []).map((seg) => (
-                <div key={seg.index} style={{
-                  background: "var(--bg-secondary)",
-                  borderRadius: 10,
-                  padding: "12px 14px",
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: seg.clips?.length > 0 ? 8 : 0 }}>
-                    <span style={{ fontSize: 16 }}>{segmentStatusIcon(seg)}</span>
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>Segmento {seg.index + 1}</span>
-                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                      {seg.duration_recorded > 0 ? `${Math.round(seg.duration_recorded)}s grabados` : ""}
+              {segments.map((seg) => (
+                <div key={seg.index} style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 15, flexShrink: 0 }}>
+                      {seg.status === "recording" ? "🔴" : seg.status === "ready" ? "✅" :
+                       seg.status === "skipped" ? "⏭️" : "❌"}
                     </span>
-                    {seg.status === "analyzing" && (
-                      <span style={{ fontSize: 12, color: "#a78bfa", marginLeft: "auto" }}>Analizando con Gemini...</span>
-                    )}
-                    {seg.status === "done" && (
-                      <span style={{ fontSize: 12, color: "#22c55e", marginLeft: "auto" }}>{seg.clip_count} clips</span>
-                    )}
-                    {seg.status === "failed" && (
-                      <span style={{ fontSize: 12, color: "#f87171", marginLeft: "auto" }}>{seg.error?.slice(0, 60)}</span>
-                    )}
-                  </div>
+                    <span style={{ fontWeight: 600, fontSize: 14, flexShrink: 0 }}>
+                      Segmento {seg.index + 1}
+                    </span>
 
-                  {seg.clips && seg.clips.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 24 }}>
-                      {seg.clips.map((clip, i) => (
-                        <div key={i} style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                          <span style={{ color: "var(--text-primary)", marginRight: 8 }}>
-                            {Math.floor(clip.start_time / 60)}:{String(Math.round(clip.start_time % 60)).padStart(2, "0")} –{" "}
-                            {Math.floor(clip.end_time / 60)}:{String(Math.round(clip.end_time % 60)).padStart(2, "0")}
-                          </span>
-                          {clip.viral_caption}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                    {seg.status === "recording" && seg.started_at ? (
+                      <SegmentTimer startedAt={seg.started_at} totalMinutes={segmentMinutes} />
+                    ) : seg.status === "ready" ? (
+                      <>
+                        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                          {seg.duration_recorded > 0 ? `${Math.round(seg.duration_recorded / 60)}m grabados` : ""}
+                          {seg.file_size_mb > 0 ? ` · ${seg.file_size_mb} MB` : ""}
+                        </span>
+                        <a
+                          href={`http://localhost:8000/api/stream/download/${sessionData.session_id}/${seg.index}`}
+                          download
+                          className="btn btn-primary"
+                          style={{ marginLeft: "auto", padding: "4px 12px", fontSize: 12, textDecoration: "none" }}
+                        >
+                          ⬇ Descargar
+                        </a>
+                      </>
+                    ) : seg.status === "skipped" ? (
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Muy corto, ignorado</span>
+                    ) : seg.error ? (
+                      <span style={{ fontSize: 12, color: "#f87171" }}>{seg.error.slice(0, 80)}</span>
+                    ) : null}
+                  </div>
                 </div>
               ))}
 
-              {isActive && (
-                <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "12px 14px", opacity: 0.6 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 16 }}>🔴</span>
-                    <span style={{ fontSize: 14 }}>Próximo segmento en cola...</span>
-                  </div>
+              {isActive && segments.length === 0 && (
+                <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "14px",
+                  textAlign: "center", fontSize: 13, color: "var(--text-muted)" }}>
+                  Conectando al stream... esto puede tomar unos segundos
                 </div>
               )}
             </div>
 
+            {readyCount > 0 && (
+              <div style={{ background: "#052e16", border: "1px solid #16a34a", borderRadius: 8,
+                padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#86efac" }}>
+                ✅ {readyCount} segmento{readyCount > 1 ? "s" : ""} listo{readyCount > 1 ? "s" : ""} —
+                descárgalo{readyCount > 1 ? "s" : ""} y súbelo{readyCount > 1 ? "s" : ""} al <b>Video Clipper</b> para sacar clips
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 10 }}>
               {isActive && (
                 <button className="btn btn-secondary" onClick={handleStop} style={{ flex: 1 }}>
-                  ⏹ Detener sesión
+                  ⏹ Detener grabación
                 </button>
               )}
               {!isActive && (

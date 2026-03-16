@@ -78,11 +78,10 @@ class StreamSegment(BaseModel):
     """One recorded segment from a live stream."""
     index: int
     file_path: str = ""
-    status: str = "pending"   # pending | recording | analyzing | done | failed
-    project_id: str = ""      # reuses existing project system
-    clips: list = []          # List[ClipData] — stored as dicts for JSON compat
+    status: str = "pending"   # recording | ready | skipped | failed
     error: str = ""
     duration_recorded: float = 0.0
+    started_at: str = ""      # ISO timestamp when recording started
 
 
 class StreamSession(BaseModel):
@@ -92,7 +91,8 @@ class StreamSession(BaseModel):
     platform: str = ""        # "twitch" | "kick" | "other"
     segment_minutes: int = 10
     clips_per_segment: int = 5
-    status: str = "idle"      # idle | recording | stopped | error
+    status: str = "idle"      # starting | recording | stopping | stopped | error
+    error: str = ""
     segments: list[StreamSegment] = []
     created_at: str = ""
 
