@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v9.2] - 2026-03-15
+
+### Added
+- **Live Stream Clipper mode**: New mode toggle at the top of the UI switches between Video Clipper and Live Stream Clipper.
+- **Twitch & Kick recording**: Paste any Twitch or Kick stream URL — `streamlink` resolves the HLS URL automatically, FFmpeg records it to disk in continuous segments.
+- **Segment-based recording**: Records N-minute segments one after another. Each segment is independently downloadable as an MP4. After recording, user downloads a segment and uploads it to the Video Clipper tab to analyze with Gemini.
+- **Resolution selector**: Three buttons (480p / 720p / 1080p) let you choose recording quality before starting. Streamlink selects the best matching stream quality; FFmpeg scales to the target resolution (`854:480`, `1280:720`, `1920:1080`).
+- **Segment duration selector**: 6 options — 5, 7, 10, 15, 20, 30 minutes. 30 min is the max (Gemini's file size limit becomes a concern beyond that).
+- **Live countdown timer**: Each recording segment shows a progress bar and countdown timer ("X:XX restantes") that counts down based on the `started_at` ISO timestamp from the backend. Updates every second via `setInterval`.
+- **Download button**: Once a segment is `ready`, a ⬇ Descargar button appears that triggers a direct MP4 download via `/api/stream/download/{session_id}/{segment_index}`.
+- **Graceful stop**: Stop button signals a `threading.Event`; FFmpeg terminates cleanly after writing valid MP4 output.
+- **New API endpoints**: `/api/stream/start`, `/api/stream/stop/{id}`, `/api/stream/status/{id}`, `/api/stream/download/{id}/{index}`, `/api/stream/sessions`
+- **New backend files**: `backend/app/services/stream_service.py`, `backend/app/routes/stream.py`
+- **New models**: `StreamSession`, `StreamSegment`, `StreamStartRequest` added to `clip.py`
+
+### Changed
+- Removed Gemini auto-analysis from stream segments — kept as a pure recorder. User downloads and uploads manually for full control over which segments to analyze.
+
 ## [v8.0] - 2026-02-27
 
 ### Fixed

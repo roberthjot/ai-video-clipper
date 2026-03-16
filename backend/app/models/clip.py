@@ -91,6 +91,7 @@ class StreamSession(BaseModel):
     platform: str = ""        # "twitch" | "kick" | "other"
     segment_minutes: int = 10
     clips_per_segment: int = 5
+    resolution: str = "720p"
     status: str = "idle"      # starting | recording | stopping | stopped | error
     error: str = ""
     segments: list[StreamSegment] = []
@@ -102,3 +103,4 @@ class StreamStartRequest(BaseModel):
     url: str
     segment_minutes: int = 10
     clips_per_segment: int = 5
+    resolution: str = "720p"  # "480p" | "720p" | "1080p"

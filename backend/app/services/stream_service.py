@@ -58,14 +58,28 @@ def detect_platform(url: str) -> str:
 
 # ─── Resolve HLS stream URL via streamlink ────────────────────────────────────
 
-def resolve_stream_url(url: str, quality: str = "720p") -> str:
+RESOLUTION_SCALE = {
+    "480p":  "854:480",
+    "720p":  "1280:720",
+    "1080p": "1920:1080",
+}
+
+RESOLUTION_QUALITY = {
+    "480p":  ["480p", "480p60", "360p", "best"],
+    "720p":  ["720p", "720p60", "480p", "best"],
+    "1080p": ["1080p", "1080p60", "720p", "720p60", "best"],
+}
+
+
+def resolve_stream_url(url: str, resolution: str = "720p") -> str:
     """Use streamlink to get the direct HLS URL for recording."""
     session = sl.Streamlink()
     streams = session.streams(url)
     if not streams:
         raise ValueError(f"No streams found for URL: {url}")
 
-    for q in [quality, "720p60", "720p", "480p", "best"]:
+    quality_list = RESOLUTION_QUALITY.get(resolution, RESOLUTION_QUALITY["720p"])
+    for q in quality_list:
         if q in streams:
             stream = streams[q]
             if hasattr(stream, 'url'):
@@ -74,14 +88,15 @@ def resolve_stream_url(url: str, quality: str = "720p") -> str:
             fd.close()
             return stream.url
 
-    raise ValueError(f"Quality '{quality}' not available. Available: {list(streams.keys())}")
+    raise ValueError(f"Resolution '{resolution}' not available. Available: {list(streams.keys())}")
 
 
 # ─── Record one segment with FFmpeg ──────────────────────────────────────────
 
 def record_segment(hls_url: str, output_path: str, duration_seconds: int,
-                   stop_event: threading.Event) -> float:
+                   stop_event: threading.Event, resolution: str = "720p") -> float:
     """Record duration_seconds of a live stream to output_path. Returns actual seconds recorded."""
+    scale = RESOLUTION_SCALE.get(resolution, RESOLUTION_SCALE["720p"])
     cmd = [
         FFMPEG_EXE,
         "-i", hls_url,
@@ -89,7 +104,7 @@ def record_segment(hls_url: str, output_path: str, duration_seconds: int,
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",
-        "-vf", "scale=1280:720",
+        "-vf", f"scale={scale}",
         "-c:a", "aac",
         "-y",
         "-loglevel", "warning",
@@ -115,8 +130,8 @@ def _recording_loop(session: StreamSession, stop_event: threading.Event) -> None
     os.makedirs(streams_dir, exist_ok=True)
 
     try:
-        hls_url = resolve_stream_url(session.url)
-        print(f"[Stream] Resolved HLS URL for {session.url}")
+        hls_url = resolve_stream_url(session.url, session.resolution)
+        print(f"[Stream] Resolved HLS URL for {session.url} ({session.resolution})")
     except Exception as e:
         session.status = "error"
         session.error = str(e)
@@ -139,7 +154,7 @@ def _recording_loop(session: StreamSession, stop_event: threading.Event) -> None
         session.segments.append(segment)
         print(f"[Stream] Recording segment {segment_index} ({session.segment_minutes} min)...")
 
-        recorded = record_segment(hls_url, seg_path, duration_s, stop_event)
+        recorded = record_segment(hls_url, seg_path, duration_s, stop_event, session.resolution)
         segment.duration_recorded = recorded
 
         if recorded < 15:
@@ -161,7 +176,8 @@ def _recording_loop(session: StreamSession, stop_event: threading.Event) -> None
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def start_session(url: str, segment_minutes: int = 10,
-                  clips_per_segment: int = 5) -> StreamSession:
+                  clips_per_segment: int = 5,
+                  resolution: str = "720p") -> StreamSession:
     session_id = uuid.uuid4().hex[:8]
     session = StreamSession(
         session_id=session_id,
@@ -169,6 +185,7 @@ def start_session(url: str, segment_minutes: int = 10,
         platform=detect_platform(url),
         segment_minutes=segment_minutes,
         clips_per_segment=clips_per_segment,
+        resolution=resolution,
         status="starting",
         created_at=datetime.now(timezone.utc).isoformat(),
     )

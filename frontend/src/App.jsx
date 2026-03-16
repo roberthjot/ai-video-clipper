@@ -1192,6 +1192,7 @@ function SegmentTimer({ startedAt, totalMinutes }) {
 function LiveStreamStep() {
   const [url, setUrl] = useState("");
   const [segmentMinutes, setSegmentMinutes] = useState(10);
+  const [resolution, setResolution] = useState("720p");
   const [sessionId, setSessionId] = useState(null);
   const [sessionData, setSessionData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1220,7 +1221,7 @@ function LiveStreamStep() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.startStream(url.trim(), segmentMinutes, 5);
+      const res = await api.startStream(url.trim(), segmentMinutes, 5, resolution);
       setSessionId(res.session_id);
       setSessionData({ session_id: res.session_id, status: res.status, segments: [], ready_count: 0 });
     } catch (e) { setError(e.message); }
@@ -1276,18 +1277,37 @@ function LiveStreamStep() {
               <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "var(--text-muted)" }}>
                 Duración por segmento
               </label>
-              <div style={{ display: "flex", gap: 8 }}>
-                {[5, 7, 10, 15].map((m) => (
+              <div style={{ display: "flex", gap: 5 }}>
+                {[5, 7, 10, 15, 20, 30].map((m) => (
                   <button
                     key={m}
                     className={`btn ${segmentMinutes === m ? "btn-primary" : "btn-secondary"}`}
-                    style={{ flex: 1, fontSize: 13 }}
+                    style={{ flex: 1, fontSize: 12, padding: "8px 4px" }}
                     onClick={() => setSegmentMinutes(m)}
                   >{m} min</button>
                 ))}
               </div>
               <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-                5 min = clips más rápido · 10-15 min = más contexto para Gemini · Grabado en 720p
+                5 min = clips más rápido · 10-15 min = más contexto para Gemini
+              </p>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "var(--text-muted)" }}>
+                Resolución de grabación
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {["480p", "720p", "1080p"].map((r) => (
+                  <button
+                    key={r}
+                    className={`btn ${resolution === r ? "btn-primary" : "btn-secondary"}`}
+                    style={{ flex: 1, fontSize: 13 }}
+                    onClick={() => setResolution(r)}
+                  >{r}</button>
+                ))}
+              </div>
+              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+                480p = archivos pequeños · 720p = balance · 1080p = máxima calidad (requiere más espacio)
               </p>
             </div>
 

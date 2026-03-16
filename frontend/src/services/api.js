@@ -178,7 +178,7 @@ export function getInstagramPreviewUrl(projectId, clipId) {
 
 // ─── Live Stream API ──────────────────────────────────────────────────────────
 
-export async function startStream(url, segmentMinutes, clipsPerSegment) {
+export async function startStream(url, segmentMinutes, clipsPerSegment, resolution = "720p") {
     const res = await fetch(`${API_BASE}/stream/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -186,6 +186,7 @@ export async function startStream(url, segmentMinutes, clipsPerSegment) {
             url,
             segment_minutes: segmentMinutes,
             clips_per_segment: clipsPerSegment,
+            resolution,
         }),
     });
     if (!res.ok) {

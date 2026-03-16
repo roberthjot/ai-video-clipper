@@ -14,10 +14,14 @@ def start_stream(req: StreamStartRequest):
     if req.segment_minutes < 1 or req.segment_minutes > 30:
         raise HTTPException(status_code=400, detail="segment_minutes must be 1-30")
 
+    if req.resolution not in ("480p", "720p", "1080p"):
+        raise HTTPException(status_code=400, detail="resolution must be 480p, 720p, or 1080p")
+
     session = stream_service.start_session(
         url=req.url.strip(),
         segment_minutes=req.segment_minutes,
         clips_per_segment=req.clips_per_segment,
+        resolution=req.resolution,
     )
     return {"session_id": session.session_id, "status": session.status}
 

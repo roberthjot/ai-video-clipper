@@ -1,4 +1,4 @@
-# 🎬 AI Video Clipper v9.1
+# 🎬 AI Video Clipper v9.2
 
 An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos — styled like CapCut/TikTok clips with a dedicated Instagram post export mode.
 
@@ -40,6 +40,17 @@ An intelligent, full-stack web application that automatically identifies, extrac
 - **Canvas Centering**: Video frame is always centered in the full 1920px canvas; text pushes it down only if they'd overlap.
 - **IG Export**: Exports video clips in IG post format (white bg + text + centered video) as MP4 files.
 
+### 🔴 Live Stream Clipper (v9.2)
+- **Twitch & Kick support**: Paste any stream URL — resolved automatically via `streamlink`
+- **Segment recording**: Records continuous N-minute segments to disk; each segment is independently downloadable
+- **Resolution selector**: Choose **480p / 720p / 1080p** before starting; streamlink picks the matching quality
+- **Segment duration**: 5 / 7 / 10 / 15 / 20 / 30 minutes per segment
+- **Live countdown timer**: Each recording segment shows a progress bar and time remaining
+- **Download button**: Download any completed segment as MP4 directly from the browser
+- **Auto-restart loop**: As soon as one segment finishes, recording starts immediately for the next
+- **Graceful stop**: Stop button ends recording after the current segment finishes cleanly
+- **Workflow**: Record → Download segment → Upload to Video Clipper → Analyze with Gemini
+
 ### 🛡️ Anti-Detect (Export Only)
 - **Strip Metadata**: Removes all EXIF/MP4 metadata (`-map_metadata -1`)
 - **Flip Horizontal**: Mirror the video (`hflip`)
@@ -56,6 +67,7 @@ An intelligent, full-stack web application that automatically identifies, extrac
 | Backend | Python + FastAPI + Uvicorn |
 | AI Model | Google Gemini 2.5 Pro |
 | Video Processing | FFmpeg + PIL (Pillow) |
+| Stream Recording | streamlink 8.2.1 (HLS resolver) + FFmpeg |
 | Text Rendering | PIL `ImageDraw` with Calibri Bold — 100% PIL, no FFmpeg drawtext |
 | Box Rendering | PIL rounded rectangle PNGs overlaid via FFmpeg |
 
@@ -69,6 +81,7 @@ An intelligent, full-stack web application that automatically identifies, extrac
 - FFmpeg (via `imageio-ffmpeg`, auto-installed)
 - [Google AI Studio API Key](https://aistudio.google.com/)
 - Windows (font paths use `C:/Windows/Fonts/calibrib.ttf`)
+- streamlink (`pip install streamlink`) — required for Live Stream feature
 
 ### 1. Clone the Repository
 ```bash
@@ -139,24 +152,26 @@ Open `http://localhost:5173`
 ai-video-clipper/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                  # FastAPI entry point, CORS
+│   │   ├── main.py                  # FastAPI entry point, CORS, route registration
 │   │   ├── config.py                # Settings (API key, paths, Gemini model)
 │   │   ├── models/
-│   │   │   └── clip.py              # ClipData, StyleConfig Pydantic models
+│   │   │   └── clip.py              # ClipData, StyleConfig, StreamSession Pydantic models
 │   │   ├── routes/
 │   │   │   ├── clips.py             # /clips endpoints (analyze, preview, instagram-preview)
 │   │   │   ├── export.py            # /export endpoints (TikTok + Instagram render/progress)
-│   │   │   └── upload.py            # /upload endpoint
+│   │   │   ├── upload.py            # /upload endpoint
+│   │   │   └── stream.py            # /stream endpoints (start, stop, status, download, sessions)
 │   │   └── services/
 │   │       ├── gemini_service.py    # Gemini API calls + clip parsing + prompt
 │   │       ├── video_service.py     # TikTok preview, IG preview frame, PIL overlays
-│   │       └── export_service.py   # TikTok export, Instagram export, background threads
+│   │       ├── export_service.py   # TikTok export, Instagram export, background threads
+│   │       └── stream_service.py   # Live stream recording via streamlink + FFmpeg
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
-│       ├── App.jsx                  # Full React UI
+│       ├── App.jsx                  # Full React UI (Video Clipper + Live Stream modes)
 │       └── services/
-│           └── api.js               # API client (all endpoints)
+│           └── api.js               # API client (all endpoints incl. stream)
 └── README.md
 ```
 
@@ -255,10 +270,27 @@ eq=contrast=1.05:brightness=0.02:saturation=1.05  # boost_contrast
 | `GET` | `/api/export/instagram-progress/{project_id}` | Poll Instagram export progress |
 | `POST` | `/api/export/split-image/{project_id}` | Upload split-screen image |
 | `GET` | `/api/export-info/{project_id}` | Download clips_info.txt |
+| `POST` | `/api/stream/start` | Start live stream recording session |
+| `POST` | `/api/stream/stop/{session_id}` | Stop recording session |
+| `GET` | `/api/stream/status/{session_id}` | Poll session status + segments |
+| `GET` | `/api/stream/download/{session_id}/{segment_index}` | Download recorded segment as MP4 |
+| `GET` | `/api/stream/sessions` | List all stream sessions |
 
 ---
 
 ## ⚠️ Known Issues & Changelog
+
+### v9.2 — Live Stream Clipper
+| Feature | Detail |
+|---------|--------|
+| Live Stream mode | Toggle between Video Clipper and Live Stream in header |
+| Twitch & Kick support | streamlink resolves HLS URL automatically |
+| Segment recording | Continuous N-minute segments, each independently downloadable |
+| Resolution selector | 480p / 720p / 1080p — streamlink picks matching quality, FFmpeg scales to match |
+| Segment durations | 5 / 7 / 10 / 15 / 20 / 30 minutes |
+| Countdown timer | Live progress bar + "X:XX remaining" per segment using `started_at` ISO timestamp |
+| Download button | Download any ready segment as MP4 directly from the browser |
+| Graceful stop | `threading.Event` signals FFmpeg to terminate cleanly |
 
 ### v9.1 — Instagram Export
 | Change | Detail |
