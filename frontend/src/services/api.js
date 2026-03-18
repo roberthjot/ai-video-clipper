@@ -213,3 +213,46 @@ export async function listStreamSessions() {
     if (!res.ok) throw new Error("Failed to list sessions");
     return res.json();
 }
+
+// ─── Meme Generator API ───────────────────────────────────────────────────────
+
+export function processMemes(files, bgColor, onProgress) {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append("bg_color", bgColor);
+        for (const file of files) {
+            formData.append("videos", file);
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${API_BASE}/meme/process`);
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && onProgress) {
+                const pct = Math.round((e.loaded / e.total) * 100);
+                onProgress(pct);
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(JSON.parse(xhr.responseText));
+            } else {
+                reject(new Error("Upload failed"));
+            }
+        };
+
+        xhr.onerror = () => reject(new Error("Upload failed"));
+        xhr.send(formData);
+    });
+}
+
+export async function getMemeStatus(batchId) {
+    const res = await fetch(`${API_BASE}/meme/status/${batchId}`);
+    if (!res.ok) throw new Error("Failed to get meme status");
+    return res.json();
+}
+
+export function getMemeDownloadUrl(batchId, index) {
+    return `${API_BASE}/meme/download/${batchId}/${index}`;
+}

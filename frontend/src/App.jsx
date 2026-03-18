@@ -1425,10 +1425,260 @@ function LiveStreamStep() {
 }
 
 
+// ================================================
+// MEME GENERATOR
+// ================================================
+function MemeStep() {
+  const [files, setFiles] = useState([]);
+  const [bgColor, setBgColor] = useState("black");
+  const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [batchId, setBatchId] = useState(null);
+  const [batch, setBatch] = useState(null);
+  const [error, setError] = useState("");
+  const pollRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // Poll batch status
+  useEffect(() => {
+    if (!batchId) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const data = await api.getMemeStatus(batchId);
+        setBatch(data);
+        if (data.status === "completed") {
+          clearInterval(pollRef.current);
+        }
+      } catch (e) {
+        // ignore poll errors
+      }
+    }, 2000);
+    return () => clearInterval(pollRef.current);
+  }, [batchId]);
+
+  const handleFiles = (e) => {
+    const selected = Array.from(e.target.files);
+    setFiles(selected);
+    setError("");
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const dropped = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("video/"));
+    if (dropped.length) {
+      setFiles(dropped);
+      setError("");
+    }
+  };
+
+  const handleStart = async () => {
+    if (!files.length) { setError("Selecciona al menos un video"); return; }
+    setError("");
+    setUploading(true);
+    setUploadPct(0);
+    setBatch(null);
+    setBatchId(null);
+    try {
+      const result = await api.processMemes(files, bgColor, setUploadPct);
+      setBatchId(result.batch_id);
+    } catch (e) {
+      setError(e.message || "Error al subir los videos");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleReset = () => {
+    clearInterval(pollRef.current);
+    setFiles([]);
+    setBgColor("black");
+    setUploading(false);
+    setUploadPct(0);
+    setBatchId(null);
+    setBatch(null);
+    setError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const statusLabel = (item) => {
+    switch (item.status) {
+      case "pending":    return "⏳ Pendiente";
+      case "uploading":  return "⬆️ Subiendo a Gemini...";
+      case "analyzing":  return "🧠 Analizando...";
+      case "exporting":  return "🎬 Exportando...";
+      case "ready":      return "✅ Listo";
+      case "error":      return `❌ Error: ${item.error}`;
+      default:           return item.status;
+    }
+  };
+
+  const doneCount = batch ? batch.items.filter(i => i.status === "ready").length : 0;
+  const totalCount = batch ? batch.items.length : 0;
+
+  return (
+    <div style={{ maxWidth: 640, margin: "24px auto", padding: "0 16px" }}>
+      <div style={{ background: "#1a1a1a", borderRadius: 12, padding: 24, color: "#fff" }}>
+        <h2 style={{ margin: "0 0 6px", fontSize: 20 }}>😂 Meme Generator</h2>
+        <p style={{ margin: "0 0 20px", color: "#aaa", fontSize: 13 }}>
+          Sube videos cortos — Gemini genera el texto del meme y exporta el video completo con el texto encima.
+        </p>
+
+        {!batchId && (
+          <>
+            {/* Drop zone */}
+            <div
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                border: "2px dashed #444",
+                borderRadius: 10,
+                padding: "32px 16px",
+                textAlign: "center",
+                cursor: "pointer",
+                marginBottom: 16,
+                background: files.length ? "#1e2a1e" : "#111",
+                transition: "background 0.2s",
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/*"
+                multiple
+                style={{ display: "none" }}
+                onChange={handleFiles}
+              />
+              {files.length ? (
+                <div>
+                  <div style={{ fontSize: 24, marginBottom: 6 }}>🎥</div>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>{files.length} video{files.length > 1 ? "s" : ""} seleccionado{files.length > 1 ? "s" : ""}</div>
+                  <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0", fontSize: 12, color: "#aaa" }}>
+                    {files.map((f, i) => (
+                      <li key={i}>{f.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
+                  <div style={{ fontSize: 14, color: "#aaa" }}>Arrastra videos aquí o haz click para seleccionar</div>
+                  <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>Máximo ~20 videos</div>
+                </div>
+              )}
+            </div>
+
+            {/* Background color */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 13, color: "#aaa", marginBottom: 8 }}>Fondo del meme</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className={`btn ${bgColor === "black" ? "btn-primary" : "btn-secondary"}`}
+                  style={{ flex: 1 }}
+                  onClick={() => setBgColor("black")}
+                >⬛ Negro</button>
+                <button
+                  className={`btn ${bgColor === "white" ? "btn-primary" : "btn-secondary"}`}
+                  style={{ flex: 1 }}
+                  onClick={() => setBgColor("white")}
+                >⬜ Blanco</button>
+              </div>
+            </div>
+
+            {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}
+
+            {uploading ? (
+              <div>
+                <div style={{ fontSize: 13, color: "#aaa", marginBottom: 6 }}>Subiendo videos... {uploadPct}%</div>
+                <div style={{ background: "#333", borderRadius: 4, height: 8 }}>
+                  <div style={{ background: "#6366f1", borderRadius: 4, height: 8, width: `${uploadPct}%`, transition: "width 0.3s" }} />
+                </div>
+              </div>
+            ) : (
+              <button
+                className="btn btn-primary"
+                style={{ width: "100%", fontSize: 15, padding: "12px 0" }}
+                onClick={handleStart}
+                disabled={!files.length}
+              >
+                🚀 Generar Memes
+              </button>
+            )}
+          </>
+        )}
+
+        {/* Batch progress */}
+        {batchId && batch && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                {batch.status === "completed"
+                  ? `✅ Completado — ${doneCount}/${totalCount} listos`
+                  : `⏳ Procesando... ${doneCount}/${totalCount}`}
+              </div>
+              <button className="btn btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={handleReset}>
+                Nuevo batch
+              </button>
+            </div>
+
+            {/* Progress bar */}
+            {batch.status !== "completed" && (
+              <div style={{ background: "#333", borderRadius: 4, height: 6, marginBottom: 16 }}>
+                <div style={{
+                  background: "#6366f1",
+                  borderRadius: 4,
+                  height: 6,
+                  width: `${totalCount > 0 ? (doneCount / totalCount) * 100 : 0}%`,
+                  transition: "width 0.3s",
+                }} />
+              </div>
+            )}
+
+            {/* Item list */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {batch.items.map((item, i) => (
+                <div key={i} style={{
+                  background: "#111",
+                  borderRadius: 8,
+                  padding: "12px 14px",
+                  border: item.status === "ready" ? "1px solid #22c55e" : item.status === "error" ? "1px solid #ef4444" : "1px solid #333",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3, wordBreak: "break-all" }}>{item.filename}</div>
+                      <div style={{ fontSize: 12, color: "#aaa" }}>{statusLabel(item)}</div>
+                      {item.meme_text && (
+                        <div style={{ marginTop: 6, fontSize: 12, color: "#c084fc", fontStyle: "italic", lineHeight: 1.4 }}>
+                          "{item.meme_text}"
+                        </div>
+                      )}
+                    </div>
+                    {item.status === "ready" && (
+                      <a
+                        href={api.getMemeDownloadUrl(batchId, i)}
+                        download
+                        className="btn btn-primary"
+                        style={{ fontSize: 12, padding: "6px 12px", whiteSpace: "nowrap", textDecoration: "none" }}
+                      >
+                        ⬇ Descargar
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 // MAIN APP
 // ================================================
 function App() {
-  const [mode, setMode] = useState("video"); // "video" | "stream"
+  const [mode, setMode] = useState("video"); // "video" | "stream" | "meme"
   const [step, setStep] = useState(1);
   const [projectId, setProjectId] = useState(null);
   const [clips, setClips] = useState([]);
@@ -1472,7 +1722,7 @@ function App() {
 
       <main className="app-main">
         {/* Mode toggle */}
-        <div style={{ display: "flex", gap: 8, padding: "12px 16px 0", justifyContent: "center" }}>
+        <div style={{ display: "flex", gap: 8, padding: "12px 16px 0", justifyContent: "center", flexWrap: "wrap" }}>
           <button
             className={`btn ${mode === "video" ? "btn-primary" : "btn-secondary"}`}
             style={{ minWidth: 140 }}
@@ -1483,9 +1733,15 @@ function App() {
             style={{ minWidth: 140 }}
             onClick={() => setMode("stream")}
           >🔴 Live Stream</button>
+          <button
+            className={`btn ${mode === "meme" ? "btn-primary" : "btn-secondary"}`}
+            style={{ minWidth: 140 }}
+            onClick={() => setMode("meme")}
+          >😂 Meme Generator</button>
         </div>
 
         {mode === "stream" && <LiveStreamStep />}
+        {mode === "meme" && <MemeStep />}
 
         {mode === "video" && <>
           <div className="steps-bar">

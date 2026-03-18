@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v9.5] - 2026-03-18
+
+### Added
+- **Meme Generator mode**: Third mode button (😂 Meme Generator) in the header, completely independent from Video Clipper and Live Stream.
+- **Multi-video upload**: Drag-and-drop or file picker supports up to ~20 short videos at once.
+- **Gemini meme text generation**: For each video, Gemini watches the full video and generates the funniest, most relatable English meme text (max 3 short lines, no hashtags, no emojis, punchy and shareable).
+- **Background color selector**: Choose black or white background for the meme canvas.
+- **Full-video meme export**: Each video is exported as-is (no cuts, no timestamps) overlaid on a 1080×1920 canvas (same format as IG). Meme text in Calibri Bold 80px appears at the top; the full video is centered below in a fixed zone (same dimensions as IG export).
+- **Batch processing**: Videos are processed sequentially in a background thread — each goes through upload → Gemini analysis → text generation → FFmpeg export. Status updates every 2 seconds in the UI.
+- **Per-item download**: Each finished meme video shows its generated text and a ⬇ Descargar button for direct download.
+- **New backend files**: `backend/app/services/meme_service.py`, `backend/app/routes/meme.py`
+- **New API endpoints**: `POST /api/meme/process`, `GET /api/meme/status/{batch_id}`, `GET /api/meme/download/{batch_id}/{index}`
+
 ## [v9.4] - 2026-03-18
 
 ### Added
