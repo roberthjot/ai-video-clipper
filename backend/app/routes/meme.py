@@ -11,6 +11,8 @@ router = APIRouter()
 @router.post("/process")
 async def process_memes(
     bg_color: str = Form("black"),
+    text_y: float = Form(0.08),
+    video_scale: float = Form(0.9),
     videos: list[UploadFile] = File(...),
 ):
     """Upload multiple videos and start meme batch processing."""
@@ -29,7 +31,8 @@ async def process_memes(
         video_paths.append(saved_path)
         filenames.append(video.filename)
 
-    batch_id = start_meme_batch(video_paths, filenames, bg_color)
+    batch_id = start_meme_batch(video_paths, filenames, bg_color,
+                                 text_y=text_y, video_scale=video_scale)
     return {"batch_id": batch_id, "count": len(video_paths)}
 
 

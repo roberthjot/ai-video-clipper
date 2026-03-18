@@ -1431,6 +1431,8 @@ function LiveStreamStep() {
 function MemeStep() {
   const [files, setFiles] = useState([]);
   const [bgColor, setBgColor] = useState("black");
+  const [textY, setTextY] = useState(0.08);
+  const [videoScale, setVideoScale] = useState(0.9);
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [batchId, setBatchId] = useState(null);
@@ -1479,7 +1481,7 @@ function MemeStep() {
     setBatch(null);
     setBatchId(null);
     try {
-      const result = await api.processMemes(files, bgColor, setUploadPct);
+      const result = await api.processMemes(files, bgColor, textY, videoScale, setUploadPct);
       setBatchId(result.batch_id);
     } catch (e) {
       setError(e.message || "Error al subir los videos");
@@ -1492,6 +1494,8 @@ function MemeStep() {
     clearInterval(pollRef.current);
     setFiles([]);
     setBgColor("black");
+    setTextY(0.08);
+    setVideoScale(0.9);
     setUploading(false);
     setUploadPct(0);
     setBatchId(null);
@@ -1583,6 +1587,36 @@ function MemeStep() {
                   onClick={() => setBgColor("white")}
                 >⬜ Blanco</button>
               </div>
+            </div>
+
+            {/* Text position slider */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#aaa", marginBottom: 6 }}>
+                <span>Posición del texto</span>
+                <span style={{ color: "#fff" }}>
+                  {textY <= 0.12 ? "⬆ Arriba" : textY <= 0.28 ? "↕ Centro" : "⬇ Abajo"}
+                </span>
+              </div>
+              <input
+                type="range" min="0.02" max="0.45" step="0.01"
+                value={textY}
+                onChange={(e) => setTextY(parseFloat(e.target.value))}
+                style={{ width: "100%" }}
+              />
+            </div>
+
+            {/* Video size slider */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#aaa", marginBottom: 6 }}>
+                <span>Tamaño del video</span>
+                <span style={{ color: "#fff" }}>{Math.round(videoScale * 100)}%</span>
+              </div>
+              <input
+                type="range" min="0.4" max="1.0" step="0.05"
+                value={videoScale}
+                onChange={(e) => setVideoScale(parseFloat(e.target.value))}
+                style={{ width: "100%" }}
+              />
             </div>
 
             {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}

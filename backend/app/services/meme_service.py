@@ -63,8 +63,8 @@ def _wrap_text(text: str, max_chars: int = 26) -> list:
     return result[:4]  # max 4 lines
 
 
-def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int = 1920) -> tuple:
-    """Create meme background PNG: solid color + meme text at top.
+def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int = 1920, text_y_ratio: float = 0.08) -> tuple:
+    """Create meme background PNG: solid color + meme text at given Y ratio.
     Returns (png_path, text_bottom_y)."""
     bg_rgb = (0, 0, 0) if bg_color == "black" else (255, 255, 255)
     text_rgb = (255, 255, 255) if bg_color == "black" else (20, 20, 20)
@@ -78,12 +78,11 @@ def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int
 
     lines = _wrap_text(text, max_chars=26)
     line_h = int(font_size * 1.35)
-    top_padding = 130
 
     img = Image.new("RGB", (W, H), bg_rgb)
     draw = ImageDraw.Draw(img)
 
-    y = top_padding
+    y = int(H * text_y_ratio)
     for line in lines:
         try:
             tw = int(font.getlength(line))
@@ -100,25 +99,20 @@ def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int
     return png_path, y  # y = bottom of last text line
 
 
-def export_meme_video(video_path: str, meme_text: str, output_path: str, bg_color: str = "black") -> None:
+def export_meme_video(video_path: str, meme_text: str, output_path: str,
+                      bg_color: str = "black", text_y: float = 0.08, video_scale: float = 0.9) -> None:
     """Export full video (no cuts) overlaid on meme background."""
     W, H = 1080, 1920
-    bottom_pad = 80
 
-    bg_png, _text_bottom = create_meme_bg_png(meme_text, bg_color, W, H)
+    bg_png, _text_bottom = create_meme_bg_png(meme_text, bg_color, W, H, text_y_ratio=text_y)
 
-    # Fixed video zone: same as IG (top=740, height=1100)
-    video_top = 740
-    fg_filter = f"scale={W}:-2"
-
-    # No-comma arithmetic for overlay_y — same pattern as IG export
-    inner = f"({video_top}+(H-h)/2+abs({video_top}-(H-h)/2))/2"
-    cb = H - bottom_pad
-    overlay_y = f"(({inner})+({cb}-h)-abs(({inner})-({cb}-h)))/2"
+    # Scale video to video_scale% of canvas width, center in canvas
+    scale_w = int(W * video_scale)
+    fg_filter = f"scale={scale_w}:-2"
 
     filter_complex = (
         f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
-        f"[1:v][fg]overlay=(W-w)/2:{overlay_y}[out]"
+        f"[1:v][fg]overlay=(W-w)/2:(H-h)/2[out]"
     )
 
     cmd = [
@@ -145,7 +139,7 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str, bg_colo
         raise RuntimeError(f"FFmpeg failed: {result.stderr[-600:]}")
 
 
-def _process_batch(batch_id: str, video_paths: list, bg_color: str) -> None:
+def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float) -> None:
     """Background thread: process each video in the batch sequentially."""
     batch = meme_batches[batch_id]
     os.makedirs(MEME_OUTPUT_DIR, exist_ok=True)
@@ -172,7 +166,7 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str) -> None:
             item["status"] = "exporting"
             output_filename = f"meme_{batch_id}_{i}.mp4"
             output_path = os.path.join(MEME_OUTPUT_DIR, output_filename)
-            export_meme_video(video_path, meme_text, output_path, bg_color)
+            export_meme_video(video_path, meme_text, output_path, bg_color, text_y=text_y, video_scale=video_scale)
 
             item["output_path"] = output_path
             item["status"] = "ready"
@@ -187,7 +181,8 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str) -> None:
     print(f"[Meme] Batch {batch_id} all done")
 
 
-def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black") -> str:
+def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black",
+                     text_y: float = 0.08, video_scale: float = 0.9) -> str:
     """Start a meme batch. Returns batch_id."""
     batch_id = uuid.uuid4().hex[:12]
     meme_batches[batch_id] = {
@@ -208,7 +203,7 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
     }
     threading.Thread(
         target=_process_batch,
-        args=(batch_id, video_paths, bg_color),
+        args=(batch_id, video_paths, bg_color, text_y, video_scale),
         daemon=True,
     ).start()
     return batch_id
