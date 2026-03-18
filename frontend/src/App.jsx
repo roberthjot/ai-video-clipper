@@ -471,19 +471,6 @@ function EditorStep({ projectId, clips, onExportDone }) {
     setLoadingPreview(false);
   };
 
-  const handlePlayTikTok = async () => {
-    if (!selectedClip) return;
-    setLoadingVideo(true);
-    setPreviewUrl(null);
-    try {
-      await api.updateStyle(projectId, style);
-      setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
-    } catch (err) {
-      alert("Failed to generate TikTok preview: " + err.message);
-      setLoadingVideo(false);
-    }
-  };
-
   // Auto-refresh preview when style changes
   useEffect(() => {
     if (!selectedClip) return;
@@ -841,19 +828,6 @@ function EditorStep({ projectId, clips, onExportDone }) {
               </button>
               <button
                 className="btn"
-                onClick={handlePlayTikTok}
-                disabled={loadingVideo}
-                style={{
-                  fontSize: 12,
-                  background: "linear-gradient(135deg, #010101 0%, #69C9D0 50%, #EE1D52 100%)",
-                  color: "#fff",
-                  border: "none",
-                }}
-              >
-                {loadingVideo ? "⏳" : "🎵 TikTok"}
-              </button>
-              <button
-                className="btn"
                 onClick={handlePlayInstagram}
                 disabled={loadingPreview}
                 style={{
@@ -872,29 +846,17 @@ function EditorStep({ projectId, clips, onExportDone }) {
           <div className="control-section">
             <h3>🎬 Video Format</h3>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                className={`btn ${style.fill_mode === "fit" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setStyle((s) => ({ ...s, fill_mode: "fit" }))}>
-                Fit
-              </button>
-              <button
-                className={`btn ${style.fill_mode === "zoom" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setStyle((s) => ({ ...s, fill_mode: "zoom" }))}>
-                Zoom
-              </button>
-              <button
-                className={`btn ${style.fill_mode === "fill" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setStyle((s) => ({ ...s, fill_mode: "fill" }))}>
-                Fill
-              </button>
-              <button
-                className={`btn ${style.fill_mode === "small" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setStyle((s) => ({ ...s, fill_mode: "small" }))}>
-                Small
-              </button>
+              {["fit", "medium", "zoom", "fill", "small"].map((m) => (
+                <button
+                  key={m}
+                  className={`btn ${style.fill_mode === m ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => setStyle((s) => ({ ...s, fill_mode: m }))}>
+                  {m.charAt(0).toUpperCase() + m.slice(1)}
+                </button>
+              ))}
             </div>
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-              Fit = full · Zoom = grande · Fill = frame completo · Small = reducido
+              Fit = full · Medium = un poco más chico · Zoom = grande · Fill = frame completo · Small = reducido
             </p>
           </div>
 

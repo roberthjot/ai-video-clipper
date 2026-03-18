@@ -179,6 +179,8 @@ def generate_instagram_preview_clip(
         fg_filter = f"scale=-2:{int(video_h * 0.9)}"
     elif fill_mode == "small":
         fg_filter = f"scale=-2:{int(video_h * 0.78)}"
+    elif fill_mode == "medium":
+        fg_filter = f"scale=-2:{int(video_h * 0.65)}"
     else:  # fit
         fg_filter = f"scale={W}:{video_h}:force_original_aspect_ratio=decrease"
 

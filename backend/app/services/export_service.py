@@ -56,6 +56,8 @@ def export_clip_with_style(
         fg_filter = f"scale=-2:{int(target_h * 0.9)}"
     elif style.fill_mode == "small":
         fg_filter = f"scale=-2:{int(target_h * 0.78)}"
+    elif style.fill_mode == "medium":
+        fg_filter = f"scale=-2:{int(target_h * 0.65)}"
     else:
         fg_filter = f"scale={W}:-2"
 
