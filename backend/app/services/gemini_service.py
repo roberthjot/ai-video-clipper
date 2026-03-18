@@ -181,10 +181,12 @@ def analyze_video(
 
     print(f"[Gemini] min_duration={min_duration}, clips from Gemini: {len(clips_raw)}")
 
-    def build_clips(clips_raw, video_duration, min_duration):
+    def build_clips(clips_raw, video_duration, min_duration, existing_starts: list = []):
         clips = []
         skipped = 0
-        last_accepted_start = -9999.0  # For deduplication
+        # Seed deduplication with already-accepted starts so the retry pass
+        # doesn't re-accept timestamps that were already taken in the first pass.
+        accepted_starts = sorted(existing_starts)
 
         # Sort by start_time so deduplication is consistent
         sorted_raw = sorted(clips_raw, key=lambda c: float(c.get("start_time", 0)))
@@ -216,13 +218,15 @@ def analyze_video(
                     skipped += 1
                     continue
 
-            # Deduplication: skip if too close to the last accepted clip
-            if start - last_accepted_start < min_duration:
-                print(f"[Gemini] Clip {i+1}: SKIPPED (duplicate) — starts {start:.1f}s, last accepted at {last_accepted_start:.1f}s (gap < {min_duration}s)")
+            # Deduplication: skip if too close to ANY already-accepted start
+            too_close = any(abs(start - s) < min_duration for s in accepted_starts)
+            if too_close:
+                nearest = min(accepted_starts, key=lambda s: abs(start - s))
+                print(f"[Gemini] Clip {i+1}: SKIPPED (duplicate) — starts {start:.1f}s, too close to accepted {nearest:.1f}s (gap < {min_duration}s)")
                 skipped += 1
                 continue
 
-            last_accepted_start = start
+            accepted_starts.append(start)
             print(f"[Gemini] Clip {i+1}: {start:.1f}-{end:.1f} ({original_duration:.1f}s raw -> {end-start:.1f}s enforced)")
 
             caption = clip.get("viral_caption", "")
@@ -287,7 +291,8 @@ def analyze_video(
                 retry_text = retry_text[:-3]
             retry_text = re.sub(r"\b0+(\d)", r"\1", retry_text)
             retry_raw = json.loads(retry_text)
-            retry_clips, _ = build_clips(retry_raw, video_duration, min_duration)
+            retry_clips, _ = build_clips(retry_raw, video_duration, min_duration,
+                                          existing_starts=[c.start_time for c in clips])
             # Renumber and append
             for c in retry_clips:
                 c.id = len(clips) + 1

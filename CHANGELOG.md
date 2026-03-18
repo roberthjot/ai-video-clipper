@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v9.3] - 2026-03-18
+
+### Fixed
+- **Duplicate clips from Gemini retry**: `build_clips()` now accepts an `existing_starts` parameter. When the retry call runs (to fill skipped/invalid clips), it passes the already-accepted start times from the first pass. Deduplication now checks against ALL accepted starts (`any(abs(start - s) < min_duration ...)`), not just the last one in sequence. This prevented cases like Clip 2 (1:47) and Clip 22 (1:47) — identical timestamps that slipped through because the retry started with a fresh `last_accepted_start = -9999`.
+
 ## [v9.2] - 2026-03-15
 
 ### Added
