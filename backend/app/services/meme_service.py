@@ -104,15 +104,26 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
     """Export full video (no cuts) overlaid on meme background."""
     W, H = 1080, 1920
 
-    bg_png, _text_bottom = create_meme_bg_png(meme_text, bg_color, W, H, text_y_ratio=text_y)
+    bg_png, text_bottom_y = create_meme_bg_png(meme_text, bg_color, W, H, text_y_ratio=text_y)
 
-    # Scale video to video_scale% of canvas width, center in canvas
+    # Video zone: from text_bottom + padding to canvas bottom - padding
+    # Video is centered both horizontally and vertically within that zone
+    text_padding = 60
+    bottom_padding = 80
+    video_zone_top = text_bottom_y + text_padding
+    video_zone_h = H - video_zone_top - bottom_padding
+
+    # Scale video to video_scale% of canvas width (maintain aspect ratio)
     scale_w = int(W * video_scale)
     fg_filter = f"scale={scale_w}:-2"
 
+    # Center video horizontally, and vertically within the zone below the text
+    overlay_x = "(W-w)/2"
+    overlay_y = f"{video_zone_top}+({video_zone_h}-h)/2"
+
     filter_complex = (
         f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
-        f"[1:v][fg]overlay=(W-w)/2:(H-h)/2[out]"
+        f"[1:v][fg]overlay={overlay_x}:{overlay_y}[out]"
     )
 
     cmd = [
