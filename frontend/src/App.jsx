@@ -1664,6 +1664,21 @@ function MemeStep() {
                       </a>
                     )}
                   </div>
+                  {item.status === "ready" && (
+                    <div style={{ marginTop: 10 }}>
+                      <video
+                        src={api.getMemeDownloadUrl(batchId, i)}
+                        controls
+                        style={{
+                          width: "100%",
+                          maxHeight: 320,
+                          borderRadius: 6,
+                          background: "#000",
+                          display: "block",
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
