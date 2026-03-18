@@ -79,15 +79,14 @@ def export_clip_with_style(
     # Caption overlay — Y relative to video portion in split mode
     if clip.viral_caption:
         lines = video_service.split_text_into_lines(clip.viral_caption, max_chars=25)
-        font_size_actual = 72
         pad_x, pad_y = 12, 8
         line_gap = 5
         base_y = int(style.text_y * target_h)
 
         rounded_box_path, box_w, box_h = video_service.create_caption_overlay(
-            lines, font_size=font_size_actual, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
+            lines, font_size=style.font_size, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
         )
-        box_x = (W - box_w) // 2
+        box_x = max(0, min(W - box_w, int(style.text_x * W) - box_w // 2))
         box_y = base_y - pad_y
 
         filter_complex += f";[{current_label}][{input_index}:v]overlay={box_x}:{box_y}[boxed]"

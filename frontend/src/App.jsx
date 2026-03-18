@@ -983,7 +983,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
             <h3>📝 Text Overlay</h3>
             <div className="slider-group">
               <label>
-                Caption Position
+                Posición vertical
                 <span>
                   {style.text_y <= 0.25 ? "⬆ Top" : style.text_y >= 0.65 ? "⬇ Bottom" : "↕ Middle"} · {Math.round(style.text_y * 100)}%
                 </span>
@@ -992,6 +992,19 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 type="range" min={5} max={95}
                 value={Math.round(style.text_y * 100)}
                 onChange={(e) => setStyle((s) => ({ ...s, text_y: parseInt(e.target.value) / 100 }))}
+              />
+            </div>
+            <div className="slider-group">
+              <label>
+                Posición horizontal
+                <span>
+                  {style.text_x <= 0.2 ? "← Izquierda" : style.text_x >= 0.8 ? "→ Derecha" : "↔ Centro"} · {Math.round(style.text_x * 100)}%
+                </span>
+              </label>
+              <input
+                type="range" min={5} max={95}
+                value={Math.round(style.text_x * 100)}
+                onChange={(e) => setStyle((s) => ({ ...s, text_x: parseInt(e.target.value) / 100 }))}
               />
             </div>
             <div className="slider-group">
