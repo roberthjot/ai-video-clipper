@@ -413,7 +413,7 @@ def generate_preview_frame(
     elif fill_mode == "small":
         fg_filter = f"scale=-2:{int(target_h * 0.78)}"
     elif fill_mode == "medium":
-        fg_filter = f"scale=-2:{int(target_h * 0.84)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.65)}"
     else:
         fg_filter = f"scale={W}:-2"
 
@@ -559,7 +559,7 @@ def generate_preview_clip(
     elif fill_mode == "small":
         fg_filter = f"scale=-2:{int(target_h * 0.78)}"
     elif fill_mode == "medium":
-        fg_filter = f"scale=-2:{int(target_h * 0.84)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.65)}"
     else:
         fg_filter = f"scale={W}:-2"
 
