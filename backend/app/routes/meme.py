@@ -14,6 +14,7 @@ async def process_memes(
     text_y: float = Form(0.08),
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
+    font_size: int = Form(80),
     videos: list[UploadFile] = File(...),
 ):
     """Upload multiple videos and start meme batch processing."""
@@ -33,7 +34,8 @@ async def process_memes(
         filenames.append(video.filename)
 
     batch_id = start_meme_batch(video_paths, filenames, bg_color,
-                                 text_y=text_y, video_scale=video_scale, video_y=video_y)
+                                 text_y=text_y, video_scale=video_scale, video_y=video_y,
+                                 font_size=font_size)
     return {"batch_id": batch_id, "count": len(video_paths)}
 
 
@@ -53,6 +55,7 @@ async def reexport_meme(
     text_y: float = Form(0.08),
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
+    font_size: int = Form(80),
 ):
     """Re-export a meme with updated text_y / video_scale (no Gemini call)."""
     from ..services.meme_service import export_meme_video
@@ -74,6 +77,7 @@ async def reexport_meme(
         export_meme_video(
             video_path, item["meme_text"], item["output_path"],
             batch["bg_color"], text_y=text_y, video_scale=video_scale, video_y=video_y,
+            font_size=font_size,
         )
         item["status"] = "ready"
     except Exception as e:

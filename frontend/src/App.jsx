@@ -1432,13 +1432,14 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
   const [textY, setTextY] = useState(0.08);
   const [videoY, setVideoY] = useState(0.6);
   const [videoScale, setVideoScale] = useState(0.9);
+  const [fontSize, setFontSize] = useState(80);
   const [reexporting, setReexporting] = useState(false);
   const [bust, setBust] = useState(null); // cache-buster for video src
 
   const handleReexport = async () => {
     setReexporting(true);
     try {
-      await api.reexportMeme(batchId, index, textY, videoScale, videoY);
+      await api.reexportMeme(batchId, index, textY, videoScale, videoY, fontSize);
       setBust(Date.now());
     } catch (e) {
       // ignore
@@ -1514,6 +1515,15 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
               </div>
               <input type="range" min="0.4" max="1.0" step="0.05"
                 value={videoScale} onChange={(e) => setVideoScale(parseFloat(e.target.value))}
+                style={{ width: "100%" }} />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 4 }}>
+                <span>Tamaño de letra</span>
+                <span style={{ color: "#fff" }}>{fontSize}px</span>
+              </div>
+              <input type="range" min="40" max="140" step="5"
+                value={fontSize} onChange={(e) => setFontSize(parseInt(e.target.value))}
                 style={{ width: "100%" }} />
             </div>
             <button

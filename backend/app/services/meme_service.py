@@ -63,20 +63,22 @@ def _wrap_text(text: str, max_chars: int = 26) -> list:
     return result[:4]  # max 4 lines
 
 
-def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int = 1920, text_y_ratio: float = 0.08) -> tuple:
+def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int = 1920,
+                        text_y_ratio: float = 0.08, font_size: int = 80) -> tuple:
     """Create meme background PNG: solid color + meme text at given Y ratio.
     Returns (png_path, text_bottom_y)."""
     bg_rgb = (0, 0, 0) if bg_color == "black" else (255, 255, 255)
     text_rgb = (255, 255, 255) if bg_color == "black" else (20, 20, 20)
 
     font_path = "C:/Windows/Fonts/calibrib.ttf"
-    font_size = 80
     try:
         font = ImageFont.truetype(font_path, font_size)
     except Exception:
         font = ImageFont.load_default()
 
-    lines = _wrap_text(text, max_chars=26)
+    # Fewer chars per line for bigger fonts
+    max_chars = max(10, int(26 * 80 / font_size))
+    lines = _wrap_text(text, max_chars=max_chars)
     line_h = int(font_size * 1.35)
 
     img = Image.new("RGB", (W, H), bg_rgb)
@@ -101,11 +103,13 @@ def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int
 
 def export_meme_video(video_path: str, meme_text: str, output_path: str,
                       bg_color: str = "black", text_y: float = 0.08,
-                      video_scale: float = 0.9, video_y: float = 0.6) -> None:
+                      video_scale: float = 0.9, video_y: float = 0.6,
+                      font_size: int = 80) -> None:
     """Export full video (no cuts) overlaid on meme background."""
     W, H = 1080, 1920
 
-    bg_png, _text_bottom = create_meme_bg_png(meme_text, bg_color, W, H, text_y_ratio=text_y)
+    bg_png, _text_bottom = create_meme_bg_png(meme_text, bg_color, W, H,
+                                               text_y_ratio=text_y, font_size=font_size)
 
     # Scale video to video_scale% of canvas width (maintain aspect ratio)
     scale_w = int(W * video_scale)
@@ -145,7 +149,7 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
         raise RuntimeError(f"FFmpeg failed: {result.stderr[-600:]}")
 
 
-def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float) -> None:
+def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 80) -> None:
     """Background thread: process each video in the batch sequentially."""
     batch = meme_batches[batch_id]
     os.makedirs(MEME_OUTPUT_DIR, exist_ok=True)
@@ -172,7 +176,7 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             item["status"] = "exporting"
             output_filename = f"meme_{batch_id}_{i}.mp4"
             output_path = os.path.join(MEME_OUTPUT_DIR, output_filename)
-            export_meme_video(video_path, meme_text, output_path, bg_color, text_y=text_y, video_scale=video_scale, video_y=0.6)
+            export_meme_video(video_path, meme_text, output_path, bg_color, text_y=text_y, video_scale=video_scale, video_y=video_y, font_size=font_size)
 
             item["video_path"] = video_path
             item["output_path"] = output_path
@@ -189,7 +193,8 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
 
 
 def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black",
-                     text_y: float = 0.08, video_scale: float = 0.9, video_y: float = 0.6) -> str:
+                     text_y: float = 0.08, video_scale: float = 0.9, video_y: float = 0.6,
+                     font_size: int = 80) -> str:
     """Start a meme batch. Returns batch_id."""
     batch_id = uuid.uuid4().hex[:12]
     meme_batches[batch_id] = {
@@ -210,7 +215,7 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
     }
     threading.Thread(
         target=_process_batch,
-        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y),
+        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size),
         daemon=True,
     ).start()
     return batch_id
