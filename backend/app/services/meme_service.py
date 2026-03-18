@@ -32,16 +32,20 @@ def generate_meme_text(file_obj) -> str:
             types.Part.from_text(text=(
                 "Watch this short video carefully. "
                 "Write the funniest, most relatable meme caption for it. "
-                "Rules: English only. Maximum 3 short lines. "
+                "Rules: English only. Maximum 12 words total across all lines. "
                 "No hashtags. No emojis. No punctuation except apostrophes. "
-                "Each line should be short — no more than 8 words per line. "
+                "Split into 2-3 short lines. "
                 "Make it punchy, funny, and instantly shareable. "
                 "Return ONLY the meme text — nothing else, no explanations, no labels, no extra words."
             )),
         ])],
         config=types.GenerateContentConfig(temperature=1.0),
     )
-    return response.text.strip()
+    raw = response.text.strip()
+    # Lowercase everything, capitalize only the very first letter
+    raw = raw.lower()
+    raw = raw[:1].upper() + raw[1:] if raw else raw
+    return raw
 
 
 def _wrap_text_px(text: str, font, max_width: int) -> list:
