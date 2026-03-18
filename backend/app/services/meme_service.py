@@ -44,16 +44,21 @@ def generate_meme_text(file_obj) -> str:
     return response.text.strip()
 
 
-def _wrap_text(text: str, max_chars: int = 26) -> list:
-    """Wrap text into lines of max_chars."""
+def _wrap_text_px(text: str, font, max_width: int) -> list:
+    """Wrap text to fit within max_width pixels using real font measurement."""
     lines_raw = text.replace('\\n', '\n').split('\n')
     result = []
     for line in lines_raw:
         words = line.split()
         cur = ""
         for w in words:
-            if len(cur) + len(w) + (1 if cur else 0) <= max_chars:
-                cur = (cur + " " + w).strip() if cur else w
+            test = (cur + " " + w).strip() if cur else w
+            try:
+                tw = int(font.getlength(test))
+            except Exception:
+                tw = len(test) * int(font.size * 0.6)
+            if tw <= max_width:
+                cur = test
             else:
                 if cur:
                     result.append(cur)
@@ -76,15 +81,16 @@ def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int
     except Exception:
         font = ImageFont.load_default()
 
-    # Fewer chars per line for bigger fonts
-    max_chars = max(10, int(26 * 80 / font_size))
-    lines = _wrap_text(text, max_chars=max_chars)
     line_h = int(font_size * 1.35)
 
     img = Image.new("RGB", (W, H), bg_rgb)
     draw = ImageDraw.Draw(img)
 
     x_start = int(W * text_x_ratio)
+    right_margin = int(W * 0.05)  # 5% padding from right edge
+    available_width = W - x_start - right_margin
+    lines = _wrap_text_px(text, font, max(available_width, 200))
+
     y = int(H * text_y_ratio)
     for line in lines:
         draw.text((x_start, y), line, font=font, fill=text_rgb)
