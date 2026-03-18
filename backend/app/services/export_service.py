@@ -121,12 +121,9 @@ def export_clip_with_style(
 
     filter_complex += f";[{current_label}]format=yuv420p[out]"
 
-    buffer = min(4.0, clip.start_time)
-    fast_seek = clip.start_time - buffer
     cmd = [
         FFMPEG_EXE,
-        "-ss", str(fast_seek), "-i", video_path,
-        "-ss", str(buffer), "-t", str(duration),
+        "-ss", str(clip.start_time), "-to", str(clip.end_time), "-i", video_path,
     ]
 
     if use_split:
@@ -319,10 +316,7 @@ def export_instagram_clip(
 
     filter_complex += f";[{current_label}]format=yuv420p[out]"
 
-    buffer = min(4.0, clip.start_time)
-    fast_seek = clip.start_time - buffer
-    cmd = [FFMPEG_EXE, "-ss", str(fast_seek), "-i", video_path,
-           "-ss", str(buffer), "-t", str(duration)]
+    cmd = [FFMPEG_EXE, "-ss", str(clip.start_time), "-to", str(clip.end_time), "-i", video_path]
     cmd.extend(["-loop", "1", "-t", str(duration), "-i", frame_png])
 
     if has_watermark:
