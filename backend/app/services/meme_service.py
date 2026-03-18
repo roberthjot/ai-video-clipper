@@ -122,8 +122,9 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
     overlay_y = f"{video_zone_top}+({video_zone_h}-h)/2"
 
     filter_complex = (
+        f"[1:v]scale={W}:{H},setsar=1[bg];"
         f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
-        f"[1:v][fg]overlay={overlay_x}:{overlay_y}[out]"
+        f"[bg][fg]overlay={overlay_x}:{overlay_y}[out]"
     )
 
     cmd = [
