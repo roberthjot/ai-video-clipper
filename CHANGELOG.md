@@ -2,18 +2,54 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v9.6] - 2026-03-18
+
+### Added
+- **Medium fill mode for Video Format (TikTok)**: New `Medium` button in Video Format alongside Fit · Zoom · Fill · Small. Uses the same 65% scale as IG Medium (`scale=-2:{int(H*0.65)}`). Added to `generate_preview_frame`, `generate_preview_clip`, and `export_service.py`.
+- **Text X position slider in clip editor**: Move caption text left/right (0%–100% of canvas width). Default 50% (centered). Applied across preview frame, preview clip, and export.
+- **Font size slider in clip editor**: Adjust caption font size from 30px to 120px (default 72px). Applied across all preview and export functions.
+
+### Fixed
+- **Medium fill_mode was ignored in TikTok preview**: `medium` fell into the `else` case in `generate_preview_clip` and `generate_preview_frame`, behaving identically to `fit`. Now correctly applies `scale=-2:{int(target_h*0.65)}`.
+- **Removed TikTok preview button**: Reverted accidental addition of a 🎵 TikTok preview button that was not requested.
+
+---
+
+## [v9.5.1] - 2026-03-18
+
+### Added (Meme Generator improvements)
+- **Font size slider** per meme card: Adjust from 40px to 180px (default 80px). Changing font size resets the video offset to 0 (auto-position).
+- **Text X slider**: Move meme text left/right (0%–90% of canvas). Default 5% (left-aligned). Pixel-width-based wrapping recalculates automatically based on available width from X position to right edge.
+- **Text Y slider**: Move meme text up/down (0%–70% of canvas). Default 5%.
+- **Video offset slider**: Fine-tune video vertical position ±400px from the auto-calculated center. Resets to 0 when font size or text Y changes.
+- **Video scale slider**: Adjust video width from 40% to 100% of canvas (default 90%).
+- **Re-export button per card**: After generating, each meme shows sliders. "Re-exportar con estos ajustes" re-runs only FFmpeg (no Gemini call) with the new settings. Cache-busting `?t=` param refreshes the video preview.
+- **Sentence case formatting**: Gemini meme text is now formatted with only the first letter capitalized, rest lowercase. Applied in the backend after Gemini response.
+- **Max 12 words**: Meme text capped at 12 words total (down from 24). Truncated after generation.
+- **Left-aligned text default**: Text defaults to left-aligned starting from `text_x * W`. Lines wrap pixel-by-pixel to stay within the canvas right edge.
+- **Re-export endpoint**: `POST /api/meme/reexport/{batch_id}/{index}` — re-runs export with new `text_y`, `video_y`, `text_x`, `font_size`, `video_scale` params (no Gemini).
+
+### Fixed
+- **Meme video not centered**: Video was centered in full 1920px canvas regardless of text height. Fixed to center in the zone below the text (from `text_bottom_y + padding` to canvas bottom).
+- **Background forced to 1080×1920**: Added explicit `scale=1080:1920,setsar=1[bg]` step in FFmpeg filter to prevent output inheriting video source dimensions.
+- **Text overflow when X > 0**: `_wrap_text(max_chars=26)` didn't account for reduced width when text starts mid-canvas. Replaced with `_wrap_text_px(font, max_width)` that measures actual pixel width per line.
+
+---
+
 ## [v9.5] - 2026-03-18
 
 ### Added
 - **Meme Generator mode**: Third mode button (😂 Meme Generator) in the header, completely independent from Video Clipper and Live Stream.
 - **Multi-video upload**: Drag-and-drop or file picker supports up to ~20 short videos at once.
-- **Gemini meme text generation**: For each video, Gemini watches the full video and generates the funniest, most relatable English meme text (max 3 short lines, no hashtags, no emojis, punchy and shareable).
+- **Gemini meme text generation**: For each video, Gemini watches the full video and generates the funniest, most relatable English meme text (max 3 short lines, no hashtags, no emojis, punchy and shareable). `temperature=1.0` for creativity.
 - **Background color selector**: Choose black or white background for the meme canvas.
-- **Full-video meme export**: Each video is exported as-is (no cuts, no timestamps) overlaid on a 1080×1920 canvas (same format as IG). Meme text in Calibri Bold 80px appears at the top; the full video is centered below in a fixed zone (same dimensions as IG export).
-- **Batch processing**: Videos are processed sequentially in a background thread — each goes through upload → Gemini analysis → text generation → FFmpeg export. Status updates every 2 seconds in the UI.
-- **Per-item download**: Each finished meme video shows its generated text and a ⬇ Descargar button for direct download.
+- **Full-video meme export**: Each video is exported as-is (no cuts, no timestamps) overlaid on a 1080×1920 canvas. Meme text in Calibri Bold appears at top; full video centered below in the remaining zone.
+- **Batch processing**: Videos processed sequentially in a background thread — upload → Gemini analysis → text generation → FFmpeg export. Status polling every 2s.
+- **Per-item download**: Each finished meme shows its generated text and a ⬇ Descargar button.
 - **New backend files**: `backend/app/services/meme_service.py`, `backend/app/routes/meme.py`
-- **New API endpoints**: `POST /api/meme/process`, `GET /api/meme/status/{batch_id}`, `GET /api/meme/download/{batch_id}/{index}`
+- **New API endpoints**: `POST /api/meme/process`, `GET /api/meme/status/{batch_id}`, `GET /api/meme/download/{batch_id}/{index}`, `POST /api/meme/reexport/{batch_id}/{index}`
+
+---
 
 ## [v9.4] - 2026-03-18
 
@@ -21,10 +57,14 @@ All notable changes to this project will be documented in this file.
 - **IG Description per clip**: Gemini now generates a long Instagram post caption for each clip alongside the short TikTok overlay caption. The description is 3-4 paragraphs + 12-15 hashtags, written in the style of a fan account. Gemini tries to identify the creator's name from audio, on-screen text, or video context and uses it naturally throughout. Included in `clips_info.txt` under each clip as "IG Description".
 - **`ig_description` field in `ClipData`**: New field stores the long IG caption per clip.
 
+---
+
 ## [v9.3] - 2026-03-18
 
 ### Fixed
 - **Duplicate clips from Gemini retry**: `build_clips()` now accepts an `existing_starts` parameter. When the retry call runs (to fill skipped/invalid clips), it passes the already-accepted start times from the first pass. Deduplication now checks against ALL accepted starts (`any(abs(start - s) < min_duration ...)`), not just the last one in sequence. This prevented cases like Clip 2 (1:47) and Clip 22 (1:47) — identical timestamps that slipped through because the retry started with a fresh `last_accepted_start = -9999`.
+
+---
 
 ## [v9.2] - 2026-03-15
 
@@ -32,125 +72,42 @@ All notable changes to this project will be documented in this file.
 - **Live Stream Clipper mode**: New mode toggle at the top of the UI switches between Video Clipper and Live Stream Clipper.
 - **Twitch & Kick recording**: Paste any Twitch or Kick stream URL — `streamlink` resolves the HLS URL automatically, FFmpeg records it to disk in continuous segments.
 - **Segment-based recording**: Records N-minute segments one after another. Each segment is independently downloadable as an MP4. After recording, user downloads a segment and uploads it to the Video Clipper tab to analyze with Gemini.
-- **Resolution selector**: Three buttons (480p / 720p / 1080p) let you choose recording quality before starting. Streamlink selects the best matching stream quality; FFmpeg scales to the target resolution (`854:480`, `1280:720`, `1920:1080`).
-- **Segment duration selector**: 6 options — 5, 7, 10, 15, 20, 30 minutes. 30 min is the max (Gemini's file size limit becomes a concern beyond that).
-- **Live countdown timer**: Each recording segment shows a progress bar and countdown timer ("X:XX restantes") that counts down based on the `started_at` ISO timestamp from the backend. Updates every second via `setInterval`.
-- **Download button**: Once a segment is `ready`, a ⬇ Descargar button appears that triggers a direct MP4 download via `/api/stream/download/{session_id}/{segment_index}`.
-- **Graceful stop**: Stop button signals a `threading.Event`; FFmpeg terminates cleanly after writing valid MP4 output.
-- **New API endpoints**: `/api/stream/start`, `/api/stream/stop/{id}`, `/api/stream/status/{id}`, `/api/stream/download/{id}/{index}`, `/api/stream/sessions`
-- **New backend files**: `backend/app/services/stream_service.py`, `backend/app/routes/stream.py`
-- **New models**: `StreamSession`, `StreamSegment`, `StreamStartRequest` added to `clip.py`
+- **Resolution selector**: Three buttons (480p / 720p / 1080p) let you choose recording quality before starting.
+- **Segment duration selector**: 6 options — 5, 7, 10, 15, 20, 30 minutes.
+- **Live countdown timer**: Each recording segment shows a progress bar and countdown timer ("X:XX restantes").
+- **Download button**: Once a segment is `ready`, a ⬇ Descargar button appears.
+- **Graceful stop**: Stop button signals a `threading.Event`; FFmpeg terminates cleanly.
 
 ### Changed
-- Removed Gemini auto-analysis from stream segments — kept as a pure recorder. User downloads and uploads manually for full control over which segments to analyze.
+- Removed Gemini auto-analysis from stream segments — kept as a pure recorder.
+
+---
 
 ## [v8.0] - 2026-02-27
 
 ### Fixed
-- **Apostrophes now render correctly in ALL cases**: Replaced FFmpeg `drawtext` filter entirely with PIL-based text rendering. FFmpeg's filter-graph parser treats `'` as a quoting delimiter at the filter-graph level, making it impossible to reliably embed apostrophes via any escape sequence (`\'`, `"..."`, backslash, etc.). All attempts were empirically verified to fail. The solution is to render the white rounded box AND the caption text as a single PNG image using PIL/Pillow, then overlay it via FFmpeg's `overlay` filter. This means captions like "He's got the whole team behind him on this" now render perfectly with no workarounds.
-- **`gemini_service.py` was stripping apostrophes**: The regex `re.sub(r'[^\w\s]', '', caption)` matched `'` as a non-word/non-space character and removed it, turning "he's" into "hes". Fixed to `re.sub(r"[^\w\s']", '', caption)` to explicitly exclude `'` from stripping.
-- **Silent FFmpeg failures**: `generate_preview_frame` had `except: pass` around the FFmpeg subprocess call, silently swallowing all errors. The "Preview file not generated" error gave no hint of the actual FFmpeg failure. Fixed to `except subprocess.CalledProcessError` with proper error logging and `raise RuntimeError`.
+- **Apostrophes now render correctly in ALL cases**: Replaced FFmpeg `drawtext` filter entirely with PIL-based text rendering. All captions render as PNG via PIL, overlaid via FFmpeg `overlay` filter. Apostrophes, quotes, special characters all work with zero escaping.
+- **`gemini_service.py` was stripping apostrophes**: The regex `re.sub(r'[^\w\s]', '', caption)` matched `'` — fixed to `re.sub(r"[^\w\s']", '', caption)`.
 
 ### Changed
-- **Caption rendering architecture**: `create_rounded_box()` + FFmpeg `drawtext` replaced by new `create_caption_overlay()` function. The new function renders both the white rounded rectangle (r=14) and the text (Calibri Bold 72px, centered, black) directly onto a transparent PNG using PIL, then returns the path for FFmpeg to use as an image overlay. No drawtext filter is used anywhere in the pipeline.
-- **`sanitize_for_drawtext()` no longer called**: The function still exists in `video_service.py` but is no longer referenced since drawtext is eliminated.
+- **Caption rendering architecture**: `create_rounded_box()` + FFmpeg `drawtext` replaced by `create_caption_overlay()` — PIL renders white rounded rectangle (r=14) + Calibri Bold text onto RGBA PNG.
 
-## [v7.9] - 2026-02-27
+---
 
-### Fixed
-- **Apostrophes now render correctly in captions**: Instead of removing apostrophes entirely (making "don't" → "dont"), they are now escaped as `\'` inside FFmpeg's single-quoted `text='...'` filter value. The key is order of operations: backslashes from the original text are stripped first, then `'` is replaced with `\'` so the escape backslashes are never accidentally removed. Words like "he's", "don't", "that's" now render correctly in the video.
-- **Curly apostrophes from Gemini (U+2019 `'`) normalized**: Gemini sometimes outputs the curly/smart apostrophe `'` instead of the straight one `'`. These were previously stripped by the non-ASCII filter before any conversion could happen. Now they are converted to `'` first, then properly escaped as `\'` for FFmpeg.
+## [v7.x] - 2026-02-25/26
 
-## [v7.8] - 2026-02-26
+- **v7.4**: `max_chars` 15 → 25 for better caption line distribution
+- **v7.0**: Gemini model updated to stable `gemini-2.5-pro`
+- **v6.9**: Fixed near-zero timestamps (`response_mime_type` missing), preview deadlock, clip deduplication
+- **v6.8**: FFmpeg text crash fix, video preview max_seconds fix, loading spinner fix
 
-### Added
-- **"Small" video format mode**: Fourth fill_mode option that scales the video to 78% of the frame height (1497px), creating a noticeable blur border on all sides without shrinking the content too much. Sits between Zoom (90% height) and Fit (full width) in visual size.
-- **Watermark center guide line**: When a watermark is uploaded and no preview is active, a vertical dashed white line appears at the horizontal center of the canvas (50%). Helps align the watermark logo precisely to center without guesswork. The line is purely visual (pointer-events: none) and disappears when preview is active.
-
-### Changed
-- **Video Format buttons**: Added `flexWrap: wrap` so the four buttons (Fit / Zoom / Fill / Small) wrap cleanly on narrow panels.
-- **Format description**: Updated hint text to `Fit = full · Zoom = grande · Fill = frame completo · Small = reducido`.
-
-## [v7.4] - 2026-02-26
-
-### Fixed
-- **Caption splits into 3 lines unnecessarily**: `max_chars` was 15, too short for typical captions like "He came with a different energy" or "He said his whole crew is ready for anything". These would hit 3 lines when 2 would look cleaner. Increased `max_chars` from 15 → 25 so lines are wider and captions distribute naturally into 1–2 lines instead of 3.
-
-### Changed
-- **Caption line length**: `max_chars=25` across preview frame, preview clip, and export. Box adapts wider (CapCut-style) and uses fewer lines, matching the reference style.
-
-## [v7.3] - 2026-02-26
-
-### Fixed
-- **Box grows when font grows**: `split_text_into_lines` was absorbing ALL remaining words onto line 3 with no character limit, causing very long line 3 → wide box. Now all 3 lines enforce `max_chars=15` and extra words are dropped. Box size is now independent of font size.
-
-### Changed
-- **Caption font size**: Increased from `95px` to `100px`. With the line-length fix, the box stays compact while text is visibly larger.
-
-## [v7.2] - 2026-02-25
-
-### Fixed
-- **Apostrophe still looks wrong**: Replaced U+2019 curly apostrophe with full removal — TikTok captions don't use apostrophes, avoids any FFmpeg font rendering issues.
-
-### Changed
-- **Caption font size**: Increased from `48px` to `62px` for stronger, more legible text on mobile.
-
-## [v7.1] - 2026-02-25
-
-### Fixed
-- **Apostrophe renders as backtick**: `sanitize_for_drawtext()` was replacing `'` with `` ` `` to avoid breaking FFmpeg. Replaced with Unicode curly apostrophe `'` (U+2019) which is visually correct and safe for FFmpeg filter parsing.
-
-### Changed
-- **Caption font**: Switched from Arial Bold (`arialbd.ttf`) to Calibri Bold (`calibrib.ttf`) — rounder, more modern, closer to CapCut's caption style.
-- **Caption font size**: Increased from `42px` to `48px` for better readability on mobile screens.
-
-## [v7.0] - 2026-02-25
-
-### Fixed
-- **Gemini model deprecated**: `gemini-2.5-pro-exp-03-25` was shut down by Google without notice. Updated to the stable release `gemini-2.5-pro`.
-
-## [v6.9] - 2026-02-25
-
-### Fixed
-- **All clips same duration / clustered at start**: Gemini was returning near-zero raw durations (e.g., `0.2s`) for all clips because `response_mime_type="application/json"` was missing from `GenerateContentConfig`. Without it, the model returned plain text that happened to parse, but with garbage timestamps. Added `response_mime_type="application/json"` to both the main call and the retry call.
-- **Duplicate/overlapping clips**: Even with valid timestamps, clips could start very close together. Added deduplication in `build_clips`: clips are now sorted by `start_time` and any clip whose start is within `min_duration` seconds of the last accepted clip is skipped.
-- **Video preview stuck forever on "Generating video preview..."**: Introduced a deadlock in the previous session — `(loadingPreview || loadingVideo)` blocked the `<video>` element from rendering, so `onCanPlay` never fired. Fixed by separating the two states: `loadingPreview` hides the video canvas, but `loadingVideo` renders the `<video>` hidden with an overlay spinner so `onCanPlay` can fire and clear the spinner.
-
-### Changed
-- **Debug logging**: Added `[Gemini] Analyzing video: duration=Xs, target=N clips, min_duration=Xs` log line at the start of each analysis for easier diagnosis.
-
-## [v6.8] - 2026-02-25
-
-### Fixed
-- **FFmpeg text crash**: Added `sanitize_for_drawtext()` helper that strips characters breaking FFmpeg's drawtext filter (`,` `:` `%` `[` `]` `{` `}` `"` `\` and non-ASCII). Applied in preview frame, preview clip, and export.
-- **Video preview not playing**: `generate_preview_clip` was ignoring the `max_seconds=10` parameter and generating the full clip duration (up to 90s), causing the browser to time out. Fixed with `min(duration, max_seconds)`.
-- **No loading feedback on video play**: Both Step 2 ("Play" button) and Step 3 ("Play Clip" button) were setting `loadingVideo=false` immediately before the video was ready. Fixed with `onCanPlay`/`onError` handlers so the spinner stays until the video is playable.
-
-### Changed
-- **Gemini model**: Switched back from `gemini-2.5-flash` to `gemini-2.5-pro-exp-03-25` for higher quality clip detection.
-- **Improved Gemini prompt**: Complete rewrite of system prompt with explicit viral criteria (hooks, emotional reactions, story arc), stricter caption rules (max 10 words, no punctuation, third person, lowercase), and better timestamp validation. Added post-processing regex to strip any remaining punctuation from captions.
-- **Retry mechanism**: If Gemini returns clips with invalid timestamps, the backend now automatically retries to get the missing clips rather than silently dropping them.
-- **Vite config**: Added `host: true` and explicit `port: 5173` for consistent local network access.
+---
 
 ## [2.0.0] - 2026-02-15
 
 ### Added
-- **Full-Stack Web App**: Migrated from a CLI tool to a modern React + FastAPI web application.
+- **Full-Stack Web App**: Migrated from CLI to React + FastAPI web application.
 - **Visual Editor**: Interactive canvas to position text captions and watermarks.
-- **Video Preview**: Added a video player in the clip review step to watch generated clips before exporting.
-- **Selective Export**: Ability to select specific clips to export instead of exporting all.
-- **Progress Tracking**: Real-time progress bars for file upload, AI analysis, and video export.
-- **Hardware Acceleration**: Optimized FFmpeg commands for faster encoding (`ultrafast` preset for previews).
-- **Fallback Mechanism**: Automatic fallback to simple cut export if complex filters (blur/text) fail.
-
-### Fixed
-- **Black Screen Export**: Resolved issue where exported videos were black due to incompatible FFmpeg filters. Switched to a simpler filter chain with `boxblur` and standard `yuv420p` format.
-- **Export Speed**: Reduced blur intensity (`boxblur=12:2`) to significantly speed up export times.
-- **CORS Issues**: Fixed Cross-Origin Resource Sharing (CORS) errors preventing the frontend (port 5173/5174) from communicating with the backend (port 8000).
-- **Clip Count**: Fixed bug where clip count reverted to 10; now supports custom values (min 1).
-- **Space Handling**: Improved filename handling for videos with spaces in their names.
-
-### Changed
-- **Architecture**: Split into `backend/` (Python) and `frontend/` (React).
-- **API**: Replaced direct script execution with REST API endpoints (`/api/upload`, `/api/analyze`, `/api/export`).
-- **Dependencies**: Added `fastapi`, `uvicorn`, `python-multipart` to backend requirements.
+- **Video Preview**: Video player in clip review step.
+- **Selective Export**: Select specific clips to export.
+- **Progress Tracking**: Real-time progress bars for upload, analysis, and export.
