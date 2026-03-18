@@ -471,6 +471,19 @@ function EditorStep({ projectId, clips, onExportDone }) {
     setLoadingPreview(false);
   };
 
+  const handlePlayTikTok = async () => {
+    if (!selectedClip) return;
+    setLoadingVideo(true);
+    setPreviewUrl(null);
+    try {
+      await api.updateStyle(projectId, style);
+      setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
+    } catch (err) {
+      alert("Failed to generate TikTok preview: " + err.message);
+      setLoadingVideo(false);
+    }
+  };
+
   // Auto-refresh preview when style changes
   useEffect(() => {
     if (!selectedClip) return;
@@ -825,6 +838,19 @@ function EditorStep({ projectId, clips, onExportDone }) {
               </button>
               <button className="btn btn-primary" onClick={handlePlayVideo} disabled={loadingVideo} style={{ fontSize: 13 }}>
                 {loadingVideo ? "⏳ Loading..." : "▶ Play Clip"}
+              </button>
+              <button
+                className="btn"
+                onClick={handlePlayTikTok}
+                disabled={loadingVideo}
+                style={{
+                  fontSize: 12,
+                  background: "linear-gradient(135deg, #010101 0%, #69C9D0 50%, #EE1D52 100%)",
+                  color: "#fff",
+                  border: "none",
+                }}
+              >
+                {loadingVideo ? "⏳" : "🎵 TikTok"}
               </button>
               <button
                 className="btn"
