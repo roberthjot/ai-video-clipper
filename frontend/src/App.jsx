@@ -1430,6 +1430,7 @@ function LiveStreamStep() {
 // ================================================
 function MemeItemCard({ item, batchId, index, statusLabel }) {
   const [textY, setTextY] = useState(0.08);
+  const [textX, setTextX] = useState(0.05);
   const [videoY, setVideoY] = useState(0.6);
   const [videoScale, setVideoScale] = useState(0.9);
   const [fontSize, setFontSize] = useState(80);
@@ -1439,7 +1440,7 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
   const handleReexport = async () => {
     setReexporting(true);
     try {
-      await api.reexportMeme(batchId, index, textY, videoScale, videoY, fontSize);
+      await api.reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize);
       setBust(Date.now());
     } catch (e) {
       // ignore
@@ -1492,11 +1493,20 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
           <div style={{ marginTop: 12, padding: "10px 0 4px", borderTop: "1px solid #222" }}>
             <div style={{ marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 4 }}>
-                <span>Posición del texto</span>
+                <span>Texto — vertical</span>
                 <span style={{ color: "#fff" }}>{textY <= 0.12 ? "⬆ Arriba" : textY <= 0.28 ? "↕ Centro" : "⬇ Abajo"}</span>
               </div>
               <input type="range" min="0.02" max="0.45" step="0.01"
                 value={textY} onChange={(e) => setTextY(parseFloat(e.target.value))}
+                style={{ width: "100%" }} />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 4 }}>
+                <span>Texto — horizontal</span>
+                <span style={{ color: "#fff" }}>{textX <= 0.08 ? "← Izquierda" : textX <= 0.42 ? "↔ Centro" : "→ Derecha"}</span>
+              </div>
+              <input type="range" min="0.03" max="0.7" step="0.01"
+                value={textX} onChange={(e) => setTextX(parseFloat(e.target.value))}
                 style={{ width: "100%" }} />
             </div>
             <div style={{ marginBottom: 10 }}>

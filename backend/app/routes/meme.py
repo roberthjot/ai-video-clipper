@@ -12,6 +12,7 @@ router = APIRouter()
 async def process_memes(
     bg_color: str = Form("black"),
     text_y: float = Form(0.08),
+    text_x: float = Form(0.05),
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
     font_size: int = Form(80),
@@ -34,8 +35,8 @@ async def process_memes(
         filenames.append(video.filename)
 
     batch_id = start_meme_batch(video_paths, filenames, bg_color,
-                                 text_y=text_y, video_scale=video_scale, video_y=video_y,
-                                 font_size=font_size)
+                                 text_y=text_y, text_x=text_x, video_scale=video_scale,
+                                 video_y=video_y, font_size=font_size)
     return {"batch_id": batch_id, "count": len(video_paths)}
 
 
@@ -53,6 +54,7 @@ async def reexport_meme(
     batch_id: str,
     index: int,
     text_y: float = Form(0.08),
+    text_x: float = Form(0.05),
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
     font_size: int = Form(80),
@@ -76,8 +78,8 @@ async def reexport_meme(
     try:
         export_meme_video(
             video_path, item["meme_text"], item["output_path"],
-            batch["bg_color"], text_y=text_y, video_scale=video_scale, video_y=video_y,
-            font_size=font_size,
+            batch["bg_color"], text_y=text_y, text_x=text_x, video_scale=video_scale,
+            video_y=video_y, font_size=font_size,
         )
         item["status"] = "ready"
     except Exception as e:

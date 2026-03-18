@@ -64,7 +64,7 @@ def _wrap_text(text: str, max_chars: int = 26) -> list:
 
 
 def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int = 1920,
-                        text_y_ratio: float = 0.08, font_size: int = 80) -> tuple:
+                        text_y_ratio: float = 0.08, font_size: int = 80, text_x_ratio: float = 0.05) -> tuple:
     """Create meme background PNG: solid color + meme text at given Y ratio.
     Returns (png_path, text_bottom_y)."""
     bg_rgb = (0, 0, 0) if bg_color == "black" else (255, 255, 255)
@@ -84,14 +84,10 @@ def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int
     img = Image.new("RGB", (W, H), bg_rgb)
     draw = ImageDraw.Draw(img)
 
+    x_start = int(W * text_x_ratio)
     y = int(H * text_y_ratio)
     for line in lines:
-        try:
-            tw = int(font.getlength(line))
-        except Exception:
-            tw = int(len(line) * font_size * 0.6)
-        x = (W - tw) // 2
-        draw.text((x, y), line, font=font, fill=text_rgb)
+        draw.text((x_start, y), line, font=font, fill=text_rgb)
         y += line_h
 
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
@@ -104,12 +100,13 @@ def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int
 def export_meme_video(video_path: str, meme_text: str, output_path: str,
                       bg_color: str = "black", text_y: float = 0.08,
                       video_scale: float = 0.9, video_y: float = 0.6,
-                      font_size: int = 80) -> None:
+                      font_size: int = 80, text_x: float = 0.05) -> None:
     """Export full video (no cuts) overlaid on meme background."""
     W, H = 1080, 1920
 
     bg_png, _text_bottom = create_meme_bg_png(meme_text, bg_color, W, H,
-                                               text_y_ratio=text_y, font_size=font_size)
+                                               text_y_ratio=text_y, font_size=font_size,
+                                               text_x_ratio=text_x)
 
     # Scale video to video_scale% of canvas width (maintain aspect ratio)
     scale_w = int(W * video_scale)
@@ -149,7 +146,7 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
         raise RuntimeError(f"FFmpeg failed: {result.stderr[-600:]}")
 
 
-def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 80) -> None:
+def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 80, text_x: float = 0.05) -> None:
     """Background thread: process each video in the batch sequentially."""
     batch = meme_batches[batch_id]
     os.makedirs(MEME_OUTPUT_DIR, exist_ok=True)
@@ -176,7 +173,7 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             item["status"] = "exporting"
             output_filename = f"meme_{batch_id}_{i}.mp4"
             output_path = os.path.join(MEME_OUTPUT_DIR, output_filename)
-            export_meme_video(video_path, meme_text, output_path, bg_color, text_y=text_y, video_scale=video_scale, video_y=video_y, font_size=font_size)
+            export_meme_video(video_path, meme_text, output_path, bg_color, text_y=text_y, video_scale=video_scale, video_y=video_y, font_size=font_size, text_x=text_x)
 
             item["video_path"] = video_path
             item["output_path"] = output_path
@@ -194,7 +191,7 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
 
 def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black",
                      text_y: float = 0.08, video_scale: float = 0.9, video_y: float = 0.6,
-                     font_size: int = 80) -> str:
+                     font_size: int = 80, text_x: float = 0.05) -> str:
     """Start a meme batch. Returns batch_id."""
     batch_id = uuid.uuid4().hex[:12]
     meme_batches[batch_id] = {
@@ -215,7 +212,7 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
     }
     threading.Thread(
         target=_process_batch,
-        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size),
+        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size, text_x),
         daemon=True,
     ).start()
     return batch_id
