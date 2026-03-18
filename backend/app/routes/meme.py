@@ -45,6 +45,43 @@ async def meme_status(batch_id: str):
     return batch
 
 
+@router.post("/reexport/{batch_id}/{index}")
+async def reexport_meme(
+    batch_id: str,
+    index: int,
+    text_y: float = Form(0.08),
+    video_scale: float = Form(0.9),
+):
+    """Re-export a meme with updated text_y / video_scale (no Gemini call)."""
+    from ..services.meme_service import export_meme_video
+    batch = get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    items = batch.get("items", [])
+    if index < 0 or index >= len(items):
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    item = items[index]
+    video_path = item.get("video_path", "")
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Original video not found")
+
+    item["status"] = "exporting"
+    try:
+        export_meme_video(
+            video_path, item["meme_text"], item["output_path"],
+            batch["bg_color"], text_y=text_y, video_scale=video_scale,
+        )
+        item["status"] = "ready"
+    except Exception as e:
+        item["status"] = "error"
+        item["error"] = str(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"status": "ok"}
+
+
 @router.get("/download/{batch_id}/{index}")
 async def download_meme(batch_id: str, index: int):
     """Download a finished meme video."""

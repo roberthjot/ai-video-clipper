@@ -168,6 +168,7 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             output_path = os.path.join(MEME_OUTPUT_DIR, output_filename)
             export_meme_video(video_path, meme_text, output_path, bg_color, text_y=text_y, video_scale=video_scale)
 
+            item["video_path"] = video_path
             item["output_path"] = output_path
             item["status"] = "ready"
             print(f"[Meme] Batch {batch_id} item {i}: done")

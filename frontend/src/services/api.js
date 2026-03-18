@@ -255,6 +255,18 @@ export async function getMemeStatus(batchId) {
     return res.json();
 }
 
-export function getMemeDownloadUrl(batchId, index) {
-    return `${API_BASE}/meme/download/${batchId}/${index}`;
+export function getMemeDownloadUrl(batchId, index, bust) {
+    return `${API_BASE}/meme/download/${batchId}/${index}${bust ? `?t=${bust}` : ""}`;
+}
+
+export async function reexportMeme(batchId, index, textY, videoScale) {
+    const formData = new FormData();
+    formData.append("text_y", textY);
+    formData.append("video_scale", videoScale);
+    const res = await fetch(`${API_BASE}/meme/reexport/${batchId}/${index}`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!res.ok) throw new Error("Re-export failed");
+    return res.json();
 }

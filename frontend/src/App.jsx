@@ -1426,13 +1426,108 @@ function LiveStreamStep() {
 
 
 // ================================================
+// MEME ITEM CARD (with per-item sliders + re-export)
+// ================================================
+function MemeItemCard({ item, batchId, index, statusLabel }) {
+  const [textY, setTextY] = useState(0.08);
+  const [videoScale, setVideoScale] = useState(0.9);
+  const [reexporting, setReexporting] = useState(false);
+  const [bust, setBust] = useState(null); // cache-buster for video src
+
+  const handleReexport = async () => {
+    setReexporting(true);
+    try {
+      await api.reexportMeme(batchId, index, textY, videoScale);
+      setBust(Date.now());
+    } catch (e) {
+      // ignore
+    } finally {
+      setReexporting(false);
+    }
+  };
+
+  return (
+    <div style={{
+      background: "#111",
+      borderRadius: 8,
+      padding: "12px 14px",
+      border: item.status === "ready" ? "1px solid #22c55e" : item.status === "error" ? "1px solid #ef4444" : "1px solid #333",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3, wordBreak: "break-all" }}>{item.filename}</div>
+          <div style={{ fontSize: 12, color: "#aaa" }}>{statusLabel(item)}</div>
+          {item.meme_text && (
+            <div style={{ marginTop: 6, fontSize: 12, color: "#c084fc", fontStyle: "italic", lineHeight: 1.4 }}>
+              "{item.meme_text}"
+            </div>
+          )}
+        </div>
+        {item.status === "ready" && (
+          <a
+            href={api.getMemeDownloadUrl(batchId, index, bust)}
+            download
+            className="btn btn-primary"
+            style={{ fontSize: 12, padding: "6px 12px", whiteSpace: "nowrap", textDecoration: "none" }}
+          >
+            ⬇ Descargar
+          </a>
+        )}
+      </div>
+
+      {item.status === "ready" && (
+        <>
+          <div style={{ marginTop: 10 }}>
+            <video
+              key={bust}
+              src={api.getMemeDownloadUrl(batchId, index, bust)}
+              controls
+              style={{ width: "100%", maxHeight: 320, borderRadius: 6, background: "#000", display: "block" }}
+            />
+          </div>
+
+          {/* Per-item sliders */}
+          <div style={{ marginTop: 12, padding: "10px 0 4px", borderTop: "1px solid #222" }}>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 4 }}>
+                <span>Posición del texto</span>
+                <span style={{ color: "#fff" }}>{textY <= 0.12 ? "⬆ Arriba" : textY <= 0.28 ? "↕ Centro" : "⬇ Abajo"}</span>
+              </div>
+              <input type="range" min="0.02" max="0.45" step="0.01"
+                value={textY} onChange={(e) => setTextY(parseFloat(e.target.value))}
+                style={{ width: "100%" }} />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 4 }}>
+                <span>Tamaño del video</span>
+                <span style={{ color: "#fff" }}>{Math.round(videoScale * 100)}%</span>
+              </div>
+              <input type="range" min="0.4" max="1.0" step="0.05"
+                value={videoScale} onChange={(e) => setVideoScale(parseFloat(e.target.value))}
+                style={{ width: "100%" }} />
+            </div>
+            <button
+              className="btn btn-secondary"
+              style={{ width: "100%", fontSize: 13 }}
+              onClick={handleReexport}
+              disabled={reexporting}
+            >
+              {reexporting ? "⏳ Re-exportando..." : "🔄 Re-exportar con estos ajustes"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
+// ================================================
 // MEME GENERATOR
 // ================================================
 function MemeStep() {
   const [files, setFiles] = useState([]);
   const [bgColor, setBgColor] = useState("black");
-  const [textY, setTextY] = useState(0.08);
-  const [videoScale, setVideoScale] = useState(0.9);
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [batchId, setBatchId] = useState(null);
@@ -1481,7 +1576,7 @@ function MemeStep() {
     setBatch(null);
     setBatchId(null);
     try {
-      const result = await api.processMemes(files, bgColor, textY, videoScale, setUploadPct);
+      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct);
       setBatchId(result.batch_id);
     } catch (e) {
       setError(e.message || "Error al subir los videos");
@@ -1494,8 +1589,6 @@ function MemeStep() {
     clearInterval(pollRef.current);
     setFiles([]);
     setBgColor("black");
-    setTextY(0.08);
-    setVideoScale(0.9);
     setUploading(false);
     setUploadPct(0);
     setBatchId(null);
@@ -1589,36 +1682,6 @@ function MemeStep() {
               </div>
             </div>
 
-            {/* Text position slider */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#aaa", marginBottom: 6 }}>
-                <span>Posición del texto</span>
-                <span style={{ color: "#fff" }}>
-                  {textY <= 0.12 ? "⬆ Arriba" : textY <= 0.28 ? "↕ Centro" : "⬇ Abajo"}
-                </span>
-              </div>
-              <input
-                type="range" min="0.02" max="0.45" step="0.01"
-                value={textY}
-                onChange={(e) => setTextY(parseFloat(e.target.value))}
-                style={{ width: "100%" }}
-              />
-            </div>
-
-            {/* Video size slider */}
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#aaa", marginBottom: 6 }}>
-                <span>Tamaño del video</span>
-                <span style={{ color: "#fff" }}>{Math.round(videoScale * 100)}%</span>
-              </div>
-              <input
-                type="range" min="0.4" max="1.0" step="0.05"
-                value={videoScale}
-                onChange={(e) => setVideoScale(parseFloat(e.target.value))}
-                style={{ width: "100%" }}
-              />
-            </div>
-
             {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}
 
             {uploading ? (
@@ -1671,49 +1734,7 @@ function MemeStep() {
             {/* Item list */}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {batch.items.map((item, i) => (
-                <div key={i} style={{
-                  background: "#111",
-                  borderRadius: 8,
-                  padding: "12px 14px",
-                  border: item.status === "ready" ? "1px solid #22c55e" : item.status === "error" ? "1px solid #ef4444" : "1px solid #333",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3, wordBreak: "break-all" }}>{item.filename}</div>
-                      <div style={{ fontSize: 12, color: "#aaa" }}>{statusLabel(item)}</div>
-                      {item.meme_text && (
-                        <div style={{ marginTop: 6, fontSize: 12, color: "#c084fc", fontStyle: "italic", lineHeight: 1.4 }}>
-                          "{item.meme_text}"
-                        </div>
-                      )}
-                    </div>
-                    {item.status === "ready" && (
-                      <a
-                        href={api.getMemeDownloadUrl(batchId, i)}
-                        download
-                        className="btn btn-primary"
-                        style={{ fontSize: 12, padding: "6px 12px", whiteSpace: "nowrap", textDecoration: "none" }}
-                      >
-                        ⬇ Descargar
-                      </a>
-                    )}
-                  </div>
-                  {item.status === "ready" && (
-                    <div style={{ marginTop: 10 }}>
-                      <video
-                        src={api.getMemeDownloadUrl(batchId, i)}
-                        controls
-                        style={{
-                          width: "100%",
-                          maxHeight: 320,
-                          borderRadius: 6,
-                          background: "#000",
-                          display: "block",
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
+                <MemeItemCard key={i} item={item} batchId={batchId} index={i} statusLabel={statusLabel} />
               ))}
             </div>
           </div>
