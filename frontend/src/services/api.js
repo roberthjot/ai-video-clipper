@@ -259,10 +259,11 @@ export function getMemeDownloadUrl(batchId, index, bust) {
     return `${API_BASE}/meme/download/${batchId}/${index}${bust ? `?t=${bust}` : ""}`;
 }
 
-export async function reexportMeme(batchId, index, textY, videoScale) {
+export async function reexportMeme(batchId, index, textY, videoScale, videoY) {
     const formData = new FormData();
     formData.append("text_y", textY);
     formData.append("video_scale", videoScale);
+    formData.append("video_y", videoY);
     const res = await fetch(`${API_BASE}/meme/reexport/${batchId}/${index}`, {
         method: "POST",
         body: formData,

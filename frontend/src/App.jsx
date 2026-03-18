@@ -1430,6 +1430,7 @@ function LiveStreamStep() {
 // ================================================
 function MemeItemCard({ item, batchId, index, statusLabel }) {
   const [textY, setTextY] = useState(0.08);
+  const [videoY, setVideoY] = useState(0.6);
   const [videoScale, setVideoScale] = useState(0.9);
   const [reexporting, setReexporting] = useState(false);
   const [bust, setBust] = useState(null); // cache-buster for video src
@@ -1437,7 +1438,7 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
   const handleReexport = async () => {
     setReexporting(true);
     try {
-      await api.reexportMeme(batchId, index, textY, videoScale);
+      await api.reexportMeme(batchId, index, textY, videoScale, videoY);
       setBust(Date.now());
     } catch (e) {
       // ignore
@@ -1495,6 +1496,15 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
               </div>
               <input type="range" min="0.02" max="0.45" step="0.01"
                 value={textY} onChange={(e) => setTextY(parseFloat(e.target.value))}
+                style={{ width: "100%" }} />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 4 }}>
+                <span>Posición del video</span>
+                <span style={{ color: "#fff" }}>{videoY <= 0.38 ? "⬆ Arriba" : videoY <= 0.62 ? "↕ Centro" : "⬇ Abajo"}</span>
+              </div>
+              <input type="range" min="0.25" max="0.85" step="0.01"
+                value={videoY} onChange={(e) => setVideoY(parseFloat(e.target.value))}
                 style={{ width: "100%" }} />
             </div>
             <div style={{ marginBottom: 10 }}>
