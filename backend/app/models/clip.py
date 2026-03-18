@@ -10,6 +10,7 @@ class ClipData(BaseModel):
     description: str
     viral_caption: str
     viral_reason: str
+    ig_description: str = ""   # Long Instagram post caption (3-4 paragraphs + hashtags)
     duration: float = 0.0
 
     def model_post_init(self, __context):

@@ -130,6 +130,14 @@ def analyze_video(
     - "description": (string) 3-5 word label for the clip (English).
     - "viral_caption": (string) Short punchy overlay text. MAX 10 words. No punctuation.
     - "viral_reason": (string) One sentence explaining the viral potential.
+    - "ig_description": (string) A long Instagram post caption for this clip. Follow these rules:
+        * First, try to identify the creator's name from audio, text on screen, or context in the video. If identified, use their real name naturally throughout.
+        * Write 3-4 paragraphs in English. Start with a hook sentence about this specific moment.
+        * Paragraph 1: Describe what happens in this clip and why it's a standout moment.
+        * Paragraph 2: Provide context about the creator — who they are, what they're known for, what makes them interesting.
+        * Paragraph 3: Why this moment resonates with fans / what the audience reaction will be.
+        * End with 12-15 highly relevant hashtags on a new line (mix of niche and broad tags).
+        * Tone: enthusiastic fan account, third person, admiring but not over-the-top. No emojis.
 
     TIMESTAMP RULES (CRITICAL):
     1. Use simple decimal numbers only (e.g. 10.5). NO leading zeros.
@@ -246,6 +254,7 @@ def analyze_video(
                 description=clip.get("description", "clip"),
                 viral_caption=caption,
                 viral_reason=clip.get("viral_reason", ""),
+                ig_description=clip.get("ig_description", ""),
             ))
         return clips, skipped
 

@@ -218,6 +218,9 @@ def export_all_clips_background(
                     f.write(f"Timestamps : {start_fmt} - {end_fmt} ({int(duration)}s)\n")
                     f.write(f"Caption    : {clip.viral_caption}\n")
                     f.write(f"Why viral  : {getattr(clip, 'viral_reason', 'N/A')}\n")
+                    ig_desc = getattr(clip, 'ig_description', '')
+                    if ig_desc:
+                        f.write(f"\nIG Description:\n{ig_desc}\n")
                     f.write("\n" + "-" * 60 + "\n\n")
             print(f"[Export] clips_info.txt saved to {info_path}")
         except Exception as e:

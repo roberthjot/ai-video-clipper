@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v9.4] - 2026-03-18
+
+### Added
+- **IG Description per clip**: Gemini now generates a long Instagram post caption for each clip alongside the short TikTok overlay caption. The description is 3-4 paragraphs + 12-15 hashtags, written in the style of a fan account. Gemini tries to identify the creator's name from audio, on-screen text, or video context and uses it naturally throughout. Included in `clips_info.txt` under each clip as "IG Description".
+- **`ig_description` field in `ClipData`**: New field stores the long IG caption per clip.
+
 ## [v9.3] - 2026-03-18
 
 ### Fixed
