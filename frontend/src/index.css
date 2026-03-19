@@ -332,25 +332,29 @@ body {
 
 .clip-card {
   display: grid;
-  grid-template-columns: 60px 1fr 200px 100px;
+  grid-template-columns: 56px 1fr 180px 120px;
   gap: 16px;
   align-items: center;
-  padding: 16px 20px;
-  background: var(--bg-card);
+  padding: 18px 20px;
+  background: linear-gradient(135deg, var(--bg-card) 0%, #13131f 100%);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-left: 3px solid transparent;
+  border-radius: 14px;
   transition: all 0.2s;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.2);
 }
 
 .clip-card:hover {
-  background: var(--bg-card-hover);
-  border-color: var(--accent);
+  background: linear-gradient(135deg, var(--bg-card-hover) 0%, #1a1a2e 100%);
+  border-left-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(99,102,241,0.12);
 }
 
 .clip-number {
   width: 44px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--gradient-1);
   display: flex;
   align-items: center;
@@ -358,54 +362,75 @@ body {
   font-weight: 800;
   font-size: 16px;
   color: white;
+  box-shadow: 0 4px 12px rgba(99,102,241,0.3);
 }
 
 .clip-info h4 {
   font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 4px;
+  font-weight: 700;
+  margin-bottom: 5px;
+  color: var(--text-primary);
 }
 
 .clip-info .caption {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.4;
+  font-style: italic;
 }
 
 .clip-meta {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   font-size: 12px;
   color: var(--text-muted);
 }
 
 .clip-meta .tag {
-  padding: 3px 8px;
-  background: var(--bg-input);
-  border-radius: 6px;
+  padding: 4px 10px;
+  background: rgba(99,102,241,0.1);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 20px;
   font-size: 11px;
+  font-weight: 600;
   display: inline-block;
   width: fit-content;
+  color: #a5b4fc;
 }
 
 .clip-actions {
   display: flex;
   gap: 8px;
+  flex-direction: column;
 }
 
 .clip-actions button {
   padding: 8px 12px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
+  font-weight: 600;
   transition: all 0.2s;
+  text-align: center;
 }
 
-.clip-actions button:hover {
+.clip-actions button:first-child {
+  background: rgba(99,102,241,0.15);
+  border-color: rgba(99,102,241,0.3);
+  color: #a5b4fc;
+}
+
+.clip-actions button:first-child:hover {
+  background: rgba(99,102,241,0.25);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.clip-actions button:last-child:hover {
   border-color: var(--accent);
   color: var(--text-primary);
 }
@@ -474,10 +499,11 @@ body {
   position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 18px;
   overflow: hidden;
   aspect-ratio: 9/16;
   max-height: 860px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 }
 
 .editor-canvas {
@@ -541,19 +567,23 @@ body {
 }
 
 .control-section {
-  background: var(--bg-card);
+  background: linear-gradient(135deg, var(--bg-card) 0%, #13131f 100%);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
 }
 
 .control-section h3 {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   display: flex;
   align-items: center;
   gap: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
 }
 
 .slider-group {
@@ -685,17 +715,18 @@ body {
    SECTION TITLES
    ================================================ */
 .section-title {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 800;
-  margin-bottom: 20px;
+  margin-bottom: 6px;
   display: flex;
   align-items: center;
   gap: 10px;
+  letter-spacing: -0.01em;
 }
 
 .section-subtitle {
-  color: var(--text-secondary);
-  font-size: 14px;
+  color: var(--text-muted);
+  font-size: 13px;
   margin-bottom: 24px;
 }
 
