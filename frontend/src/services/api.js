@@ -273,3 +273,13 @@ export async function reexportMeme(batchId, index, textY, textX, videoScale, vid
     if (!res.ok) throw new Error("Re-export failed");
     return res.json();
 }
+
+export function getMemeDescriptionUrl(batchId, index) {
+    return `${API_BASE}/meme/description/${batchId}/${index}`;
+}
+
+export async function getMemeIgDescription(batchId, index) {
+    const res = await fetch(`${API_BASE}/meme/description/${batchId}/${index}`);
+    if (!res.ok) throw new Error("Description not found");
+    return res.text();
+}

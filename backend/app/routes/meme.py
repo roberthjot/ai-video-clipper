@@ -112,3 +112,24 @@ async def download_meme(batch_id: str, index: int):
     original_name = os.path.splitext(item["filename"])[0]
     download_name = f"meme_{original_name}.mp4"
     return FileResponse(output_path, media_type="video/mp4", filename=download_name)
+
+
+@router.get("/description/{batch_id}/{index}")
+async def download_description(batch_id: str, index: int):
+    """Download the IG description .txt for a finished meme."""
+    batch = get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    items = batch.get("items", [])
+    if index < 0 or index >= len(items):
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    item = items[index]
+    txt_path = item.get("txt_path", "")
+    if not txt_path or not os.path.exists(txt_path):
+        raise HTTPException(status_code=404, detail="Description file not found")
+
+    original_name = os.path.splitext(item["filename"])[0]
+    download_name = f"descripcion_{original_name}.txt"
+    return FileResponse(txt_path, media_type="text/plain", filename=download_name)

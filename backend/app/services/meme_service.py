@@ -48,6 +48,27 @@ def generate_meme_text(file_obj) -> str:
     return raw
 
 
+def generate_ig_description(file_obj, meme_text: str) -> str:
+    """Ask Gemini to generate a long Instagram caption for the meme."""
+    response = client.models.generate_content(
+        model=settings.GEMINI_MODEL,
+        contents=[types.Content(role="user", parts=[
+            types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+            types.Part.from_text(text=(
+                f'This video\'s meme caption is: "{meme_text}"\n\n'
+                "Write a long Instagram post caption for this meme video. "
+                "Write it as a funny, relatable fan account post in English. "
+                "Use 3-4 short paragraphs (1-3 sentences each). "
+                "Include 12-15 relevant hashtags at the end. "
+                "Make it engaging and shareable. Max 2 emojis total. "
+                "Return ONLY the caption — no labels, no extra words."
+            )),
+        ])],
+        config=types.GenerateContentConfig(temperature=0.9),
+    )
+    return response.text.strip()
+
+
 def _wrap_text_px(text: str, font, max_width: int) -> list:
     """Wrap text to fit within max_width pixels using real font measurement."""
     lines_raw = text.replace('\\n', '\n').split('\n')
@@ -176,6 +197,14 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             # 3. Generate meme text
             meme_text = generate_meme_text(file_obj)
             item["meme_text"] = meme_text
+
+            # 3b. Generate IG description (while file is still uploaded)
+            try:
+                ig_description = generate_ig_description(file_obj, meme_text)
+            except Exception:
+                ig_description = ""
+            item["ig_description"] = ig_description
+
             delete_file(file_obj)
             print(f"[Meme] Batch {batch_id} item {i}: text = {meme_text[:60]!r}")
 
@@ -184,6 +213,14 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             output_filename = f"meme_{batch_id}_{i}.mp4"
             output_path = os.path.join(MEME_OUTPUT_DIR, output_filename)
             export_meme_video(video_path, meme_text, output_path, bg_color, text_y=text_y, video_scale=video_scale, video_y=video_y, font_size=font_size, text_x=text_x)
+
+            # Save IG description as .txt
+            txt_filename = f"meme_{batch_id}_{i}.txt"
+            txt_path = os.path.join(MEME_OUTPUT_DIR, txt_filename)
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(f"Meme text:\n{meme_text}\n\n")
+                f.write(f"Instagram Description:\n{ig_description}\n")
+            item["txt_path"] = txt_path
 
             item["video_path"] = video_path
             item["output_path"] = output_path
@@ -216,6 +253,8 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
                 "meme_text": "",
                 "output_path": "",
                 "error": "",
+                "ig_description": "",
+                "txt_path": "",
             }
             for i in range(len(video_paths))
         ],
