@@ -121,19 +121,24 @@ def export_clip_with_style(
 
     filter_complex += f";[{current_label}]format=yuv420p[out]"
 
+    # Two-pass seek: fast input seek (keyframe) + accurate output trim
+    fast_seek = max(0.0, clip.start_time - 4.0)
+    buffer = clip.start_time - fast_seek
+    loop_dur = duration + buffer + 1.0  # looped inputs need to cover fast_seek window too
+    print(f"[Export] Clip {clip.id}: start={clip.start_time}s end={clip.end_time}s duration={duration:.1f}s fast_seek={fast_seek}s buffer={buffer:.1f}s")
     cmd = [
         FFMPEG_EXE,
-        "-ss", str(clip.start_time), "-to", str(clip.end_time), "-i", video_path,
+        "-ss", str(fast_seek), "-i", video_path,
     ]
 
     if use_split:
-        cmd.extend(["-loop", "1", "-t", str(duration), "-i", style.split_image_path])
+        cmd.extend(["-loop", "1", "-t", str(loop_dur), "-i", style.split_image_path])
 
     if rounded_box_path:
-        cmd.extend(["-loop", "1", "-t", str(duration), "-i", rounded_box_path])
+        cmd.extend(["-loop", "1", "-t", str(loop_dur), "-i", rounded_box_path])
 
     if has_watermark:
-        cmd.extend(["-loop", "1", "-t", str(duration), "-i", style.watermark_path])
+        cmd.extend(["-loop", "1", "-t", str(loop_dur), "-i", style.watermark_path])
 
     cmd.extend([
         "-filter_complex", filter_complex,
@@ -148,7 +153,9 @@ def export_clip_with_style(
     ])
     if style.strip_metadata:
         cmd.extend(["-map_metadata", "-1"])
-    cmd.extend(["-y", "-loglevel", "warning", output_path])
+    # Output-side accurate seek: discard the first `buffer` seconds (the fast-seek overshoot),
+    # then cut at exactly `duration` seconds. This gives frame-accurate clipping.
+    cmd.extend(["-ss", str(buffer), "-t", str(duration), "-y", "-loglevel", "warning", output_path])
 
     try:
         print(f"[Export] Clip {clip.id}: Exporting... split={use_split}")
@@ -316,11 +323,14 @@ def export_instagram_clip(
 
     filter_complex += f";[{current_label}]format=yuv420p[out]"
 
-    cmd = [FFMPEG_EXE, "-ss", str(clip.start_time), "-to", str(clip.end_time), "-i", video_path]
-    cmd.extend(["-loop", "1", "-t", str(duration), "-i", frame_png])
+    fast_seek = max(0.0, clip.start_time - 4.0)
+    buffer = clip.start_time - fast_seek
+    loop_dur = duration + buffer + 1.0
+    cmd = [FFMPEG_EXE, "-ss", str(fast_seek), "-i", video_path]
+    cmd.extend(["-loop", "1", "-t", str(loop_dur), "-i", frame_png])
 
     if has_watermark:
-        cmd.extend(["-loop", "1", "-t", str(duration), "-i", style.watermark_path])
+        cmd.extend(["-loop", "1", "-t", str(loop_dur), "-i", style.watermark_path])
 
     cmd.extend([
         "-filter_complex", filter_complex,
@@ -335,7 +345,7 @@ def export_instagram_clip(
     ])
     if style.strip_metadata:
         cmd.extend(["-map_metadata", "-1"])
-    cmd.extend(["-y", "-loglevel", "warning", output_path])
+    cmd.extend(["-ss", str(buffer), "-t", str(duration), "-y", "-loglevel", "warning", output_path])
 
     try:
         print(f"[Instagram Export] Clip {clip.id}: Exporting (ig_fill_mode={ig_fill_mode}, ig_top_padding={ig_top_padding})...")
