@@ -2158,7 +2158,7 @@ function App() {
         {mode === "meme" && <MemeStep />}
 
         {mode === "video" && <>
-          <div className="steps-bar">
+          <div className="steps-bar" style={{ marginTop: 20 }}>
             {steps.map((s) => (
               <div
                 key={s.num}
