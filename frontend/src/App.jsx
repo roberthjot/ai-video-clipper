@@ -125,81 +125,138 @@ function UploadStep({ onComplete }) {
   }
 
   return (
-    <div>
-      <h2 className="section-title">🎬 Upload Video</h2>
-      <p className="section-subtitle">
-        Upload a video and let the AI find the most viral moments.
-      </p>
+    <div style={{ maxWidth: 660, margin: "0 auto" }}>
+      {/* Header */}
+      <div style={{
+        background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)",
+        borderRadius: 16, padding: "22px 28px", marginBottom: 20,
+        border: "1px solid #2a2a4a",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ fontSize: 28 }}>🎬</div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#fff" }}>Upload Video</h2>
+            <p style={{ margin: 0, color: "#8888aa", fontSize: 13 }}>
+              Gemini watches your video and finds the most viral moments automatically
+            </p>
+          </div>
+        </div>
+      </div>
 
+      {/* Upload zone */}
       <div
         className={`upload-zone ${dragover ? "dragover" : ""}`}
         onDragOver={(e) => { e.preventDefault(); setDragover(true); }}
         onDragLeave={() => setDragover(false)}
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
+        style={{
+          borderRadius: 14, marginBottom: 20,
+          background: file ? "#0d1a0d" : "#111",
+          border: file ? "2px dashed #22c55e" : "2px dashed #333",
+          transition: "all 0.2s",
+        }}
       >
-        <input
-          ref={inputRef}
-          type="file"
-          accept="video/*"
-          hidden
-          onChange={(e) => setFile(e.target.files[0])}
-        />
-        <div className="icon">📁</div>
+        <input ref={inputRef} type="file" accept="video/*" hidden
+          onChange={(e) => setFile(e.target.files[0])} />
+        <div className="icon">{file ? "✅" : "📁"}</div>
         {file ? (
-          <p className="file-selected">✅ {file.name} ({(file.size / 1024 / 1024).toFixed(0)} MB)</p>
+          <div>
+            <p style={{ fontWeight: 700, fontSize: 15, color: "#22c55e", margin: "0 0 4px" }}>{file.name}</p>
+            <p style={{ color: "#666", fontSize: 13, margin: 0 }}>{(file.size / 1024 / 1024).toFixed(1)} MB · Click para cambiar</p>
+          </div>
         ) : (
           <>
-            <h3>Drag & drop your video here</h3>
-            <p>or click to browse (MP4, MOV, AVI)</p>
+            <h3 style={{ margin: "0 0 6px", color: "#ccc" }}>Drag & drop your video here</h3>
+            <p style={{ color: "#555", margin: 0 }}>or click to browse (MP4, MOV, AVI)</p>
           </>
         )}
       </div>
 
-      <div className="config-grid">
-        <div className="config-field">
-          <label>Number of clips</label>
-          <input
-            type="number"
-            value={clipCount}
-            onChange={(e) => setClipCount(Math.max(1, parseInt(e.target.value) || 1))}
-            min={1}
-            max={50}
-          />
+      {/* Config */}
+      <div style={{
+        background: "#1a1a1a", borderRadius: 14, padding: "20px 24px",
+        border: "1px solid #2a2a2a", marginBottom: 20,
+      }}>
+        <div style={{ fontSize: 12, color: "#666", fontWeight: 700, letterSpacing: "0.06em", marginBottom: 16, textTransform: "uppercase" }}>
+          Configuración
         </div>
-        <div className="config-field">
-          <label>Min Duration (sec)</label>
-          <input
-            type="number"
-            value={minDuration}
-            onChange={(e) => setMinDuration(parseInt(e.target.value) || 10)}
-            min={5}
-            max={120}
-          />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+              Número de clips
+            </label>
+            <input
+              type="number" value={clipCount}
+              onChange={(e) => setClipCount(Math.max(1, parseInt(e.target.value) || 1))}
+              min={1} max={50}
+              style={{
+                width: "100%", background: "#111", border: "1px solid #333",
+                borderRadius: 8, padding: "8px 12px", color: "#fff", fontSize: 14,
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+              Duración mínima (seg)
+            </label>
+            <input
+              type="number" value={minDuration}
+              onChange={(e) => setMinDuration(parseInt(e.target.value) || 10)}
+              min={5} max={120}
+              style={{
+                width: "100%", background: "#111", border: "1px solid #333",
+                borderRadius: 8, padding: "8px 12px", color: "#fff", fontSize: 14,
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
         </div>
-        <div className="config-field">
-          <label>Format</label>
-          <input type="text" value="9:16 (TikTok / Reels)" readOnly />
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+            Formato de salida
+          </label>
+          <div style={{
+            background: "#111", border: "1px solid #333", borderRadius: 8,
+            padding: "8px 12px", color: "#6366f1", fontSize: 14, fontWeight: 600,
+          }}>
+            9:16 — TikTok / Reels / Shorts
+          </div>
         </div>
-        <div className="config-field full-width">
-          <label>🧠 Instructions for the AI (optional)</label>
+        <div>
+          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+            🧠 Instrucciones para la IA (opcional)
+          </label>
           <textarea
             value={customPrompt}
             onChange={(e) => setCustomPrompt(e.target.value)}
             placeholder="e.g. Find the most dramatic moments. Prioritize funny reactions and confessions..."
+            style={{
+              width: "100%", background: "#111", border: "1px solid #333",
+              borderRadius: 8, padding: "10px 12px", color: "#e5e5e5", fontSize: 13,
+              resize: "vertical", minHeight: 80, fontFamily: "inherit", boxSizing: "border-box",
+            }}
           />
         </div>
       </div>
 
-      <div className="btn-group">
-        <button
-          className="btn btn-primary"
-          disabled={!file}
-          onClick={handleSubmit}
-        >
-          🚀 Analyze Video
-        </button>
-      </div>
+      <button
+        style={{
+          width: "100%", fontSize: 15, padding: "14px 0", borderRadius: 12,
+          border: "none", cursor: file ? "pointer" : "default", fontWeight: 700,
+          background: file
+            ? "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)"
+            : "#1a1a1a",
+          color: file ? "#fff" : "#444",
+          transition: "all 0.2s",
+          boxShadow: file ? "0 4px 20px rgba(99,102,241,0.3)" : "none",
+        }}
+        disabled={!file}
+        onClick={handleSubmit}
+      >
+        🚀 Analyze Video
+      </button>
     </div>
   );
 }
@@ -1250,139 +1307,191 @@ function LiveStreamStep() {
   const readyCount = sessionData?.ready_count ?? 0;
 
   return (
-    <div style={{ maxWidth: 700, margin: "0 auto", padding: "24px 16px" }}>
-      <div className="card" style={{ marginBottom: 20 }}>
-        <h2 style={{ marginBottom: 4, fontSize: 18 }}>🔴 Live Stream Clipper</h2>
-        <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 20 }}>
-          Graba segmentos del stream → descárgalos → súbelos al Video Clipper para sacar clips con Gemini
-        </p>
+    <div style={{ maxWidth: 680, margin: "0 auto", padding: "24px 16px" }}>
+      {/* Header */}
+      <div style={{
+        background: "linear-gradient(135deg, #1a0a0a 0%, #2a0a0a 100%)",
+        borderRadius: 16, padding: "22px 28px", marginBottom: 20,
+        border: "1px solid #4a1a1a",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ fontSize: 28 }}>🔴</div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#fff" }}>Live Stream Clipper</h2>
+            <p style={{ margin: 0, color: "#aa8888", fontSize: 13 }}>
+              Graba segmentos → descarga → sube al Video Clipper para extraer clips con Gemini
+            </p>
+          </div>
+        </div>
+      </div>
 
+      <div style={{ background: "#1a1a1a", borderRadius: 14, padding: "20px 24px", border: "1px solid #2a2a2a", marginBottom: 16 }}>
         {!sessionId ? (
           <>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "var(--text-muted)" }}>
-                URL del stream (Twitch o Kick)
+            {/* URL input */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 12, color: "#888", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>
+                URL del Stream
               </label>
               <input
                 type="text"
-                className="input"
-                placeholder="https://twitch.tv/nombre_del_canal  o  https://kick.com/nombre"
+                placeholder="https://twitch.tv/canal  ·  https://kick.com/canal"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleStart()}
-                style={{ width: "100%", marginBottom: 0 }}
+                style={{
+                  width: "100%", background: "#111", border: url ? "1px solid #6366f1" : "1px solid #333",
+                  borderRadius: 10, padding: "12px 14px", color: "#fff", fontSize: 14,
+                  boxSizing: "border-box", transition: "border 0.2s",
+                }}
               />
             </div>
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "var(--text-muted)" }}>
+            {/* Duration */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 12, color: "#888", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>
                 Duración por segmento
               </label>
-              <div style={{ display: "flex", gap: 5 }}>
+              <div style={{ display: "flex", gap: 6 }}>
                 {[5, 7, 10, 15, 20, 30].map((m) => (
                   <button
                     key={m}
-                    className={`btn ${segmentMinutes === m ? "btn-primary" : "btn-secondary"}`}
-                    style={{ flex: 1, fontSize: 12, padding: "8px 4px" }}
                     onClick={() => setSegmentMinutes(m)}
-                  >{m} min</button>
+                    style={{
+                      flex: 1, padding: "10px 4px", borderRadius: 8, cursor: "pointer",
+                      border: segmentMinutes === m ? "2px solid #ef4444" : "2px solid #2a2a2a",
+                      background: segmentMinutes === m ? "#ef444422" : "#111",
+                      color: segmentMinutes === m ? "#fca5a5" : "#666",
+                      fontSize: 13, fontWeight: 600, transition: "all 0.15s",
+                    }}
+                  >{m}m</button>
                 ))}
               </div>
-              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-                5 min = clips más rápido · 10-15 min = más contexto para Gemini
+              <p style={{ fontSize: 11, color: "#555", marginTop: 6 }}>
+                5m = clips rápido · 10-15m = más contexto para Gemini
               </p>
             </div>
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6, fontSize: 13, color: "var(--text-muted)" }}>
-                Resolución de grabación
+            {/* Resolution */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 12, color: "#888", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>
+                Resolución
               </label>
               <div style={{ display: "flex", gap: 8 }}>
-                {["480p", "720p", "1080p"].map((r) => (
+                {[["480p", "Pequeño"], ["720p", "Balance"], ["1080p", "HD"]].map(([r, desc]) => (
                   <button
                     key={r}
-                    className={`btn ${resolution === r ? "btn-primary" : "btn-secondary"}`}
-                    style={{ flex: 1, fontSize: 13 }}
                     onClick={() => setResolution(r)}
-                  >{r}</button>
+                    style={{
+                      flex: 1, padding: "10px 8px", borderRadius: 8, cursor: "pointer",
+                      border: resolution === r ? "2px solid #ef4444" : "2px solid #2a2a2a",
+                      background: resolution === r ? "#ef444422" : "#111",
+                      color: resolution === r ? "#fca5a5" : "#666",
+                      fontWeight: 600, transition: "all 0.15s",
+                    }}
+                  >
+                    <div style={{ fontSize: 13 }}>{r}</div>
+                    <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{desc}</div>
+                  </button>
                 ))}
               </div>
-              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-                480p = archivos pequeños · 720p = balance · 1080p = máxima calidad (requiere más espacio)
-              </p>
             </div>
 
-            {error && <p style={{ color: "#f87171", marginBottom: 12, fontSize: 13 }}>{error}</p>}
-            <button className="btn btn-primary" onClick={handleStart} disabled={loading} style={{ width: "100%" }}>
-              {loading ? "⏳ Conectando al stream..." : "▶ Iniciar grabación"}
+            {error && (
+              <div style={{ color: "#f87171", fontSize: 13, marginBottom: 14, background: "#ef444411", padding: "10px 14px", borderRadius: 8 }}>
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={handleStart}
+              disabled={loading || !url.trim()}
+              style={{
+                width: "100%", fontSize: 15, padding: "14px 0", borderRadius: 12,
+                border: "none", cursor: url.trim() ? "pointer" : "default", fontWeight: 700,
+                background: url.trim()
+                  ? "linear-gradient(135deg, #dc2626 0%, #ef4444 100%)"
+                  : "#1a1a1a",
+                color: url.trim() ? "#fff" : "#444",
+                transition: "all 0.2s",
+                boxShadow: url.trim() ? "0 4px 20px rgba(239,68,68,0.3)" : "none",
+              }}
+            >
+              {loading ? "⏳ Conectando..." : "▶ Iniciar grabación"}
             </button>
           </>
         ) : (
           <>
-            {/* Status header */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16,
-              background: "var(--bg-secondary)", borderRadius: 10, padding: "10px 14px" }}>
+            {/* Status bar */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10, marginBottom: 16,
+              background: "#111", borderRadius: 10, padding: "12px 16px",
+              border: isActive ? "1px solid #ef444444" : "1px solid #2a2a2a",
+            }}>
               <div style={{
                 width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
-                background: isActive ? "#f87171" : "#6b7280",
-                boxShadow: isActive ? "0 0 0 3px rgba(248,113,113,0.3)" : "none",
+                background: isActive ? "#ef4444" : "#6b7280",
+                boxShadow: isActive ? "0 0 0 3px rgba(239,68,68,0.3)" : "none",
                 animation: isActive ? "pulse 1.5s infinite" : "none",
               }} />
-              <span style={{ fontSize: 13, fontWeight: 600 }}>
-                {isActive ? "En vivo" : sessionData?.status === "stopping" ? "Deteniendo..." : "Finalizado"}
+              <span style={{ fontSize: 13, fontWeight: 700, color: isActive ? "#fca5a5" : "#aaa" }}>
+                {isActive ? "🔴 En vivo" : sessionData?.status === "stopping" ? "⏳ Deteniendo..." : "⏹ Finalizado"}
               </span>
-              <span style={{ fontSize: 12, color: "var(--text-muted)", overflow: "hidden",
-                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{url}</span>
-              <div style={{ marginLeft: "auto", display: "flex", gap: 16, flexShrink: 0 }}>
-                <span style={{ fontSize: 13 }}>
-                  <b>{segments.length}</b> <span style={{ color: "var(--text-muted)", fontSize: 11 }}>segmentos</span>
-                </span>
-                <span style={{ fontSize: 13 }}>
-                  <b style={{ color: "#22c55e" }}>{readyCount}</b> <span style={{ color: "var(--text-muted)", fontSize: 11 }}>listos</span>
-                </span>
-              </div>
+              <span style={{ fontSize: 12, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                {url}
+              </span>
+              <span style={{ fontSize: 13, flexShrink: 0 }}>
+                <b style={{ color: "#22c55e" }}>{readyCount}</b>
+                <span style={{ color: "#555", fontSize: 11 }}> listos</span>
+                {" / "}
+                <b>{segments.length}</b>
+                <span style={{ color: "#555", fontSize: 11 }}> total</span>
+              </span>
             </div>
 
-            {/* Error from backend */}
             {sessionData?.error && (
-              <div style={{ background: "#450a0a", border: "1px solid #f87171", borderRadius: 8,
-                padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#fca5a5" }}>
+              <div style={{ background: "#450a0a", border: "1px solid #f87171", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#fca5a5" }}>
                 ❌ {sessionData.error}
               </div>
             )}
 
-            {/* Segments list */}
+            {/* Segments */}
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
               {segments.map((seg) => (
-                <div key={seg.index} style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "12px 14px" }}>
+                <div key={seg.index} style={{
+                  background: seg.status === "ready" ? "#0d1a0d" : "#111",
+                  borderRadius: 10, padding: "12px 14px",
+                  border: seg.status === "ready" ? "1px solid #22c55e33" : "1px solid #222",
+                }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 15, flexShrink: 0 }}>
-                      {seg.status === "recording" ? "🔴" : seg.status === "ready" ? "✅" :
-                       seg.status === "skipped" ? "⏭️" : "❌"}
+                      {seg.status === "recording" ? "🔴" : seg.status === "ready" ? "✅" : seg.status === "skipped" ? "⏭️" : "❌"}
                     </span>
-                    <span style={{ fontWeight: 600, fontSize: 14, flexShrink: 0 }}>
+                    <span style={{ fontWeight: 600, fontSize: 14, flexShrink: 0, color: "#e5e5e5" }}>
                       Segmento {seg.index + 1}
                     </span>
-
                     {seg.status === "recording" && seg.started_at ? (
                       <SegmentTimer startedAt={seg.started_at} totalMinutes={segmentMinutes} />
                     ) : seg.status === "ready" ? (
                       <>
-                        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                          {seg.duration_recorded > 0 ? `${Math.round(seg.duration_recorded / 60)}m grabados` : ""}
+                        <span style={{ fontSize: 12, color: "#666" }}>
+                          {seg.duration_recorded > 0 ? `${Math.round(seg.duration_recorded / 60)}m` : ""}
                           {seg.file_size_mb > 0 ? ` · ${seg.file_size_mb} MB` : ""}
                         </span>
                         <a
                           href={`http://localhost:8000/api/stream/download/${sessionData.session_id}/${seg.index}`}
                           download
-                          className="btn btn-primary"
-                          style={{ marginLeft: "auto", padding: "4px 12px", fontSize: 12, textDecoration: "none" }}
+                          style={{
+                            marginLeft: "auto", padding: "5px 14px", fontSize: 12, textDecoration: "none",
+                            background: "#22c55e22", color: "#22c55e", border: "1px solid #22c55e44",
+                            borderRadius: 8, fontWeight: 600,
+                          }}
                         >
                           ⬇ Descargar
                         </a>
                       </>
                     ) : seg.status === "skipped" ? (
-                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Muy corto, ignorado</span>
+                      <span style={{ fontSize: 12, color: "#555" }}>Muy corto, ignorado</span>
                     ) : seg.error ? (
                       <span style={{ fontSize: 12, color: "#f87171" }}>{seg.error.slice(0, 80)}</span>
                     ) : null}
@@ -1391,29 +1500,40 @@ function LiveStreamStep() {
               ))}
 
               {isActive && segments.length === 0 && (
-                <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "14px",
-                  textAlign: "center", fontSize: 13, color: "var(--text-muted)" }}>
-                  Conectando al stream... esto puede tomar unos segundos
+                <div style={{ background: "#111", borderRadius: 10, padding: "18px", textAlign: "center", fontSize: 13, color: "#555" }}>
+                  ⏳ Conectando al stream...
                 </div>
               )}
             </div>
 
             {readyCount > 0 && (
-              <div style={{ background: "#052e16", border: "1px solid #16a34a", borderRadius: 8,
-                padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#86efac" }}>
-                ✅ {readyCount} segmento{readyCount > 1 ? "s" : ""} listo{readyCount > 1 ? "s" : ""} —
-                descárgalo{readyCount > 1 ? "s" : ""} y súbelo{readyCount > 1 ? "s" : ""} al <b>Video Clipper</b> para sacar clips
+              <div style={{ background: "#052e16", border: "1px solid #16a34a", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#86efac" }}>
+                ✅ {readyCount} segmento{readyCount > 1 ? "s" : ""} listo{readyCount > 1 ? "s" : ""} — descárgalo{readyCount > 1 ? "s" : ""} y súbelo{readyCount > 1 ? "s" : ""} al <b>Video Clipper</b>
               </div>
             )}
 
             <div style={{ display: "flex", gap: 10 }}>
               {isActive && (
-                <button className="btn btn-secondary" onClick={handleStop} style={{ flex: 1 }}>
+                <button
+                  onClick={handleStop}
+                  style={{
+                    flex: 1, padding: "12px 0", borderRadius: 10, border: "none",
+                    background: "#2a1010", color: "#f87171", cursor: "pointer",
+                    fontSize: 14, fontWeight: 600, border: "1px solid #ef444444",
+                  }}
+                >
                   ⏹ Detener grabación
                 </button>
               )}
               {!isActive && (
-                <button className="btn btn-primary" onClick={handleReset} style={{ flex: 1 }}>
+                <button
+                  onClick={handleReset}
+                  style={{
+                    flex: 1, padding: "12px 0", borderRadius: 10, border: "none",
+                    background: "linear-gradient(135deg, #dc2626, #ef4444)",
+                    color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 700,
+                  }}
+                >
                   🔄 Nueva sesión
                 </button>
               )}
@@ -1715,6 +1835,30 @@ function MemeStep() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const handleDownloadAllDescriptions = async () => {
+    if (!batch) return;
+    const parts = [];
+    for (let i = 0; i < batch.items.length; i++) {
+      const item = batch.items[i];
+      if (item.status === "ready") {
+        try {
+          const text = await api.getMemeIgDescription(batchId, i);
+          parts.push(`=== Meme ${i + 1}: ${item.filename} ===\n\n${text}`);
+        } catch (e) {
+          parts.push(`=== Meme ${i + 1}: ${item.filename} ===\n\n[Descripción no disponible]`);
+        }
+      }
+    }
+    if (!parts.length) return;
+    const blob = new Blob([parts.join("\n\n" + "─".repeat(60) + "\n\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `descripciones_memes_${batchId}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const statusLabel = (item) => {
     switch (item.status) {
       case "pending":    return "⏳ Pendiente";
@@ -1881,13 +2025,27 @@ function MemeStep() {
                 {batch?.status !== "completed" && "Gemini está analizando cada video secuencialmente"}
               </div>
             </div>
-            <button
-              className="btn btn-secondary"
-              style={{ fontSize: 12, padding: "6px 14px", borderRadius: 8 }}
-              onClick={handleReset}
-            >
-              Nuevo batch
-            </button>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                {batch?.status === "completed" && doneCount > 0 && (
+                  <button
+                    onClick={handleDownloadAllDescriptions}
+                    style={{
+                      fontSize: 12, padding: "6px 14px", borderRadius: 8, cursor: "pointer",
+                      background: "#6366f122", color: "#818cf8",
+                      border: "1px solid #6366f144", fontWeight: 600,
+                    }}
+                  >
+                    📄 Todas las descripciones
+                  </button>
+                )}
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12, padding: "6px 14px", borderRadius: 8 }}
+                  onClick={handleReset}
+                >
+                  Nuevo batch
+                </button>
+              </div>
           </div>
 
           {/* Progress bar */}
