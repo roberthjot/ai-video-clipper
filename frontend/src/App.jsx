@@ -2126,22 +2126,32 @@ function App() {
 
       <main className="app-main">
         {/* Mode toggle */}
-        <div style={{ display: "flex", gap: 8, padding: "12px 16px 0", justifyContent: "center", flexWrap: "wrap" }}>
-          <button
-            className={`btn ${mode === "video" ? "btn-primary" : "btn-secondary"}`}
-            style={{ minWidth: 140 }}
-            onClick={() => setMode("video")}
-          >📹 Video Clipper</button>
-          <button
-            className={`btn ${mode === "stream" ? "btn-primary" : "btn-secondary"}`}
-            style={{ minWidth: 140 }}
-            onClick={() => setMode("stream")}
-          >🔴 Live Stream</button>
-          <button
-            className={`btn ${mode === "meme" ? "btn-primary" : "btn-secondary"}`}
-            style={{ minWidth: 140 }}
-            onClick={() => setMode("meme")}
-          >😂 Meme Generator</button>
+        <div style={{ padding: "20px 16px 0", display: "flex", justifyContent: "center" }}>
+          <div style={{
+            display: "inline-flex", gap: 6, background: "#111", borderRadius: 16,
+            padding: 6, border: "1px solid #2a2a2a", boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+          }}>
+            {[
+              { key: "video",  icon: "📹", label: "Video Clipper",   active: "linear-gradient(135deg,#6366f1,#8b5cf6)" },
+              { key: "stream", icon: "🔴", label: "Live Stream",      active: "linear-gradient(135deg,#dc2626,#ef4444)" },
+              { key: "meme",   icon: "😂", label: "Meme Generator",   active: "linear-gradient(135deg,#d97706,#f59e0b)" },
+            ].map(({ key, icon, label, active }) => (
+              <button
+                key={key}
+                onClick={() => setMode(key)}
+                style={{
+                  padding: "10px 22px", borderRadius: 12, border: "none", cursor: "pointer",
+                  background: mode === key ? active : "transparent",
+                  color: mode === key ? "#fff" : "#666",
+                  fontWeight: 700, fontSize: 14, transition: "all 0.2s",
+                  boxShadow: mode === key ? "0 2px 12px rgba(0,0,0,0.3)" : "none",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {icon} {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {mode === "stream" && <LiveStreamStep />}
