@@ -71,9 +71,13 @@ RESOLUTION_QUALITY = {
 }
 
 
-def resolve_stream_url(url: str, resolution: str = "720p") -> str:
+def resolve_stream_url(url: str, resolution: str = "720p", start_offset_minutes: int = 0) -> str:
     """Use streamlink to get the direct HLS URL for recording."""
     session = sl.Streamlink()
+    if start_offset_minutes > 0:
+        # hls-start-offset expects seconds as int or HH:MM:SS string
+        session.set_option("hls-start-offset", start_offset_minutes * 60)
+        print(f"[Stream] Rewind offset: -{start_offset_minutes} min ({start_offset_minutes * 60}s)")
     streams = session.streams(url)
     if not streams:
         raise ValueError(f"No streams found for URL: {url}")
@@ -130,7 +134,7 @@ def _recording_loop(session: StreamSession, stop_event: threading.Event) -> None
     os.makedirs(streams_dir, exist_ok=True)
 
     try:
-        hls_url = resolve_stream_url(session.url, session.resolution)
+        hls_url = resolve_stream_url(session.url, session.resolution, session.start_offset_minutes)
         print(f"[Stream] Resolved HLS URL for {session.url} ({session.resolution})")
     except Exception as e:
         session.status = "error"
@@ -177,7 +181,8 @@ def _recording_loop(session: StreamSession, stop_event: threading.Event) -> None
 
 def start_session(url: str, segment_minutes: int = 10,
                   clips_per_segment: int = 5,
-                  resolution: str = "720p") -> StreamSession:
+                  resolution: str = "720p",
+                  start_offset_minutes: int = 0) -> StreamSession:
     session_id = uuid.uuid4().hex[:8]
     session = StreamSession(
         session_id=session_id,
@@ -186,6 +191,7 @@ def start_session(url: str, segment_minutes: int = 10,
         segment_minutes=segment_minutes,
         clips_per_segment=clips_per_segment,
         resolution=resolution,
+        start_offset_minutes=start_offset_minutes,
         status="starting",
         created_at=datetime.now(timezone.utc).isoformat(),
     )

@@ -1251,11 +1251,15 @@ function LiveStreamStep() {
   const [url, setUrl] = useState("");
   const [segmentMinutes, setSegmentMinutes] = useState(10);
   const [resolution, setResolution] = useState("720p");
+  const [startOffset, setStartOffset] = useState(0);
   const [sessionId, setSessionId] = useState(null);
   const [sessionData, setSessionData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const pollRef = useRef(null);
+  const [elapsed, setElapsed] = useState(0);
+  const timerRef = useRef(null);
+  const startTimeRef = useRef(null);
 
   // Poll status every 3s while session active
   useEffect(() => {
@@ -1266,6 +1270,7 @@ function LiveStreamStep() {
         setSessionData(data);
         if (data.status === "stopped" || data.status === "error") {
           clearInterval(pollRef.current);
+          clearInterval(timerRef.current);
         }
       } catch (e) { /* ignore transient */ }
     };
@@ -1279,9 +1284,14 @@ function LiveStreamStep() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.startStream(url.trim(), segmentMinutes, 5, resolution);
+      const res = await api.startStream(url.trim(), segmentMinutes, 5, resolution, startOffset);
       setSessionId(res.session_id);
       setSessionData({ session_id: res.session_id, status: res.status, segments: [], ready_count: 0 });
+      setElapsed(0);
+      startTimeRef.current = Date.now();
+      timerRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      }, 1000);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
@@ -1296,10 +1306,21 @@ function LiveStreamStep() {
 
   const handleReset = () => {
     clearInterval(pollRef.current);
+    clearInterval(timerRef.current);
     setSessionId(null);
     setSessionData(null);
     setUrl("");
     setError("");
+    setElapsed(0);
+  };
+
+  const formatElapsed = (secs) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
   };
 
   const isActive = sessionData && (sessionData.status === "recording" || sessionData.status === "starting");
@@ -1397,6 +1418,31 @@ function LiveStreamStep() {
               </div>
             </div>
 
+            {/* Start offset (rewind) */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 12, color: "#888", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>
+                ⏪ Empezar desde
+              </label>
+              <p style={{ fontSize: 11, color: "#555", margin: "0 0 8px" }}>
+                Retrocede en el stream en vivo (Twitch guarda ~30-60 min en caché)
+              </p>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[[0, "🔴 En vivo"], [10, "−10 min"], [20, "−20 min"], [30, "−30 min"]].map(([mins, label]) => (
+                  <button
+                    key={mins}
+                    onClick={() => setStartOffset(mins)}
+                    style={{
+                      flex: 1, padding: "10px 4px", borderRadius: 8, cursor: "pointer",
+                      border: startOffset === mins ? "2px solid #ef4444" : "2px solid #2a2a2a",
+                      background: startOffset === mins ? "#ef444422" : "#111",
+                      color: startOffset === mins ? "#fca5a5" : "#666",
+                      fontSize: 12, fontWeight: 600, transition: "all 0.15s",
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+
             {error && (
               <div style={{ color: "#f87171", fontSize: 13, marginBottom: 14, background: "#ef444411", padding: "10px 14px", borderRadius: 8 }}>
                 {error}
@@ -1437,6 +1483,11 @@ function LiveStreamStep() {
               <span style={{ fontSize: 13, fontWeight: 700, color: isActive ? "#fca5a5" : "#aaa" }}>
                 {isActive ? "🔴 En vivo" : sessionData?.status === "stopping" ? "⏳ Deteniendo..." : "⏹ Finalizado"}
               </span>
+              {isActive && (
+                <span style={{ fontSize: 12, color: "#f87171", fontWeight: 700, background: "#ef444418", padding: "2px 8px", borderRadius: 6, flexShrink: 0 }}>
+                  ⏱ {formatElapsed(elapsed)}
+                </span>
+              )}
               <span style={{ fontSize: 12, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                 {url}
               </span>

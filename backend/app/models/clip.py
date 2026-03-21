@@ -93,6 +93,7 @@ class StreamSession(BaseModel):
     segment_minutes: int = 10
     clips_per_segment: int = 5
     resolution: str = "720p"
+    start_offset_minutes: int = 0
     status: str = "idle"      # starting | recording | stopping | stopped | error
     error: str = ""
     segments: list[StreamSegment] = []
@@ -105,3 +106,4 @@ class StreamStartRequest(BaseModel):
     segment_minutes: int = 10
     clips_per_segment: int = 5
     resolution: str = "720p"  # "480p" | "720p" | "1080p"
+    start_offset_minutes: int = 0  # Rewind N minutes before recording starts

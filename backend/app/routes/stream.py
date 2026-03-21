@@ -22,6 +22,7 @@ def start_stream(req: StreamStartRequest):
         segment_minutes=req.segment_minutes,
         clips_per_segment=req.clips_per_segment,
         resolution=req.resolution,
+        start_offset_minutes=req.start_offset_minutes,
     )
     return {"session_id": session.session_id, "status": session.status}
 
