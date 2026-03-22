@@ -71,21 +71,34 @@ def generate_music_vibe(file_obj) -> str:
     return raw
 
 
-def generate_ig_description(file_obj, meme_text: str) -> str:
-    """Ask Gemini to generate a long Instagram caption for the meme."""
+def generate_ig_description(file_obj, meme_text: str, content_type: str = "meme") -> str:
+    """Ask Gemini to generate a long Instagram caption for the video."""
+    if content_type == "music":
+        prompt = (
+            f'This music clip\'s vibe phrase is: "{meme_text}"\n\n'
+            "Write a long Instagram post caption for this music clip. "
+            "Write it as an engaging music fan account post in English. "
+            "Talk about the feeling, energy, and mood of the song. "
+            "Use 3-4 short paragraphs (1-3 sentences each). "
+            "Include 12-15 relevant music hashtags at the end (e.g. #music #vibes #nowplaying). "
+            "Max 2 emojis total. "
+            "Return ONLY the caption — no labels, no extra words."
+        )
+    else:
+        prompt = (
+            f'This video\'s meme caption is: "{meme_text}"\n\n'
+            "Write a long Instagram post caption for this meme video. "
+            "Write it as a funny, relatable fan account post in English. "
+            "Use 3-4 short paragraphs (1-3 sentences each). "
+            "Include 12-15 relevant hashtags at the end. "
+            "Make it engaging and shareable. Max 2 emojis total. "
+            "Return ONLY the caption — no labels, no extra words."
+        )
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-            types.Part.from_text(text=(
-                f'This video\'s meme caption is: "{meme_text}"\n\n'
-                "Write a long Instagram post caption for this meme video. "
-                "Write it as a funny, relatable fan account post in English. "
-                "Use 3-4 short paragraphs (1-3 sentences each). "
-                "Include 12-15 relevant hashtags at the end. "
-                "Make it engaging and shareable. Max 2 emojis total. "
-                "Return ONLY the caption — no labels, no extra words."
-            )),
+            types.Part.from_text(text=prompt),
         ])],
         config=types.GenerateContentConfig(temperature=0.9),
     )
@@ -226,7 +239,7 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
 
             # 3b. Generate IG description (while file is still uploaded)
             try:
-                ig_description = generate_ig_description(file_obj, meme_text)
+                ig_description = generate_ig_description(file_obj, meme_text, content_type)
             except Exception:
                 ig_description = ""
             item["ig_description"] = ig_description
@@ -243,8 +256,9 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             # Save IG description as .txt
             txt_filename = f"meme_{batch_id}_{i}.txt"
             txt_path = os.path.join(MEME_OUTPUT_DIR, txt_filename)
+            label = "Vibe text" if content_type == "music" else "Meme text"
             with open(txt_path, "w", encoding="utf-8") as f:
-                f.write(f"Meme text:\n{meme_text}\n\n")
+                f.write(f"{label}:\n{meme_text}\n\n")
                 f.write(f"Instagram Description:\n{ig_description}\n")
             item["txt_path"] = txt_path
 
