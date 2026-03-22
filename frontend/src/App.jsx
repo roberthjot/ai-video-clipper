@@ -1568,7 +1568,7 @@ function LiveStreamStep() {
                 <button
                   onClick={handleStop}
                   style={{
-                    flex: 1, padding: "12px 0", borderRadius: 10, border: "none",
+                    flex: 1, padding: "12px 0", borderRadius: 10,
                     background: "#2a1010", color: "#f87171", cursor: "pointer",
                     fontSize: 14, fontWeight: 600, border: "1px solid #ef444444",
                   }}
