@@ -48,6 +48,29 @@ def generate_meme_text(file_obj) -> str:
     return raw
 
 
+def generate_music_vibe(file_obj) -> str:
+    """Ask Gemini to generate a vibe phrase for a music video."""
+    response = client.models.generate_content(
+        model=settings.GEMINI_MODEL,
+        contents=[types.Content(role="user", parts=[
+            types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+            types.Part.from_text(text=(
+                "Watch this music video or audio clip carefully. "
+                "Write a short, punchy phrase that perfectly captures the VIBE and FEELING of this music. "
+                "Rules: English only. Maximum 10 words. No hashtags. No emojis. No punctuation except apostrophes and commas. "
+                "Make it feel like a mood that people instantly relate to. "
+                "Examples of the style: 'That one song you replay 10 times', 'Late night drives only', 'Pure serotonin', 'This hits different at 2am', 'The song that lives rent free in your head'. "
+                "Return ONLY the vibe phrase — nothing else, no explanations, no labels."
+            )),
+        ])],
+        config=types.GenerateContentConfig(temperature=1.0),
+    )
+    raw = response.text.strip()
+    raw = raw.lower()
+    raw = raw[:1].upper() + raw[1:] if raw else raw
+    return raw
+
+
 def generate_ig_description(file_obj, meme_text: str) -> str:
     """Ask Gemini to generate a long Instagram caption for the meme."""
     response = client.models.generate_content(
@@ -177,7 +200,7 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
         raise RuntimeError(f"FFmpeg failed: {result.stderr[-600:]}")
 
 
-def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 80, text_x: float = 0.05) -> None:
+def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 80, text_x: float = 0.05, content_type: str = "meme") -> None:
     """Background thread: process each video in the batch sequentially."""
     batch = meme_batches[batch_id]
     os.makedirs(MEME_OUTPUT_DIR, exist_ok=True)
@@ -194,8 +217,11 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             item["status"] = "analyzing"
             file_obj = wait_for_processing(file_obj)
 
-            # 3. Generate meme text
-            meme_text = generate_meme_text(file_obj)
+            # 3. Generate text based on content type
+            if content_type == "music":
+                meme_text = generate_music_vibe(file_obj)
+            else:
+                meme_text = generate_meme_text(file_obj)
             item["meme_text"] = meme_text
 
             # 3b. Generate IG description (while file is still uploaded)
@@ -206,7 +232,7 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             item["ig_description"] = ig_description
 
             delete_file(file_obj)
-            print(f"[Meme] Batch {batch_id} item {i}: text = {meme_text[:60]!r}")
+            print(f"[Meme] Batch {batch_id} item {i}: [{content_type}] text = {meme_text[:60]!r}")
 
             # 4. Export video
             item["status"] = "exporting"
@@ -238,13 +264,14 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
 
 def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black",
                      text_y: float = 0.08, video_scale: float = 0.9, video_y: float = 0.6,
-                     font_size: int = 80, text_x: float = 0.05) -> str:
+                     font_size: int = 80, text_x: float = 0.05, content_type: str = "meme") -> str:
     """Start a meme batch. Returns batch_id."""
     batch_id = uuid.uuid4().hex[:12]
     meme_batches[batch_id] = {
         "batch_id": batch_id,
         "status": "processing",
         "bg_color": bg_color,
+        "content_type": content_type,
         "items": [
             {
                 "index": i,
@@ -261,7 +288,7 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
     }
     threading.Thread(
         target=_process_batch,
-        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size, text_x),
+        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size, text_x, content_type),
         daemon=True,
     ).start()
     return batch_id

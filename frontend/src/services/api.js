@@ -217,12 +217,13 @@ export async function listStreamSessions() {
 
 // ─── Meme Generator API ───────────────────────────────────────────────────────
 
-export function processMemes(files, bgColor, textY, videoScale, onProgress) {
+export function processMemes(files, bgColor, textY, videoScale, onProgress, contentType = "meme") {
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append("bg_color", bgColor);
         formData.append("text_y", textY);
         formData.append("video_scale", videoScale);
+        formData.append("content_type", contentType);
         for (const file of files) {
             formData.append("videos", file);
         }

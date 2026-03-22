@@ -16,6 +16,7 @@ async def process_memes(
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
     font_size: int = Form(80),
+    content_type: str = Form("meme"),
     videos: list[UploadFile] = File(...),
 ):
     """Upload multiple videos and start meme batch processing."""
@@ -36,7 +37,7 @@ async def process_memes(
 
     batch_id = start_meme_batch(video_paths, filenames, bg_color,
                                  text_y=text_y, text_x=text_x, video_scale=video_scale,
-                                 video_y=video_y, font_size=font_size)
+                                 video_y=video_y, font_size=font_size, content_type=content_type)
     return {"batch_id": batch_id, "count": len(video_paths)}
 
 

@@ -1817,6 +1817,7 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
 function MemeStep() {
   const [files, setFiles] = useState([]);
   const [bgColor, setBgColor] = useState("black");
+  const [contentType, setContentType] = useState("meme");
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [batchId, setBatchId] = useState(null);
@@ -1865,7 +1866,7 @@ function MemeStep() {
     setBatch(null);
     setBatchId(null);
     try {
-      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct);
+      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct, contentType);
       setBatchId(result.batch_id);
     } catch (e) {
       setError(e.message || "Error al subir los videos");
@@ -1878,6 +1879,7 @@ function MemeStep() {
     clearInterval(pollRef.current);
     setFiles([]);
     setBgColor("black");
+    setContentType("meme");
     setUploading(false);
     setUploadPct(0);
     setBatchId(null);
@@ -1934,11 +1936,15 @@ function MemeStep() {
         border: "1px solid #2a2a4a",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-          <div style={{ fontSize: 28 }}>😂</div>
+          <div style={{ fontSize: 28 }}>{contentType === "music" ? "🎵" : "😂"}</div>
           <div>
-            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Meme Generator</h2>
+            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>
+              {contentType === "music" ? "Music Vibe Generator" : "Meme Generator"}
+            </h2>
             <p style={{ margin: 0, color: "#8888aa", fontSize: 13 }}>
-              Gemini analiza el video y genera texto + descripción larga para Instagram
+              {contentType === "music"
+                ? "Gemini detecta el vibe de la música y genera una frase que lo describe"
+                : "Gemini analiza el video y genera texto + descripción larga para Instagram"}
             </p>
           </div>
         </div>
@@ -1991,6 +1997,40 @@ function MemeStep() {
                 <div style={{ fontSize: 13, color: "#555" }}>o haz click para seleccionar · máximo ~20 videos</div>
               </div>
             )}
+          </div>
+
+          {/* Content type selector */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 12, color: "#888", fontWeight: 600, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Tipo de contenido
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              {[
+                { val: "meme", label: "😂 Meme", desc: "Texto gracioso y relatable" },
+                { val: "music", label: "🎵 Música", desc: "Frase que describe el vibe" },
+              ].map(({ val, label, desc }) => (
+                <button
+                  key={val}
+                  onClick={() => setContentType(val)}
+                  style={{
+                    flex: 1, padding: "12px 16px", borderRadius: 10, cursor: "pointer",
+                    border: contentType === val
+                      ? (val === "music" ? "2px solid #f59e0b" : "2px solid #6366f1")
+                      : "2px solid #2a2a2a",
+                    background: contentType === val
+                      ? (val === "music" ? "#f59e0b18" : "#6366f118")
+                      : "#111",
+                    color: contentType === val
+                      ? (val === "music" ? "#fbbf24" : "#818cf8")
+                      : "#666",
+                    transition: "all 0.2s", textAlign: "left",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{label}</div>
+                  <div style={{ fontSize: 11, opacity: 0.7 }}>{desc}</div>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Background selector */}
