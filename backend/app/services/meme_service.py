@@ -48,6 +48,42 @@ def generate_meme_text(file_obj) -> str:
     return raw
 
 
+def detect_music_artist(file_obj) -> dict:
+    """Ask Gemini to identify the artist in the music video. Returns dict with artist/instagram or empty strings."""
+    response = client.models.generate_content(
+        model=settings.GEMINI_MODEL,
+        contents=[types.Content(role="user", parts=[
+            types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+            types.Part.from_text(text=(
+                "Listen and watch this music video carefully. "
+                "Try to identify the music artist or singer. "
+                "Only answer if you are highly confident — do NOT guess or make up names. "
+                "If you recognize the artist, respond in this exact format:\n"
+                "ARTIST: [full artist name]\n"
+                "INSTAGRAM: [@instagram_handle]\n\n"
+                "If you cannot identify the artist with high confidence, respond exactly:\n"
+                "ARTIST: NONE\n"
+                "Return ONLY these lines, nothing else."
+            )),
+        ])],
+        config=types.GenerateContentConfig(temperature=0.1),
+    )
+    raw = response.text.strip()
+    artist = ""
+    instagram = ""
+    for line in raw.splitlines():
+        line = line.strip()
+        if line.upper().startswith("ARTIST:"):
+            val = line[7:].strip()
+            if val.upper() != "NONE":
+                artist = val
+        elif line.upper().startswith("INSTAGRAM:"):
+            val = line[10:].strip()
+            if val and val.upper() != "NONE":
+                instagram = val if val.startswith("@") else f"@{val}"
+    return {"artist": artist, "instagram": instagram}
+
+
 def generate_music_vibe(file_obj) -> str:
     """Ask Gemini to generate a vibe phrase for a music video."""
     response = client.models.generate_content(
@@ -237,7 +273,16 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
                 meme_text = generate_meme_text(file_obj)
             item["meme_text"] = meme_text
 
-            # 3b. Generate IG description (while file is still uploaded)
+            # 3b. Detect artist (music mode only, while file is still uploaded)
+            if content_type == "music":
+                try:
+                    artist_info = detect_music_artist(file_obj)
+                except Exception:
+                    artist_info = {"artist": "", "instagram": ""}
+                item["artist_info"] = artist_info
+                print(f"[Meme] Batch {batch_id} item {i}: artist = {artist_info}")
+
+            # 3c. Generate IG description (while file is still uploaded)
             try:
                 ig_description = generate_ig_description(file_obj, meme_text, content_type)
             except Exception:
@@ -259,6 +304,14 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             label = "Vibe text" if content_type == "music" else "Meme text"
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write(f"{label}:\n{meme_text}\n\n")
+                if content_type == "music":
+                    ai = item.get("artist_info", {})
+                    if ai.get("artist"):
+                        f.write(f"Artist: {ai['artist']}\n")
+                    if ai.get("instagram"):
+                        f.write(f"Instagram: {ai['instagram']}\n")
+                    if ai.get("artist"):
+                        f.write("\n")
                 f.write(f"Instagram Description:\n{ig_description}\n")
             item["txt_path"] = txt_path
 
@@ -296,6 +349,7 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
                 "error": "",
                 "ig_description": "",
                 "txt_path": "",
+                "artist_info": None,
             }
             for i in range(len(video_paths))
         ],

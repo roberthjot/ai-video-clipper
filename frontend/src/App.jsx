@@ -1682,18 +1682,40 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
         </div>
       </div>
 
-      {/* Meme text box */}
+      {/* Meme/vibe text box */}
       {item.meme_text && (
         <div style={{
           margin: "0 14px 12px",
           padding: "10px 14px",
           background: "#0d0d0d",
           borderRadius: 8,
-          borderLeft: "3px solid #6366f1",
+          borderLeft: `3px solid ${item.artist_info !== undefined ? "#f59e0b" : "#6366f1"}`,
         }}>
-          <div style={{ fontSize: 11, color: "#6366f1", fontWeight: 700, marginBottom: 4, letterSpacing: "0.05em" }}>MEME TEXT</div>
+          <div style={{ fontSize: 11, color: item.artist_info !== undefined ? "#f59e0b" : "#6366f1", fontWeight: 700, marginBottom: 4, letterSpacing: "0.05em" }}>
+            {item.artist_info !== undefined ? "VIBE TEXT" : "MEME TEXT"}
+          </div>
           <div style={{ fontSize: 14, color: "#e5e5e5", fontWeight: 600, lineHeight: 1.5 }}>
             {item.meme_text}
+          </div>
+        </div>
+      )}
+
+      {/* Artist info (music mode only) */}
+      {item.artist_info?.artist && (
+        <div style={{
+          margin: "-4px 14px 12px",
+          padding: "8px 14px",
+          background: "#0d0d0d",
+          borderRadius: 8,
+          borderLeft: "3px solid #f59e0b",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <div style={{ fontSize: 18 }}>🎤</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#fbbf24" }}>{item.artist_info.artist}</div>
+            {item.artist_info.instagram && (
+              <div style={{ fontSize: 12, color: "#888", marginTop: 1 }}>{item.artist_info.instagram}</div>
+            )}
           </div>
         </div>
       )}
