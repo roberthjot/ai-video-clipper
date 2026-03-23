@@ -1865,7 +1865,13 @@ function MemeStep() {
   const [batchId, setBatchId] = useState(null);
   const [batch, setBatch] = useState(null);
   const [error, setError] = useState("");
-  const [globalPreset, setGlobalPreset] = useState(null);
+  const [showGlobalSliders, setShowGlobalSliders] = useState(false);
+  const [gTextY, setGTextY] = useState(0.08);
+  const [gTextX, setGTextX] = useState(0.05);
+  const [gVideoY, setGVideoY] = useState(0.60);
+  const [gVideoScale, setGVideoScale] = useState(0.9);
+  const [gFontSize, setGFontSize] = useState(80);
+  const [reexportingAll, setReexportingAll] = useState(false);
   const pollRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -1953,6 +1959,16 @@ function MemeStep() {
     a.download = `descripciones_memes_${batchId}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleReexportAll = async () => {
+    if (!batch) return;
+    setReexportingAll(true);
+    const readyItems = batch.items.map((item, i) => ({ item, i })).filter(({ item }) => item.status === "ready");
+    await Promise.all(readyItems.map(({ i }) =>
+      api.reexportMeme(batchId, i, gTextY, gTextX, gVideoScale, gVideoY, gFontSize).catch(() => {})
+    ));
+    setReexportingAll(false);
   };
 
   const statusLabel = (item) => {
@@ -2194,31 +2210,50 @@ function MemeStep() {
             </div>
           )}
 
-          {/* Global presets */}
-          <div style={{
-            background: "#111", borderRadius: 10, padding: "12px 14px",
-            border: "1px solid #2a2a2a", marginBottom: 12,
-          }}>
-            <div style={{ fontSize: 10, color: "#666", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
-              ⚡ Preset global — mueve todos los videos a la vez
+          {/* Global adjustments panel */}
+          <div style={{ background: "#111", borderRadius: 10, border: "1px solid #2a2a2a", marginBottom: 12, overflow: "hidden" }}>
+            <div
+              style={{ padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+              onClick={() => setShowGlobalSliders(v => !v)}
+            >
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#c4b5fd" }}>⚙ Ajustes globales — aplica a todos</div>
+              <div style={{ fontSize: 12, color: "#666" }}>{showGlobalSliders ? "▲ Cerrar" : "▼ Abrir"}</div>
             </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {MEME_PRESETS.map(({ label, vals }) => (
-                <button
-                  key={label}
-                  onClick={() => setGlobalPreset({ ...vals, _ts: Date.now() })}
-                  style={{
-                    fontSize: 12, padding: "6px 14px", borderRadius: 8, cursor: "pointer",
-                    background: "#1a1a1a", color: "#aaa",
-                    border: "1px solid #333", fontWeight: 600, transition: "all 0.15s",
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#6366f1"; e.currentTarget.style.color = "#c4b5fd"; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#333"; e.currentTarget.style.color = "#aaa"; }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            {showGlobalSliders && (
+              <div style={{ padding: "0 14px 14px", borderTop: "1px solid #1e1e1e" }}>
+                <div style={{ paddingTop: 12 }}>
+                  {[
+                    { label: "Texto vertical",  value: gTextY,     setValue: setGTextY,     min: 0.02, max: 0.45, step: 0.01, fmt: v => +v <= 0.12 ? "⬆ Arriba" : +v <= 0.28 ? "↕ Centro" : "⬇ Abajo" },
+                    { label: "Texto horizontal", value: gTextX,     setValue: setGTextX,     min: 0.03, max: 0.7,  step: 0.01, fmt: v => +v <= 0.08 ? "← Izq"    : +v <= 0.42 ? "↔ Centro" : "→ Der" },
+                    { label: "Posición video",   value: gVideoY,    setValue: setGVideoY,    min: 0.25, max: 0.85, step: 0.01, fmt: v => +v <= 0.38 ? "⬆ Arriba" : +v <= 0.62 ? "↕ Centro" : "⬇ Abajo" },
+                    { label: "Tamaño video",     value: gVideoScale,setValue: setGVideoScale, min: 0.4,  max: 1.0,  step: 0.05, fmt: v => `${Math.round(+v * 100)}%` },
+                    { label: "Tamaño letra",     value: gFontSize,  setValue: v => setGFontSize(parseInt(v)), min: 40, max: 140, step: 5, fmt: v => `${v}px` },
+                  ].map(({ label, value, setValue, min, max, step, fmt }) => (
+                    <div key={label} style={{ marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 4 }}>
+                        <span>{label}</span>
+                        <span style={{ color: "#c4b5fd" }}>{fmt(value)}</span>
+                      </div>
+                      <input type="range" min={min} max={max} step={step}
+                        value={value} onChange={e => setValue(e.target.value)}
+                        style={{ width: "100%", accentColor: "#6366f1" }} />
+                    </div>
+                  ))}
+                  <button
+                    onClick={handleReexportAll}
+                    disabled={reexportingAll}
+                    style={{
+                      width: "100%", fontSize: 13, padding: "11px 0", borderRadius: 8,
+                      border: "none", cursor: reexportingAll ? "not-allowed" : "pointer", fontWeight: 700,
+                      background: reexportingAll ? "#222" : "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                      color: "#fff", marginTop: 4,
+                    }}
+                  >
+                    {reexportingAll ? "⏳ Re-exportando todos..." : "🔄 Re-exportar todos con estos ajustes"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Items list */}
@@ -2230,7 +2265,6 @@ function MemeStep() {
                 batchId={batchId}
                 index={i}
                 statusLabel={statusLabel}
-                globalPreset={globalPreset}
               />
             ))}
           </div>
