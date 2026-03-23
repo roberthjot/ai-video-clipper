@@ -1796,6 +1796,40 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
       {isReady && showSliders && (
         <div style={{ padding: "0 14px 14px", borderTop: "1px solid #222" }}>
           <div style={{ paddingTop: 12 }}>
+
+            {/* Presets */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, color: "#666", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 7 }}>Presets — aplica todos los ajustes de una vez</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[
+                  { label: "🎯 Estándar",     vals: { textY: 0.08, textX: 0.05, videoY: 0.60, videoScale: 0.9,  fontSize: 80 } },
+                  { label: "⬆ Texto arriba",  vals: { textY: 0.04, textX: 0.05, videoY: 0.65, videoScale: 0.9,  fontSize: 75 } },
+                  { label: "🎬 Video grande",  vals: { textY: 0.04, textX: 0.05, videoY: 0.58, videoScale: 1.0,  fontSize: 65 } },
+                  { label: "📐 Equilibrado",   vals: { textY: 0.12, textX: 0.05, videoY: 0.55, videoScale: 0.85, fontSize: 80 } },
+                ].map(({ label, vals }) => (
+                  <button
+                    key={label}
+                    onClick={() => {
+                      setTextY(vals.textY);
+                      setTextX(vals.textX);
+                      setVideoY(vals.videoY);
+                      setVideoScale(vals.videoScale);
+                      setFontSize(vals.fontSize);
+                    }}
+                    style={{
+                      fontSize: 11, padding: "6px 12px", borderRadius: 7, cursor: "pointer",
+                      background: "#1a1a1a", color: "#aaa",
+                      border: "1px solid #333", fontWeight: 600, transition: "all 0.15s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = "#6366f1"; e.currentTarget.style.color = "#c4b5fd"; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#333"; e.currentTarget.style.color = "#aaa"; }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {[
               { label: "Texto vertical", value: textY, setValue: setTextY, min: 0.02, max: 0.45, step: 0.01, fmt: v => v <= 0.12 ? "⬆ Arriba" : v <= 0.28 ? "↕ Centro" : "⬇ Abajo" },
               { label: "Texto horizontal", value: textX, setValue: setTextX, min: 0.03, max: 0.7, step: 0.01, fmt: v => v <= 0.08 ? "← Izq" : v <= 0.42 ? "↔ Centro" : "→ Der" },
