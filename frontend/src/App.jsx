@@ -1598,10 +1598,19 @@ function LiveStreamStep() {
 
 
 // ================================================
+// MEME PRESETS (global — applied to all cards at once)
+// ================================================
+const MEME_PRESETS = [
+  { label: "🎯 Estándar",    vals: { textY: 0.08, textX: 0.05, videoY: 0.60, videoScale: 0.9,  fontSize: 80 } },
+  { label: "⬆ Texto arriba", vals: { textY: 0.04, textX: 0.05, videoY: 0.65, videoScale: 0.9,  fontSize: 75 } },
+  { label: "🎬 Video grande", vals: { textY: 0.04, textX: 0.05, videoY: 0.58, videoScale: 1.0,  fontSize: 65 } },
+  { label: "📐 Equilibrado",  vals: { textY: 0.12, textX: 0.05, videoY: 0.55, videoScale: 0.85, fontSize: 80 } },
+];
+
 // ================================================
 // MEME ITEM CARD
 // ================================================
-function MemeItemCard({ item, batchId, index, statusLabel }) {
+function MemeItemCard({ item, batchId, index, statusLabel, globalPreset }) {
   const [textY, setTextY] = useState(0.08);
   const [textX, setTextX] = useState(0.05);
   const [videoY, setVideoY] = useState(0.6);
@@ -1612,6 +1621,16 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
   const [showSliders, setShowSliders] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Apply global preset whenever parent changes it
+  useEffect(() => {
+    if (!globalPreset) return;
+    setTextY(globalPreset.textY);
+    setTextX(globalPreset.textX);
+    setVideoY(globalPreset.videoY);
+    setVideoScale(globalPreset.videoScale);
+    setFontSize(globalPreset.fontSize);
+  }, [globalPreset]);
 
   const handleReexport = async () => {
     setReexporting(true);
@@ -1797,39 +1816,6 @@ function MemeItemCard({ item, batchId, index, statusLabel }) {
         <div style={{ padding: "0 14px 14px", borderTop: "1px solid #222" }}>
           <div style={{ paddingTop: 12 }}>
 
-            {/* Presets */}
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 10, color: "#666", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 7 }}>Presets — aplica todos los ajustes de una vez</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {[
-                  { label: "🎯 Estándar",     vals: { textY: 0.08, textX: 0.05, videoY: 0.60, videoScale: 0.9,  fontSize: 80 } },
-                  { label: "⬆ Texto arriba",  vals: { textY: 0.04, textX: 0.05, videoY: 0.65, videoScale: 0.9,  fontSize: 75 } },
-                  { label: "🎬 Video grande",  vals: { textY: 0.04, textX: 0.05, videoY: 0.58, videoScale: 1.0,  fontSize: 65 } },
-                  { label: "📐 Equilibrado",   vals: { textY: 0.12, textX: 0.05, videoY: 0.55, videoScale: 0.85, fontSize: 80 } },
-                ].map(({ label, vals }) => (
-                  <button
-                    key={label}
-                    onClick={() => {
-                      setTextY(vals.textY);
-                      setTextX(vals.textX);
-                      setVideoY(vals.videoY);
-                      setVideoScale(vals.videoScale);
-                      setFontSize(vals.fontSize);
-                    }}
-                    style={{
-                      fontSize: 11, padding: "6px 12px", borderRadius: 7, cursor: "pointer",
-                      background: "#1a1a1a", color: "#aaa",
-                      border: "1px solid #333", fontWeight: 600, transition: "all 0.15s",
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = "#6366f1"; e.currentTarget.style.color = "#c4b5fd"; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#333"; e.currentTarget.style.color = "#aaa"; }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {[
               { label: "Texto vertical", value: textY, setValue: setTextY, min: 0.02, max: 0.45, step: 0.01, fmt: v => v <= 0.12 ? "⬆ Arriba" : v <= 0.28 ? "↕ Centro" : "⬇ Abajo" },
               { label: "Texto horizontal", value: textX, setValue: setTextX, min: 0.03, max: 0.7, step: 0.01, fmt: v => v <= 0.08 ? "← Izq" : v <= 0.42 ? "↔ Centro" : "→ Der" },
@@ -1879,6 +1865,7 @@ function MemeStep() {
   const [batchId, setBatchId] = useState(null);
   const [batch, setBatch] = useState(null);
   const [error, setError] = useState("");
+  const [globalPreset, setGlobalPreset] = useState(null);
   const pollRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -2207,6 +2194,33 @@ function MemeStep() {
             </div>
           )}
 
+          {/* Global presets */}
+          <div style={{
+            background: "#111", borderRadius: 10, padding: "12px 14px",
+            border: "1px solid #2a2a2a", marginBottom: 12,
+          }}>
+            <div style={{ fontSize: 10, color: "#666", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
+              ⚡ Preset global — mueve todos los videos a la vez
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {MEME_PRESETS.map(({ label, vals }) => (
+                <button
+                  key={label}
+                  onClick={() => setGlobalPreset({ ...vals, _ts: Date.now() })}
+                  style={{
+                    fontSize: 12, padding: "6px 14px", borderRadius: 8, cursor: "pointer",
+                    background: "#1a1a1a", color: "#aaa",
+                    border: "1px solid #333", fontWeight: 600, transition: "all 0.15s",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#6366f1"; e.currentTarget.style.color = "#c4b5fd"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#333"; e.currentTarget.style.color = "#aaa"; }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Items list */}
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {batch?.items.map((item, i) => (
@@ -2216,6 +2230,7 @@ function MemeStep() {
                 batchId={batchId}
                 index={i}
                 statusLabel={statusLabel}
+                globalPreset={globalPreset}
               />
             ))}
           </div>
