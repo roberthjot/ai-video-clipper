@@ -41,9 +41,8 @@ def generate_meme_text(file_obj) -> str:
         ])],
         config=types.GenerateContentConfig(temperature=1.0),
     )
-    raw = response.text.strip()
-    # Lowercase everything, capitalize only the very first letter
-    raw = raw.lower()
+    raw = response.text.strip().rstrip(".")
+    raw = raw.lower().rstrip(".")
     raw = raw[:1].upper() + raw[1:] if raw else raw
     return raw
 
@@ -101,8 +100,8 @@ def generate_music_vibe(file_obj) -> str:
         ])],
         config=types.GenerateContentConfig(temperature=1.0),
     )
-    raw = response.text.strip()
-    raw = raw.lower()
+    raw = response.text.strip().rstrip(".")
+    raw = raw.lower().rstrip(".")
     raw = raw[:1].upper() + raw[1:] if raw else raw
     return raw
 

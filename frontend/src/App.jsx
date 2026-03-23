@@ -1621,6 +1621,8 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset }) {
   const [showSliders, setShowSliders] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [editingText, setEditingText] = useState(false);
+  const [customText, setCustomText] = useState("");
 
   // Apply global preset whenever parent changes it
   useEffect(() => {
@@ -1635,8 +1637,9 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset }) {
   const handleReexport = async () => {
     setReexporting(true);
     try {
-      await api.reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize);
+      await api.reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText);
       setBust(Date.now());
+      setEditingText(false);
     } catch (e) {
       // ignore
     } finally {
@@ -1710,12 +1713,43 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset }) {
           borderRadius: 8,
           borderLeft: `3px solid ${item.artist_info !== undefined ? "#f59e0b" : "#6366f1"}`,
         }}>
-          <div style={{ fontSize: 11, color: item.artist_info !== undefined ? "#f59e0b" : "#6366f1", fontWeight: 700, marginBottom: 4, letterSpacing: "0.05em" }}>
-            {item.artist_info !== undefined ? "VIBE TEXT" : "MEME TEXT"}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: item.artist_info !== undefined ? "#f59e0b" : "#6366f1", fontWeight: 700, letterSpacing: "0.05em" }}>
+              {item.artist_info !== undefined ? "VIBE TEXT" : "MEME TEXT"}
+            </div>
+            {isReady && (
+              <button
+                onClick={() => { setEditingText(v => !v); setCustomText(item.meme_text); }}
+                style={{
+                  fontSize: 10, padding: "2px 8px", borderRadius: 5, cursor: "pointer",
+                  background: editingText ? "#6366f122" : "transparent",
+                  color: editingText ? "#818cf8" : "#555",
+                  border: editingText ? "1px solid #6366f144" : "1px solid #333",
+                  fontWeight: 600,
+                }}
+              >
+                ✏️ Editar
+              </button>
+            )}
           </div>
-          <div style={{ fontSize: 14, color: "#e5e5e5", fontWeight: 600, lineHeight: 1.5 }}>
-            {item.meme_text}
-          </div>
+          {editingText ? (
+            <textarea
+              value={customText}
+              onChange={e => setCustomText(e.target.value)}
+              rows={3}
+              style={{
+                width: "100%", background: "#111", border: "1px solid #6366f155",
+                borderRadius: 6, color: "#e5e5e5", fontSize: 14, fontWeight: 600,
+                padding: "8px 10px", resize: "vertical", outline: "none",
+                lineHeight: 1.5, boxSizing: "border-box",
+              }}
+              placeholder="Escribe el texto personalizado..."
+            />
+          ) : (
+            <div style={{ fontSize: 14, color: "#e5e5e5", fontWeight: 600, lineHeight: 1.5 }}>
+              {customText && customText !== item.meme_text ? customText : item.meme_text}
+            </div>
+          )}
         </div>
       )}
 

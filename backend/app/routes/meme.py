@@ -59,6 +59,7 @@ async def reexport_meme(
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
     font_size: int = Form(80),
+    custom_text: str = Form(""),
 ):
     """Re-export a meme with updated text_y / video_scale (no Gemini call)."""
     from ..services.meme_service import export_meme_video
@@ -75,10 +76,15 @@ async def reexport_meme(
     if not video_path or not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Original video not found")
 
+    # Use custom text if provided, otherwise keep original
+    meme_text = custom_text.strip() if custom_text.strip() else item["meme_text"]
+    if custom_text.strip():
+        item["meme_text"] = custom_text.strip()
+
     item["status"] = "exporting"
     try:
         export_meme_video(
-            video_path, item["meme_text"], item["output_path"],
+            video_path, meme_text, item["output_path"],
             batch["bg_color"], text_y=text_y, text_x=text_x, video_scale=video_scale,
             video_y=video_y, font_size=font_size,
         )

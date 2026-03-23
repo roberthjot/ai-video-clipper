@@ -261,13 +261,14 @@ export function getMemeDownloadUrl(batchId, index, bust) {
     return `${API_BASE}/meme/download/${batchId}/${index}${bust ? `?t=${bust}` : ""}`;
 }
 
-export async function reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize) {
+export async function reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText = "") {
     const formData = new FormData();
     formData.append("text_y", textY);
     formData.append("text_x", textX);
     formData.append("video_scale", videoScale);
     formData.append("video_y", videoY);
     formData.append("font_size", fontSize);
+    if (customText) formData.append("custom_text", customText);
     const res = await fetch(`${API_BASE}/meme/reexport/${batchId}/${index}`, {
         method: "POST",
         body: formData,
