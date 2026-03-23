@@ -303,15 +303,15 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             label = "Vibe text" if content_type == "music" else "Meme text"
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write(f"{label}:\n{meme_text}\n\n")
+                f.write(f"Instagram Description:\n{ig_description}\n")
                 if content_type == "music":
                     ai = item.get("artist_info", {})
+                    if ai.get("artist") or ai.get("instagram"):
+                        f.write("\n")
                     if ai.get("artist"):
                         f.write(f"Artist: {ai['artist']}\n")
                     if ai.get("instagram"):
                         f.write(f"Instagram: {ai['instagram']}\n")
-                    if ai.get("artist"):
-                        f.write("\n")
-                f.write(f"Instagram Description:\n{ig_description}\n")
             item["txt_path"] = txt_path
 
             item["video_path"] = video_path
