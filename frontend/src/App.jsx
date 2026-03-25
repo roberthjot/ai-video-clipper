@@ -1611,11 +1611,11 @@ const MEME_PRESETS = [
 // MEME ITEM CARD
 // ================================================
 function MemeItemCard({ item, batchId, index, statusLabel, globalPreset }) {
-  const [textY, setTextY] = useState(0.08);
+  const [textY, setTextY] = useState(0.22);
   const [textX, setTextX] = useState(0.05);
-  const [videoY, setVideoY] = useState(0.6);
+  const [videoY, setVideoY] = useState(0.55);
   const [videoScale, setVideoScale] = useState(0.9);
-  const [fontSize, setFontSize] = useState(80);
+  const [fontSize, setFontSize] = useState(65);
   const [reexporting, setReexporting] = useState(false);
   const [bust, setBust] = useState(null);
   const [showSliders, setShowSliders] = useState(false);
@@ -1900,11 +1900,11 @@ function MemeStep() {
   const [batch, setBatch] = useState(null);
   const [error, setError] = useState("");
   const [showGlobalSliders, setShowGlobalSliders] = useState(false);
-  const [gTextY, setGTextY] = useState(0.08);
+  const [gTextY, setGTextY] = useState(0.22);
   const [gTextX, setGTextX] = useState(0.05);
-  const [gVideoY, setGVideoY] = useState(0.60);
+  const [gVideoY, setGVideoY] = useState(0.55);
   const [gVideoScale, setGVideoScale] = useState(0.9);
-  const [gFontSize, setGFontSize] = useState(80);
+  const [gFontSize, setGFontSize] = useState(65);
   const [reexportingAll, setReexportingAll] = useState(false);
   const pollRef = useRef(null);
   const fileInputRef = useRef(null);
