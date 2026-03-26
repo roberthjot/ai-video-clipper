@@ -85,9 +85,14 @@ def export_clip_with_style(
         line_gap = 5
         base_y = int(style.text_y * target_h)
 
-        rounded_box_path, box_w, box_h = video_service.create_caption_overlay(
-            lines, font_size=style.font_size, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
-        )
+        if getattr(style, 'caption_style', 'box') == 'tiktok':
+            rounded_box_path, box_w, box_h = video_service.create_tiktok_caption_overlay(
+                lines, font_size=style.font_size
+            )
+        else:
+            rounded_box_path, box_w, box_h = video_service.create_caption_overlay(
+                lines, font_size=style.font_size, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
+            )
         box_x = max(0, min(W - box_w, int(style.text_x * W) - box_w // 2))
         box_y = base_y - pad_y
 

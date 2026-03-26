@@ -431,6 +431,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     boost_contrast: false,
     split_screen_enabled: false,
     split_ratio: 0.5,
+    caption_style: "box",
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [exportMode, setExportMode] = useState("tiktok"); // "tiktok" | "instagram"
@@ -915,6 +916,27 @@ function EditorStep({ projectId, clips, onExportDone }) {
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
               Fit = full · Medium = un poco más chico · Zoom = grande · Fill = frame completo · Small = reducido
             </p>
+          </div>
+
+          {/* Caption Style */}
+          <div className="control-section">
+            <h3>✍️ Caption Style</h3>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[
+                { val: "box",    label: "□ Caja blanca", desc: "Texto negro sobre caja" },
+                { val: "tiktok", label: "🎵 TikTok",     desc: "Texto blanco con outline" },
+              ].map(({ val, label, desc }) => (
+                <button
+                  key={val}
+                  className={`btn ${style.caption_style === val ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => setStyle((s) => ({ ...s, caption_style: val }))}
+                  style={{ flex: 1, textAlign: "left", padding: "10px 14px" }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
+                  <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{desc}</div>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* IG Video Size */}

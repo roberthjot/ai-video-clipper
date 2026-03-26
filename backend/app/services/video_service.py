@@ -52,6 +52,61 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     return png_path, box_w, box_h
 
 
+def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
+                                   pad_x: int = 20, pad_y: int = 10,
+                                   line_gap: int = 8,
+                                   stroke_width: int = 4) -> tuple:
+    """Render TikTok-style text: white text with thick black outline, transparent background.
+    Returns (png_path, box_w, box_h)."""
+    import time
+    from PIL import ImageFont as _IF
+
+    W_vid = 1080
+    font_path = 'C:/Windows/Fonts/calibrib.ttf'
+    try:
+        font = _IF.truetype(font_path, font_size)
+    except Exception:
+        font = _IF.load_default()
+
+    line_h = int(font_size * 1.25)
+
+    try:
+        max_line_px = max(font.getlength(line) for line in lines) if lines else 0
+    except Exception:
+        max_line_px = max(len(line) for line in lines) * font_size * 0.55 if lines else 0
+
+    box_w = min(W_vid - 40, int(max_line_px + pad_x * 2 + stroke_width * 2))
+    box_h = line_h * len(lines) + line_gap * max(len(lines) - 1, 0) + pad_y * 2 + stroke_width * 2
+
+    img = Image.new('RGBA', (box_w, box_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    for i, line in enumerate(lines):
+        y = pad_y + stroke_width + i * (line_h + line_gap)
+        try:
+            tw = int(font.getlength(line))
+        except Exception:
+            tw = int(len(line) * font_size * 0.55)
+        x = (box_w - tw) // 2
+
+        # Black outline: draw text at all surrounding offsets
+        for dx in range(-stroke_width, stroke_width + 1):
+            for dy in range(-stroke_width, stroke_width + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                if abs(dx) ** 2 + abs(dy) ** 2 <= stroke_width ** 2 + stroke_width:
+                    draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0, 255))
+
+        # White text on top
+        draw.text((x, y), line, font=font, fill=(255, 255, 255, 255))
+
+    temp_dir = os.path.join(os.path.dirname(__file__), "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    png_path = os.path.join(temp_dir, f"caption_tiktok_{int(time.time() * 1000)}.png")
+    img.save(png_path)
+    return png_path, box_w, box_h
+
+
 def split_text_into_lines(text: str, max_chars: int = 40) -> list:
     """Split text into up to 3 lines, each capped at max_chars. Extra words are dropped."""
     words = text.split()
@@ -389,6 +444,7 @@ def generate_preview_frame(
     split_ratio: float = 0.5,
     flip_horizontal: bool = False,
     boost_contrast: bool = False,
+    caption_style: str = "box",
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
@@ -445,9 +501,14 @@ def generate_preview_frame(
         line_gap = 5
         base_y = int(text_y * target_h)
 
-        rounded_box_path, box_w, box_h = create_caption_overlay(
-            lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
-        )
+        if caption_style == 'tiktok':
+            rounded_box_path, box_w, box_h = create_tiktok_caption_overlay(
+                lines, font_size=font_size
+            )
+        else:
+            rounded_box_path, box_w, box_h = create_caption_overlay(
+                lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
+            )
         box_x = max(0, min(W - box_w, int(text_x * W) - box_w // 2))
         box_y = base_y - pad_y
 
@@ -535,6 +596,7 @@ def generate_preview_clip(
     split_ratio: float = 0.5,
     flip_horizontal: bool = False,
     boost_contrast: bool = False,
+    caption_style: str = "box",
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -588,9 +650,14 @@ def generate_preview_clip(
         line_gap = 5
         base_y = int(text_y * target_h)
 
-        rounded_box_path, box_w, box_h = create_caption_overlay(
-            lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
-        )
+        if caption_style == 'tiktok':
+            rounded_box_path, box_w, box_h = create_tiktok_caption_overlay(
+                lines, font_size=font_size
+            )
+        else:
+            rounded_box_path, box_w, box_h = create_caption_overlay(
+                lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
+            )
         box_x = max(0, min(W - box_w, int(text_x * W) - box_w // 2))
         box_y = base_y - pad_y
 

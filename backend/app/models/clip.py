@@ -49,6 +49,9 @@ class StyleConfig(BaseModel):
     split_image_path: Optional[str] = None
     split_ratio: float = 0.5  # fraction of canvas height for video (0.3-0.7)
 
+    # Caption style: "box" = white rounded box (default), "tiktok" = white text + black outline
+    caption_style: str = "box"
+
     # Anti-detect / uniquify (export only, not applied to preview)
     strip_metadata: bool = False
     flip_horizontal: bool = False
