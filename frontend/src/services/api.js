@@ -287,7 +287,7 @@ export function getCropPreviewUrl(batchId, index, cropTopPct, cropBottomPct) {
     return `${API_BASE}/meme/crop-preview/${batchId}/${index}?crop_top_pct=${cropTopPct}&crop_bottom_pct=${cropBottomPct}&t=${Date.now()}`;
 }
 
-export async function reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText = "", cropTopPct = 0, cropBottomPct = 0) {
+export async function reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText = "", cropTopPct = 0, cropBottomPct = 0, cornerRadius = 0) {
     const formData = new FormData();
     formData.append("text_y", textY);
     formData.append("text_x", textX);
@@ -296,6 +296,7 @@ export async function reexportMeme(batchId, index, textY, textX, videoScale, vid
     formData.append("font_size", fontSize);
     formData.append("crop_top_pct", cropTopPct);
     formData.append("crop_bottom_pct", cropBottomPct);
+    formData.append("corner_radius", cornerRadius);
     if (customText) formData.append("custom_text", customText);
     const res = await fetch(`${API_BASE}/meme/reexport/${batchId}/${index}`, {
         method: "POST",

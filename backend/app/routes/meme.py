@@ -163,8 +163,9 @@ async def reexport_meme(
     custom_text: str = Form(""),
     crop_top_pct: float = Form(0.0),
     crop_bottom_pct: float = Form(0.0),
+    corner_radius: int = Form(0),
 ):
-    """Re-export a meme with updated settings (no Gemini call). Supports crop."""
+    """Re-export a meme with updated settings (no Gemini call). Supports crop + rounded corners."""
     from ..services.meme_service import export_meme_video, crop_video_pct
     batch = get_batch(batch_id)
     if not batch:
@@ -199,7 +200,7 @@ async def reexport_meme(
         export_meme_video(
             video_path, meme_text, item["output_path"],
             batch["bg_color"], text_y=text_y, text_x=text_x, video_scale=video_scale,
-            video_y=video_y, font_size=font_size,
+            video_y=video_y, font_size=font_size, corner_radius=corner_radius,
         )
         item["status"] = "ready"
     except Exception as e:

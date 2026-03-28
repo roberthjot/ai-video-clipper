@@ -273,10 +273,28 @@ def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int
     return png_path, y  # y = bottom of last text line
 
 
+def create_rounded_corner_blocker(W: int, H: int, radius: int, bg_color: str, output_path: str) -> str:
+    """Create a PNG: background color only at the 4 corners (to round the canvas edges).
+    Transparent everywhere else, so it can be overlaid as the final layer."""
+    bg_rgb = (0, 0, 0) if bg_color == "black" else (255, 255, 255)
+    # Full-size rounded rectangle mask: 255 inside, 0 in corners
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([(0, 0), (W - 1, H - 1)], radius=radius, fill=255)
+    # Invert: corners = 255, inside = 0
+    corners_alpha = mask.point(lambda x: 255 - x)
+    # Create background-colored image and apply alpha so only corners are opaque
+    blocker = Image.new("RGBA", (W, H), (*bg_rgb, 255))
+    blocker.putalpha(corners_alpha)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    blocker.save(output_path)
+    return output_path
+
+
 def export_meme_video(video_path: str, meme_text: str, output_path: str,
                       bg_color: str = "black", text_y: float = 0.08,
                       video_scale: float = 0.9, video_y: float = 0.6,
-                      font_size: int = 80, text_x: float = 0.05) -> None:
+                      font_size: int = 80, text_x: float = 0.05,
+                      corner_radius: int = 0) -> None:
     """Export full video (no cuts) overlaid on meme background."""
     W, H = 1080, 1920
 
@@ -292,16 +310,31 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
     overlay_x = "(W-w)/2"
     overlay_y = f"{int(H * video_y)}-h/2"
 
-    filter_complex = (
-        f"[1:v]scale={W}:{H},setsar=1[bg];"
-        f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
-        f"[bg][fg]overlay={overlay_x}:{overlay_y}[out]"
-    )
+    extra_inputs = []
+    corner_png = None
+
+    if corner_radius > 0:
+        corner_png = os.path.join(TEMP_DIR, f"corners_{int(time.time() * 1000)}.png")
+        create_rounded_corner_blocker(W, H, corner_radius, bg_color, corner_png)
+        extra_inputs = ["-loop", "1", "-i", corner_png]
+        filter_complex = (
+            f"[1:v]scale={W}:{H},setsar=1[bg];"
+            f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
+            f"[bg][fg]overlay={overlay_x}:{overlay_y}[comp];"
+            f"[comp][2:v]overlay=0:0[out]"
+        )
+    else:
+        filter_complex = (
+            f"[1:v]scale={W}:{H},setsar=1[bg];"
+            f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
+            f"[bg][fg]overlay={overlay_x}:{overlay_y}[out]"
+        )
 
     cmd = [
         FFMPEG_EXE,
         "-i", video_path,
         "-loop", "1", "-i", bg_png,
+        *extra_inputs,
         "-filter_complex", filter_complex,
         "-map", "[out]",
         "-map", "0:a?",
@@ -314,10 +347,12 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
-    try:
-        os.remove(bg_png)
-    except Exception:
-        pass
+    for p in (bg_png, corner_png):
+        try:
+            if p:
+                os.remove(p)
+        except Exception:
+            pass
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg failed: {result.stderr[-600:]}")
 
