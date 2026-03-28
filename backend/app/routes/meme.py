@@ -111,9 +111,11 @@ async def reexport_meme(
     video_y: float = Form(0.6),
     font_size: int = Form(80),
     custom_text: str = Form(""),
+    crop_top_pct: float = Form(0.0),
+    crop_bottom_pct: float = Form(0.0),
 ):
-    """Re-export a meme with updated text_y / video_scale (no Gemini call)."""
-    from ..services.meme_service import export_meme_video
+    """Re-export a meme with updated settings (no Gemini call). Supports crop."""
+    from ..services.meme_service import export_meme_video, crop_video_pct
     batch = get_batch(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
@@ -132,6 +134,16 @@ async def reexport_meme(
     if custom_text.strip():
         item["meme_text"] = custom_text.strip()
 
+    # Crop original video if requested
+    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001
+    cropped_path = None
+    if do_crop:
+        cropped_path = video_path + "_reexport_crop.mp4"
+        try:
+            video_path = crop_video_pct(video_path, cropped_path, crop_top_pct, crop_bottom_pct)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Crop failed: {e}")
+
     item["status"] = "exporting"
     try:
         export_meme_video(
@@ -144,6 +156,12 @@ async def reexport_meme(
         item["status"] = "error"
         item["error"] = str(e)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cropped_path:
+            try:
+                os.remove(cropped_path)
+            except Exception:
+                pass
 
     return {"status": "ok"}
 

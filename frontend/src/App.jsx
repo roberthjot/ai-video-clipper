@@ -1632,12 +1632,14 @@ const MEME_PRESETS = [
 // ================================================
 // MEME ITEM CARD
 // ================================================
-function MemeItemCard({ item, batchId, index, statusLabel, globalPreset }) {
+function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalCropTopPct = 0, globalCropBottomPct = 0 }) {
   const [textY, setTextY] = useState(0.22);
   const [textX, setTextX] = useState(0.05);
   const [videoY, setVideoY] = useState(0.55);
   const [videoScale, setVideoScale] = useState(0.9);
   const [fontSize, setFontSize] = useState(65);
+  const [cropTopPct, setCropTopPct] = useState(0);
+  const [cropBottomPct, setCropBottomPct] = useState(0);
   const [reexporting, setReexporting] = useState(false);
   const [bust, setBust] = useState(null);
   const [showSliders, setShowSliders] = useState(false);
@@ -1645,6 +1647,12 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset }) {
   const [copied, setCopied] = useState(false);
   const [editingText, setEditingText] = useState(false);
   const [customText, setCustomText] = useState("");
+
+  // Sync global crop into local state
+  useEffect(() => {
+    setCropTopPct(globalCropTopPct);
+    setCropBottomPct(globalCropBottomPct);
+  }, [globalCropTopPct, globalCropBottomPct]);
 
   // Apply global preset whenever parent changes it
   useEffect(() => {
@@ -1659,7 +1667,7 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset }) {
   const handleReexport = async () => {
     setReexporting(true);
     try {
-      await api.reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText);
+      await api.reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText, cropTopPct / 100, cropBottomPct / 100);
       setBust(Date.now());
       setEditingText(false);
     } catch (e) {
@@ -1872,6 +1880,25 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset }) {
         <div style={{ padding: "0 14px 14px", borderTop: "1px solid #222" }}>
           <div style={{ paddingTop: 12 }}>
 
+            {/* Crop sliders per item */}
+            <div style={{ marginBottom: 12, padding: "10px 12px", background: "#1a1a1a", borderRadius: 8, border: "1px solid #333" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>✂️ Crop (elimina tweet/UI)</div>
+              {[
+                { label: "⬆️ Crop superior", value: cropTopPct, setValue: setCropTopPct, min: 0, max: 60, step: 1, fmt: v => `${v}%` },
+                { label: "⬇️ Crop inferior",  value: cropBottomPct, setValue: setCropBottomPct, min: 0, max: 30, step: 1, fmt: v => `${v}%` },
+              ].map(({ label, value, setValue, min, max, step, fmt }) => (
+                <div key={label} style={{ marginBottom: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 3 }}>
+                    <span>{label}</span>
+                    <span style={{ color: "#f59e0b", fontWeight: 700 }}>{fmt(value)}</span>
+                  </div>
+                  <input type="range" min={min} max={max} step={step}
+                    value={value} onChange={e => setValue(Number(e.target.value))}
+                    style={{ width: "100%", accentColor: "#f59e0b" }} />
+                </div>
+              ))}
+            </div>
+
             {[
               { label: "Texto vertical", value: textY, setValue: setTextY, min: 0.02, max: 0.45, step: 0.01, fmt: v => v <= 0.12 ? "⬆ Arriba" : v <= 0.28 ? "↕ Centro" : "⬇ Abajo" },
               { label: "Texto horizontal", value: textX, setValue: setTextX, min: 0.03, max: 0.7, step: 0.01, fmt: v => v <= 0.08 ? "← Izq" : v <= 0.42 ? "↔ Centro" : "→ Der" },
@@ -1927,6 +1954,8 @@ function MemeStep() {
   const [gVideoY, setGVideoY] = useState(0.55);
   const [gVideoScale, setGVideoScale] = useState(0.9);
   const [gFontSize, setGFontSize] = useState(65);
+  const [gCropTopPct, setGCropTopPct] = useState(0);
+  const [gCropBottomPct, setGCropBottomPct] = useState(0);
   const [reexportingAll, setReexportingAll] = useState(false);
   // Crop state
   const [cropEnabled, setCropEnabled] = useState(false);
@@ -2063,7 +2092,7 @@ function MemeStep() {
     setReexportingAll(true);
     const readyItems = batch.items.map((item, i) => ({ item, i })).filter(({ item }) => item.status === "ready");
     await Promise.all(readyItems.map(({ i }) =>
-      api.reexportMeme(batchId, i, gTextY, gTextX, gVideoScale, gVideoY, gFontSize).catch(() => {})
+      api.reexportMeme(batchId, i, gTextY, gTextX, gVideoScale, gVideoY, gFontSize, "", gCropTopPct / 100, gCropBottomPct / 100).catch(() => {})
     ));
     setReexportingAll(false);
   };
@@ -2439,6 +2468,30 @@ function MemeStep() {
             {showGlobalSliders && (
               <div style={{ padding: "0 14px 14px", borderTop: "1px solid #1e1e1e" }}>
                 <div style={{ paddingTop: 12 }}>
+                  {/* Crop sliders */}
+                  <div style={{ marginBottom: 14, padding: "10px 12px", background: "#1a1a1a", borderRadius: 8, border: "1px solid #333" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", marginBottom: 10 }}>✂️ Crop — elimina tweet/UI del video original</div>
+                    {[
+                      { label: "⬆️ Crop superior (tweet card)", value: gCropTopPct, setValue: setGCropTopPct, min: 0, max: 60, step: 1, fmt: v => `${v}%` },
+                      { label: "⬇️ Crop inferior (player UI)",  value: gCropBottomPct, setValue: setGCropBottomPct, min: 0, max: 30, step: 1, fmt: v => `${v}%` },
+                    ].map(({ label, value, setValue, min, max, step, fmt }) => (
+                      <div key={label} style={{ marginBottom: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 4 }}>
+                          <span>{label}</span>
+                          <span style={{ color: "#f59e0b", fontWeight: 700 }}>{fmt(value)}</span>
+                        </div>
+                        <input type="range" min={min} max={max} step={step}
+                          value={value} onChange={e => setValue(Number(e.target.value))}
+                          style={{ width: "100%", accentColor: "#f59e0b" }} />
+                      </div>
+                    ))}
+                    {(gCropTopPct > 0 || gCropBottomPct > 0) && (
+                      <div style={{ fontSize: 11, color: "#f59e0b88", marginTop: 4 }}>
+                        Se aplica al re-exportar ↓
+                      </div>
+                    )}
+                  </div>
+
                   {[
                     { label: "Texto vertical",  value: gTextY,     setValue: setGTextY,     min: 0.02, max: 0.45, step: 0.01, fmt: v => +v <= 0.12 ? "⬆ Arriba" : +v <= 0.28 ? "↕ Centro" : "⬇ Abajo" },
                     { label: "Texto horizontal", value: gTextX,     setValue: setGTextX,     min: 0.03, max: 0.7,  step: 0.01, fmt: v => +v <= 0.08 ? "← Izq"    : +v <= 0.42 ? "↔ Centro" : "→ Der" },
@@ -2482,6 +2535,8 @@ function MemeStep() {
                 batchId={batchId}
                 index={i}
                 statusLabel={statusLabel}
+                globalCropTopPct={gCropTopPct}
+                globalCropBottomPct={gCropBottomPct}
               />
             ))}
           </div>
