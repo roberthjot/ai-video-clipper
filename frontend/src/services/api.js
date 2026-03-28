@@ -217,13 +217,35 @@ export async function listStreamSessions() {
 
 // ─── Meme Generator API ───────────────────────────────────────────────────────
 
-export function processMemes(files, bgColor, textY, videoScale, onProgress, contentType = "meme") {
+export async function detectMemeCrop(file) {
+    const formData = new FormData();
+    formData.append("video", file);
+    const res = await fetch(`${API_BASE}/meme/detect-crop`, { method: "POST", body: formData });
+    if (!res.ok) throw new Error("Detect crop failed");
+    return res.json(); // { crop_top_pct, crop_bottom_pct }
+}
+
+export function getVideoFrameUrl(file) {
+    // Returns a Promise that resolves to an object URL for the extracted frame
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append("video", file);
+        fetch(`${API_BASE}/meme/frame`, { method: "POST", body: formData })
+            .then(r => { if (!r.ok) throw new Error("Frame failed"); return r.blob(); })
+            .then(blob => resolve(URL.createObjectURL(blob)))
+            .catch(reject);
+    });
+}
+
+export function processMemes(files, bgColor, textY, videoScale, onProgress, contentType = "meme", cropTopPct = 0, cropBottomPct = 0) {
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append("bg_color", bgColor);
         formData.append("text_y", textY);
         formData.append("video_scale", videoScale);
         formData.append("content_type", contentType);
+        formData.append("crop_top_pct", cropTopPct);
+        formData.append("crop_bottom_pct", cropBottomPct);
         for (const file of files) {
             formData.append("videos", file);
         }

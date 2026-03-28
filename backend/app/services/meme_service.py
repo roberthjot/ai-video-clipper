@@ -23,6 +23,80 @@ MEME_UPLOAD_DIR = os.path.join(settings.PROJECTS_DIR, "_meme_uploads")
 meme_batches: dict = {}
 
 
+TEMP_DIR = os.path.join(os.path.dirname(__file__), "temp")
+
+
+def extract_video_frame(video_path: str, output_path: str) -> None:
+    """Extract a single frame from a video (tries at 1s, fallback 0s)."""
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    for seek in ("1", "0"):
+        cmd = [FFMPEG_EXE, "-ss", seek, "-i", video_path,
+               "-frames:v", "1", "-q:v", "3", "-y", output_path]
+        r = subprocess.run(cmd, capture_output=True)
+        if r.returncode == 0 and os.path.exists(output_path):
+            return
+    raise RuntimeError("No se pudo extraer frame del video")
+
+
+def detect_crop_boundaries(frame_path: str) -> dict:
+    """Ask Gemini to detect tweet-card vs video boundaries in an Instagram meme frame.
+    Returns { crop_top_pct: float, crop_bottom_pct: float } (0.0-1.0)."""
+    with open(frame_path, "rb") as f:
+        img_bytes = f.read()
+
+    response = client.models.generate_content(
+        model=settings.GEMINI_MODEL,
+        contents=[types.Content(role="user", parts=[
+            types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
+            types.Part.from_text(text=(
+                "This is a frame from an Instagram meme video. "
+                "It has a tweet/text card section at the top and an actual video clip below it. "
+                "There may also be player controls or padding at the very bottom. "
+                "Your job: determine the exact percentages to crop so only the video remains. "
+                "TOP: percentage of total image height to crop from the top (removes the tweet card). "
+                "BOTTOM: percentage of total image height to crop from the bottom (removes player UI or black padding). "
+                "Return ONLY this format, no explanation:\n"
+                "TOP:X BOTTOM:Y\n"
+                "X and Y are integers 0-70. Use 0 if nothing to remove."
+            )),
+        ])],
+        config=types.GenerateContentConfig(temperature=0.0),
+    )
+    raw = response.text.strip().upper()
+    crop_top = 0.0
+    crop_bottom = 0.0
+    for token in raw.split():
+        if token.startswith("TOP:"):
+            try:
+                crop_top = min(70, max(0, int(token[4:]))) / 100.0
+            except Exception:
+                pass
+        elif token.startswith("BOTTOM:"):
+            try:
+                crop_bottom = min(70, max(0, int(token[7:]))) / 100.0
+            except Exception:
+                pass
+    return {"crop_top_pct": round(crop_top, 4), "crop_bottom_pct": round(crop_bottom, 4)}
+
+
+def crop_video_pct(video_path: str, output_path: str,
+                   crop_top_pct: float, crop_bottom_pct: float) -> str:
+    """Crop video removing top/bottom percentages. Returns output_path."""
+    # Ensure even pixel counts required by libx264
+    top_expr = f"trunc(ih*{crop_top_pct:.6f}/2)*2"
+    h_expr = f"trunc(ih*(1-{crop_top_pct:.6f}-{crop_bottom_pct:.6f})/2)*2"
+    cmd = [
+        FFMPEG_EXE, "-i", video_path,
+        "-vf", f"crop=iw:{h_expr}:0:{top_expr}",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-c:a", "copy", "-y", output_path,
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"Crop failed: {r.stderr[-500:]}")
+    return output_path
+
+
 def generate_meme_text(file_obj) -> str:
     """Ask Gemini to generate meme text for this video."""
     response = client.models.generate_content(
@@ -248,14 +322,23 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
         raise RuntimeError(f"FFmpeg failed: {result.stderr[-600:]}")
 
 
-def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 80, text_x: float = 0.05, content_type: str = "meme") -> None:
+def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 80, text_x: float = 0.05, content_type: str = "meme", crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0) -> None:
     """Background thread: process each video in the batch sequentially."""
     batch = meme_batches[batch_id]
     os.makedirs(MEME_OUTPUT_DIR, exist_ok=True)
+    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001
 
     for i, video_path in enumerate(video_paths):
         item = batch["items"][i]
+        cropped_path = None
         try:
+            # 0. Crop if needed
+            if do_crop:
+                item["status"] = "cropping"
+                cropped_path = video_path.replace(".mp4", "_cropped.mp4").replace(".mov", "_cropped.mp4")
+                video_path = crop_video_pct(video_path, cropped_path, crop_top_pct, crop_bottom_pct)
+                print(f"[Meme] Batch {batch_id} item {i}: cropped ({crop_top_pct:.1%} top, {crop_bottom_pct:.1%} bottom)")
+
             # 1. Upload to Gemini
             item["status"] = "uploading"
             print(f"[Meme] Batch {batch_id} item {i}: uploading to Gemini")
@@ -330,7 +413,8 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
 
 def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black",
                      text_y: float = 0.08, video_scale: float = 0.9, video_y: float = 0.6,
-                     font_size: int = 80, text_x: float = 0.05, content_type: str = "meme") -> str:
+                     font_size: int = 80, text_x: float = 0.05, content_type: str = "meme",
+                     crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0) -> str:
     """Start a meme batch. Returns batch_id."""
     batch_id = uuid.uuid4().hex[:12]
     meme_batches[batch_id] = {
@@ -355,7 +439,7 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
     }
     threading.Thread(
         target=_process_batch,
-        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size, text_x, content_type),
+        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size, text_x, content_type, crop_top_pct, crop_bottom_pct),
         daemon=True,
     ).start()
     return batch_id

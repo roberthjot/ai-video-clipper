@@ -1,11 +1,59 @@
 import os
 import uuid
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
-from ..services.meme_service import start_meme_batch, get_batch, MEME_UPLOAD_DIR, MEME_OUTPUT_DIR
+from ..services.meme_service import (
+    start_meme_batch, get_batch, MEME_UPLOAD_DIR, MEME_OUTPUT_DIR, TEMP_DIR,
+    extract_video_frame, detect_crop_boundaries,
+)
 
 router = APIRouter()
+
+
+@router.post("/frame")
+async def get_frame(video: UploadFile = File(...)):
+    """Extract and return a JPEG frame from a video (for crop preview)."""
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    tmp_video = os.path.join(TEMP_DIR, f"tmp_frame_{uuid.uuid4().hex[:8]}{os.path.splitext(video.filename)[1] or '.mp4'}")
+    tmp_frame = os.path.join(TEMP_DIR, f"frame_{uuid.uuid4().hex[:8]}.jpg")
+    try:
+        content = await video.read()
+        with open(tmp_video, "wb") as f:
+            f.write(content)
+        extract_video_frame(tmp_video, tmp_frame)
+        return FileResponse(tmp_frame, media_type="image/jpeg")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            os.remove(tmp_video)
+        except Exception:
+            pass
+
+
+@router.post("/detect-crop")
+async def detect_crop(video: UploadFile = File(...)):
+    """Upload a video, extract a frame, ask Gemini to detect crop boundaries.
+    Returns { crop_top_pct, crop_bottom_pct }."""
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    tmp_video = os.path.join(TEMP_DIR, f"tmp_crop_{uuid.uuid4().hex[:8]}{os.path.splitext(video.filename)[1] or '.mp4'}")
+    tmp_frame = os.path.join(TEMP_DIR, f"frame_crop_{uuid.uuid4().hex[:8]}.jpg")
+    try:
+        content = await video.read()
+        with open(tmp_video, "wb") as f:
+            f.write(content)
+        extract_video_frame(tmp_video, tmp_frame)
+        result = detect_crop_boundaries(tmp_frame)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        for p in (tmp_video, tmp_frame):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
 
 
 @router.post("/process")
@@ -17,6 +65,8 @@ async def process_memes(
     video_y: float = Form(0.6),
     font_size: int = Form(80),
     content_type: str = Form("meme"),
+    crop_top_pct: float = Form(0.0),
+    crop_bottom_pct: float = Form(0.0),
     videos: list[UploadFile] = File(...),
 ):
     """Upload multiple videos and start meme batch processing."""
@@ -37,7 +87,8 @@ async def process_memes(
 
     batch_id = start_meme_batch(video_paths, filenames, bg_color,
                                  text_y=text_y, text_x=text_x, video_scale=video_scale,
-                                 video_y=video_y, font_size=font_size, content_type=content_type)
+                                 video_y=video_y, font_size=font_size, content_type=content_type,
+                                 crop_top_pct=crop_top_pct, crop_bottom_pct=crop_bottom_pct)
     return {"batch_id": batch_id, "count": len(video_paths)}
 
 

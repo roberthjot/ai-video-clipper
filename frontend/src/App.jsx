@@ -1928,6 +1928,13 @@ function MemeStep() {
   const [gVideoScale, setGVideoScale] = useState(0.9);
   const [gFontSize, setGFontSize] = useState(65);
   const [reexportingAll, setReexportingAll] = useState(false);
+  // Crop state
+  const [cropEnabled, setCropEnabled] = useState(false);
+  const [cropTopPct, setCropTopPct] = useState(0);
+  const [cropBottomPct, setCropBottomPct] = useState(0);
+  const [cropFrameUrl, setCropFrameUrl] = useState(null);
+  const [detectingCrop, setDetectingCrop] = useState(false);
+  const [cropDetectError, setCropDetectError] = useState("");
   const pollRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -1963,6 +1970,33 @@ function MemeStep() {
     }
   };
 
+  const handleAutoDetectCrop = async () => {
+    if (!files.length) return;
+    setDetectingCrop(true);
+    setCropDetectError("");
+    try {
+      // Load frame preview
+      const frameUrl = await api.getVideoFrameUrl(files[0]);
+      setCropFrameUrl(frameUrl);
+      // Ask Gemini
+      const result = await api.detectMemeCrop(files[0]);
+      setCropTopPct(Math.round(result.crop_top_pct * 100));
+      setCropBottomPct(Math.round(result.crop_bottom_pct * 100));
+    } catch (e) {
+      setCropDetectError("No se pudo detectar automáticamente. Ajusta los sliders manualmente.");
+    } finally {
+      setDetectingCrop(false);
+    }
+  };
+
+  const handleLoadFrameOnly = async () => {
+    if (!files.length || cropFrameUrl) return;
+    try {
+      const frameUrl = await api.getVideoFrameUrl(files[0]);
+      setCropFrameUrl(frameUrl);
+    } catch (e) { /* ignore */ }
+  };
+
   const handleStart = async () => {
     if (!files.length) { setError("Selecciona al menos un video"); return; }
     setError("");
@@ -1971,7 +2005,9 @@ function MemeStep() {
     setBatch(null);
     setBatchId(null);
     try {
-      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct, contentType);
+      const topPct = cropEnabled ? cropTopPct / 100 : 0;
+      const bottomPct = cropEnabled ? cropBottomPct / 100 : 0;
+      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct, contentType, topPct, bottomPct);
       setBatchId(result.batch_id);
     } catch (e) {
       setError(e.message || "Error al subir los videos");
@@ -1990,6 +2026,11 @@ function MemeStep() {
     setBatchId(null);
     setBatch(null);
     setError("");
+    setCropEnabled(false);
+    setCropTopPct(0);
+    setCropBottomPct(0);
+    setCropFrameUrl(null);
+    setCropDetectError("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -2030,6 +2071,7 @@ function MemeStep() {
   const statusLabel = (item) => {
     switch (item.status) {
       case "pending":    return "⏳ Pendiente";
+      case "cropping":   return "✂️ Recortando...";
       case "uploading":  return "⬆️ Subiendo a Gemini...";
       case "analyzing":  return "🧠 Analizando...";
       case "exporting":  return "🎬 Exportando...";
@@ -2113,6 +2155,125 @@ function MemeStep() {
               </div>
             )}
           </div>
+
+          {/* Crop section */}
+          {files.length > 0 && (
+            <div style={{
+              background: "#111", borderRadius: 12, padding: "16px 18px",
+              border: `1px solid ${cropEnabled ? "#6366f155" : "#222"}`,
+              marginBottom: 20, transition: "border 0.2s",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: cropEnabled ? 16 : 0 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#e5e5e5" }}>✂️ Recortar memes de Instagram</div>
+                  <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>Elimina el tweet de arriba y UI de abajo antes de procesar</div>
+                </div>
+                <button
+                  onClick={() => { setCropEnabled(v => !v); if (!cropEnabled) handleLoadFrameOnly(); }}
+                  style={{
+                    padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+                    fontWeight: 700, fontSize: 13,
+                    background: cropEnabled ? "#6366f1" : "#222",
+                    color: cropEnabled ? "#fff" : "#888",
+                    transition: "all 0.2s",
+                  }}
+                >{cropEnabled ? "ON" : "OFF"}</button>
+              </div>
+
+              {cropEnabled && (
+                <div>
+                  {/* Auto-detect button */}
+                  <button
+                    onClick={handleAutoDetectCrop}
+                    disabled={detectingCrop}
+                    style={{
+                      width: "100%", padding: "10px 0", borderRadius: 10, border: "none",
+                      cursor: detectingCrop ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 14,
+                      background: detectingCrop ? "#222" : "linear-gradient(135deg,#0ea5e9,#6366f1)",
+                      color: detectingCrop ? "#555" : "#fff", marginBottom: 14, transition: "all 0.2s",
+                    }}
+                  >
+                    {detectingCrop ? "🔍 Analizando con Gemini..." : "🔍 Auto-detectar crop (Gemini)"}
+                  </button>
+
+                  {cropDetectError && (
+                    <div style={{ color: "#f87171", fontSize: 12, marginBottom: 12,
+                      background: "#ef444411", padding: "8px 12px", borderRadius: 8 }}>
+                      {cropDetectError}
+                    </div>
+                  )}
+
+                  {/* Frame preview with crop overlay */}
+                  {cropFrameUrl && (
+                    <div style={{ position: "relative", marginBottom: 16, borderRadius: 10, overflow: "hidden", border: "1px solid #333" }}>
+                      <img src={cropFrameUrl} alt="frame" style={{ width: "100%", display: "block" }} />
+                      {/* Top crop overlay */}
+                      {cropTopPct > 0 && (
+                        <div style={{
+                          position: "absolute", top: 0, left: 0, right: 0,
+                          height: `${cropTopPct}%`,
+                          background: "rgba(239,68,68,0.45)",
+                          borderBottom: "2px solid #ef4444",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 12, fontWeight: 700, color: "#fff",
+                        }}>
+                          ✂️ recortar top {cropTopPct}%
+                        </div>
+                      )}
+                      {/* Bottom crop overlay */}
+                      {cropBottomPct > 0 && (
+                        <div style={{
+                          position: "absolute", bottom: 0, left: 0, right: 0,
+                          height: `${cropBottomPct}%`,
+                          background: "rgba(239,68,68,0.45)",
+                          borderTop: "2px solid #ef4444",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 12, fontWeight: 700, color: "#fff",
+                        }}>
+                          ✂️ recortar bottom {cropBottomPct}%
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Sliders */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 6 }}>
+                        <span>⬆️ Crop superior (tweet card)</span>
+                        <span style={{ color: "#6366f1", fontWeight: 700 }}>{cropTopPct}%</span>
+                      </div>
+                      <input type="range" min={0} max={60} value={cropTopPct}
+                        onChange={e => setCropTopPct(Number(e.target.value))}
+                        style={{ width: "100%", accentColor: "#6366f1" }} />
+                    </div>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 6 }}>
+                        <span>⬇️ Crop inferior (player UI)</span>
+                        <span style={{ color: "#6366f1", fontWeight: 700 }}>{cropBottomPct}%</span>
+                      </div>
+                      <input type="range" min={0} max={30} value={cropBottomPct}
+                        onChange={e => setCropBottomPct(Number(e.target.value))}
+                        style={{ width: "100%", accentColor: "#6366f1" }} />
+                    </div>
+                  </div>
+
+                  {!cropFrameUrl && (
+                    <button
+                      onClick={handleLoadFrameOnly}
+                      style={{
+                        marginTop: 12, width: "100%", padding: "8px 0", borderRadius: 8,
+                        border: "1px solid #333", background: "#1a1a1a", color: "#888",
+                        cursor: "pointer", fontSize: 13,
+                      }}
+                    >
+                      🖼️ Cargar frame de preview
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Content type selector */}
           <div style={{ marginBottom: 20 }}>
@@ -2209,7 +2370,7 @@ function MemeStep() {
               }}
               disabled={!files.length}
             >
-              🚀 Generar memes ({files.length} video{files.length !== 1 ? "s" : ""})
+              🚀 Generar memes ({files.length} video{files.length !== 1 ? "s" : ""}{cropEnabled && cropTopPct > 0 ? ` · crop ${cropTopPct}%` : ""})
             </button>
           )}
         </div>
