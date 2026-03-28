@@ -283,6 +283,10 @@ export function getMemeDownloadUrl(batchId, index, bust) {
     return `${API_BASE}/meme/download/${batchId}/${index}${bust ? `?t=${bust}` : ""}`;
 }
 
+export function getCropPreviewUrl(batchId, index, cropTopPct, cropBottomPct) {
+    return `${API_BASE}/meme/crop-preview/${batchId}/${index}?crop_top_pct=${cropTopPct}&crop_bottom_pct=${cropBottomPct}&t=${Date.now()}`;
+}
+
 export async function reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText = "", cropTopPct = 0, cropBottomPct = 0) {
     const formData = new FormData();
     formData.append("text_y", textY);

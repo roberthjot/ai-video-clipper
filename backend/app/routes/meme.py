@@ -101,6 +101,56 @@ async def meme_status(batch_id: str):
     return batch
 
 
+@router.get("/crop-preview/{batch_id}/{index}")
+async def crop_preview(
+    batch_id: str,
+    index: int,
+    crop_top_pct: float = 0.0,
+    crop_bottom_pct: float = 0.0,
+):
+    """Extract a frame from original video, apply crop, return JPEG preview."""
+    from ..services.meme_service import crop_video_pct
+    import imageio_ffmpeg as _iio
+    _ffmpeg = _iio.get_ffmpeg_exe()
+
+    batch = get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    items = batch.get("items", [])
+    if index < 0 or index >= len(items):
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    video_path = items[index].get("video_path", "")
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Original video not found")
+
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    uid = uuid.uuid4().hex[:8]
+    frame_path = os.path.join(TEMP_DIR, f"cprev_{uid}.jpg")
+
+    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001
+    if do_crop:
+        # Apply crop filter directly to a single frame (fast)
+        top_expr = f"trunc(ih*{crop_top_pct:.6f}/2)*2"
+        h_expr   = f"trunc(ih*(1-{crop_top_pct:.6f}-{crop_bottom_pct:.6f})/2)*2"
+        vf = f"crop=iw:{h_expr}:0:{top_expr}"
+    else:
+        vf = "scale=iw:ih"  # no-op
+
+    cmd = [_ffmpeg, "-ss", "1", "-i", video_path,
+           "-vf", vf, "-frames:v", "1", "-q:v", "3", "-y", frame_path]
+    import subprocess as _sp
+    r = _sp.run(cmd, capture_output=True)
+    if r.returncode != 0 or not os.path.exists(frame_path):
+        # fallback at 0s
+        cmd[2] = "0"
+        r = _sp.run(cmd, capture_output=True)
+    if not os.path.exists(frame_path):
+        raise HTTPException(status_code=500, detail="Frame extraction failed")
+
+    return FileResponse(frame_path, media_type="image/jpeg")
+
+
 @router.post("/reexport/{batch_id}/{index}")
 async def reexport_meme(
     batch_id: str,

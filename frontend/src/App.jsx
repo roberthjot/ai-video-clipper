@@ -1956,6 +1956,7 @@ function MemeStep() {
   const [gFontSize, setGFontSize] = useState(65);
   const [gCropTopPct, setGCropTopPct] = useState(0);
   const [gCropBottomPct, setGCropBottomPct] = useState(0);
+  const [cropPreviewImg, setCropPreviewImg] = useState(null);
   const [reexportingAll, setReexportingAll] = useState(false);
   // Crop state
   const [cropEnabled, setCropEnabled] = useState(false);
@@ -2465,10 +2466,10 @@ function MemeStep() {
               <div style={{ fontSize: 13, fontWeight: 700, color: "#f59e0b", marginBottom: 12 }}>
                 ✂️ Recortar tweet card / UI — aplica a todos los videos
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
                 {[
-                  { label: "⬆️ Crop superior (elimina tweet de arriba)", value: gCropTopPct, setValue: setGCropTopPct, min: 0, max: 60 },
-                  { label: "⬇️ Crop inferior (elimina player UI de abajo)", value: gCropBottomPct, setValue: setGCropBottomPct, min: 0, max: 30 },
+                  { label: "⬆️ Crop superior (elimina tweet de arriba)", value: gCropTopPct, setValue: setGCropTopPct, min: 0, max: 70 },
+                  { label: "⬇️ Crop inferior (elimina player UI de abajo)", value: gCropBottomPct, setValue: setGCropBottomPct, min: 0, max: 40 },
                 ].map(({ label, value, setValue, min, max }) => (
                   <div key={label}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#ccc", marginBottom: 5 }}>
@@ -2476,11 +2477,44 @@ function MemeStep() {
                       <span style={{ color: value > 0 ? "#f59e0b" : "#555", fontWeight: 700 }}>{value}%</span>
                     </div>
                     <input type="range" min={min} max={max} step={1} value={value}
-                      onChange={e => setValue(Number(e.target.value))}
+                      onChange={e => { setValue(Number(e.target.value)); setCropPreviewImg(null); }}
                       style={{ width: "100%", accentColor: "#f59e0b" }} />
                   </div>
                 ))}
               </div>
+
+              {/* Preview button */}
+              {(gCropTopPct > 0 || gCropBottomPct > 0) && batchId && batch?.items?.length > 0 && (
+                <button
+                  onClick={() => {
+                    const url = api.getCropPreviewUrl(batchId, 0, gCropTopPct / 100, gCropBottomPct / 100);
+                    setCropPreviewImg(url);
+                  }}
+                  style={{
+                    width: "100%", padding: "8px 0", borderRadius: 8, border: "1px solid #f59e0b55",
+                    background: "#2a1800", color: "#f59e0b", fontWeight: 600, fontSize: 13,
+                    cursor: "pointer", marginBottom: 10,
+                  }}
+                >
+                  🔍 Ver preview del crop (primer video)
+                </button>
+              )}
+
+              {/* Frame preview */}
+              {cropPreviewImg && (
+                <div style={{ marginBottom: 12, borderRadius: 8, overflow: "hidden", border: "1px solid #f59e0b44" }}>
+                  <div style={{ fontSize: 11, color: "#f59e0b88", padding: "4px 8px", background: "#111" }}>
+                    Así quedará el video recortado — si aún se ve el tweet, aumenta el % superior
+                  </div>
+                  <img
+                    src={cropPreviewImg}
+                    alt="crop preview"
+                    style={{ width: "100%", display: "block" }}
+                    onError={() => setCropPreviewImg(null)}
+                  />
+                </div>
+              )}
+
               <button
                 onClick={handleReexportAll}
                 disabled={reexportingAll || (gCropTopPct === 0 && gCropBottomPct === 0)}
