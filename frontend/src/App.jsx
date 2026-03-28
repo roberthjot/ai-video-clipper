@@ -2456,6 +2456,53 @@ function MemeStep() {
             </div>
           )}
 
+          {/* ✂️ Crop panel — visible when batch completed */}
+          {batch?.status === "completed" && doneCount > 0 && (
+            <div style={{
+              background: "#1a1100", borderRadius: 12, border: "2px solid #f59e0b55",
+              marginBottom: 12, padding: "14px 16px",
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#f59e0b", marginBottom: 12 }}>
+                ✂️ Recortar tweet card / UI — aplica a todos los videos
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+                {[
+                  { label: "⬆️ Crop superior (elimina tweet de arriba)", value: gCropTopPct, setValue: setGCropTopPct, min: 0, max: 60 },
+                  { label: "⬇️ Crop inferior (elimina player UI de abajo)", value: gCropBottomPct, setValue: setGCropBottomPct, min: 0, max: 30 },
+                ].map(({ label, value, setValue, min, max }) => (
+                  <div key={label}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#ccc", marginBottom: 5 }}>
+                      <span>{label}</span>
+                      <span style={{ color: value > 0 ? "#f59e0b" : "#555", fontWeight: 700 }}>{value}%</span>
+                    </div>
+                    <input type="range" min={min} max={max} step={1} value={value}
+                      onChange={e => setValue(Number(e.target.value))}
+                      style={{ width: "100%", accentColor: "#f59e0b" }} />
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={handleReexportAll}
+                disabled={reexportingAll || (gCropTopPct === 0 && gCropBottomPct === 0)}
+                style={{
+                  width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
+                  fontWeight: 700, fontSize: 14, cursor: (reexportingAll || (gCropTopPct === 0 && gCropBottomPct === 0)) ? "not-allowed" : "pointer",
+                  background: (gCropTopPct > 0 || gCropBottomPct > 0)
+                    ? "linear-gradient(135deg, #d97706, #f59e0b)"
+                    : "#222",
+                  color: (gCropTopPct > 0 || gCropBottomPct > 0) ? "#000" : "#555",
+                  transition: "all 0.2s",
+                }}
+              >
+                {reexportingAll
+                  ? "⏳ Re-exportando..."
+                  : (gCropTopPct > 0 || gCropBottomPct > 0)
+                    ? `✂️ Re-exportar todos con crop (top ${gCropTopPct}% / bottom ${gCropBottomPct}%)`
+                    : "← Mueve los sliders para activar el crop"}
+              </button>
+            </div>
+          )}
+
           {/* Global adjustments panel */}
           <div style={{ background: "#111", borderRadius: 10, border: "1px solid #2a2a2a", marginBottom: 12, overflow: "hidden" }}>
             <div
