@@ -96,9 +96,8 @@ def analyze_video(
     Target Audience: USA (English speakers).
     Platform: TikTok / Instagram Reels / YouTube Shorts.
 
-    YOUR GOAL: Find AS MANY unique clips as possible — up to {target_clips}. Spread them across the ENTIRE video, not just the beginning.
-    Scan every minute of the video. Do NOT cluster all clips in the first half — distribute them from start to finish.
-    Each clip MUST be at least {min_duration} seconds long.
+    YOUR GOAL: Find exactly {target_clips} clips. Each clip MUST be at least {min_duration} seconds long.
+    Scan the ENTIRE video from start to finish — do not miss moments in the second half.
 
     WHAT MAKES A CLIP GO VIRAL:
     - Hooks viewers in the first 2 seconds — starts at the peak of the action
@@ -320,10 +319,6 @@ def analyze_video(
             print(f"[Gemini] Retry gave {len(retry_clips)} valid clips. Total: {len(clips)}")
         except Exception as e:
             print(f"[Gemini] Retry failed (ignoring): {e}")
-
-    # Verification pass: ask Gemini to confirm each clip's timestamp matches its content
-    if clips:
-        clips = _verify_clip_timestamps(file_obj, clips, video_duration, min_duration)
 
     # If still under target, fill remaining slots with duplicate clips (different captions)
     if len(clips) < target_clips:
