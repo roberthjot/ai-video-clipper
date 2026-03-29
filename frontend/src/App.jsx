@@ -1623,23 +1623,25 @@ function LiveStreamStep() {
 // MEME PRESETS (global — applied to all cards at once)
 // ================================================
 const MEME_PRESETS = [
-  { label: "🎯 Estándar",    vals: { textY: 0.08, textX: 0.05, videoY: 0.60, videoScale: 0.9,  fontSize: 80 } },
-  { label: "⬆ Texto arriba", vals: { textY: 0.04, textX: 0.05, videoY: 0.65, videoScale: 0.9,  fontSize: 75 } },
-  { label: "🎬 Video grande", vals: { textY: 0.04, textX: 0.05, videoY: 0.58, videoScale: 1.0,  fontSize: 65 } },
-  { label: "📐 Equilibrado",  vals: { textY: 0.12, textX: 0.05, videoY: 0.55, videoScale: 0.85, fontSize: 80 } },
+  { label: "🎯 Estándar",    vals: { textY: 0.08, textX: 0.05, videoY: 0.60, videoScale: 0.9,  fontSize: 60 } },
+  { label: "⬆ Texto arriba", vals: { textY: 0.04, textX: 0.05, videoY: 0.65, videoScale: 0.9,  fontSize: 60 } },
+  { label: "🎬 Video grande", vals: { textY: 0.04, textX: 0.05, videoY: 0.58, videoScale: 1.0,  fontSize: 60 } },
+  { label: "📐 Equilibrado",  vals: { textY: 0.12, textX: 0.05, videoY: 0.55, videoScale: 0.85, fontSize: 60 } },
 ];
 
 // ================================================
 // MEME ITEM CARD
 // ================================================
-function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalCropTopPct = 0, globalCropBottomPct = 0, globalCornerRadius = 0 }) {
+function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalCropTopPct = 0, globalCropBottomPct = 0, globalCropLeftPct = 0, globalCropRightPct = 0, globalCornerRadius = 0 }) {
   const [textY, setTextY] = useState(0.22);
   const [textX, setTextX] = useState(0.05);
   const [videoY, setVideoY] = useState(0.55);
   const [videoScale, setVideoScale] = useState(0.9);
-  const [fontSize, setFontSize] = useState(65);
+  const [fontSize, setFontSize] = useState(60);
   const [cropTopPct, setCropTopPct] = useState(0);
   const [cropBottomPct, setCropBottomPct] = useState(0);
+  const [cropLeftPct, setCropLeftPct] = useState(0);
+  const [cropRightPct, setCropRightPct] = useState(0);
   const [cornerRadius, setCornerRadius] = useState(0);
   const [cropPreviewUrl, setCropPreviewUrl] = useState(null);
   const [reexporting, setReexporting] = useState(false);
@@ -1655,6 +1657,11 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
     setCropTopPct(globalCropTopPct);
     setCropBottomPct(globalCropBottomPct);
   }, [globalCropTopPct, globalCropBottomPct]);
+
+  useEffect(() => {
+    setCropLeftPct(globalCropLeftPct);
+    setCropRightPct(globalCropRightPct);
+  }, [globalCropLeftPct, globalCropRightPct]);
 
   useEffect(() => {
     setCornerRadius(globalCornerRadius);
@@ -1673,7 +1680,7 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
   const handleReexport = async () => {
     setReexporting(true);
     try {
-      await api.reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText, cropTopPct / 100, cropBottomPct / 100, cornerRadius);
+      await api.reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText, cropTopPct / 100, cropBottomPct / 100, cornerRadius, cropLeftPct / 100, cropRightPct / 100);
       setBust(Date.now());
       setEditingText(false);
     } catch (e) {
@@ -1892,6 +1899,8 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
               {[
                 { label: "⬆️ Crop superior", value: cropTopPct, setValue: v => { setCropTopPct(v); setCropPreviewUrl(null); }, min: 0, max: 70, step: 1, fmt: v => `${v}%` },
                 { label: "⬇️ Crop inferior",  value: cropBottomPct, setValue: v => { setCropBottomPct(v); setCropPreviewUrl(null); }, min: 0, max: 40, step: 1, fmt: v => `${v}%` },
+                { label: "◀️ Crop izquierdo", value: cropLeftPct, setValue: v => { setCropLeftPct(v); setCropPreviewUrl(null); }, min: 0, max: 40, step: 1, fmt: v => `${v}%` },
+                { label: "▶️ Crop derecho",   value: cropRightPct, setValue: v => { setCropRightPct(v); setCropPreviewUrl(null); }, min: 0, max: 40, step: 1, fmt: v => `${v}%` },
               ].map(({ label, value, setValue, min, max, step, fmt }) => (
                 <div key={label} style={{ marginBottom: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#ccc", marginBottom: 3 }}>
@@ -1905,9 +1914,9 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
               ))}
 
               {/* Per-card crop preview */}
-              {(cropTopPct > 0 || cropBottomPct > 0) && (
+              {(cropTopPct > 0 || cropBottomPct > 0 || cropLeftPct > 0 || cropRightPct > 0) && (
                 <button
-                  onClick={() => setCropPreviewUrl(api.getCropPreviewUrl(batchId, index, cropTopPct / 100, cropBottomPct / 100))}
+                  onClick={() => setCropPreviewUrl(api.getCropPreviewUrl(batchId, index, cropTopPct / 100, cropBottomPct / 100, cropLeftPct / 100, cropRightPct / 100))}
                   style={{
                     width: "100%", padding: "6px 0", marginBottom: 8, borderRadius: 6,
                     border: "1px solid #f59e0b55", background: "#2a1800", color: "#f59e0b",
@@ -1924,17 +1933,6 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
                 </div>
               )}
 
-              {/* Rounded corners */}
-              <div style={{ borderTop: "1px solid #2a2a2a", paddingTop: 10, marginTop: 4 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#a78bfa", marginBottom: 8 }}>⬛ Esquinas redondeadas</div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#ccc", marginBottom: 4 }}>
-                  <span>Radio de esquinas</span>
-                  <span style={{ color: "#a78bfa", fontWeight: 700 }}>{cornerRadius === 0 ? "Sin redondear" : `${cornerRadius}px`}</span>
-                </div>
-                <input type="range" min={0} max={80} step={4} value={cornerRadius}
-                  onChange={e => setCornerRadius(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "#a78bfa" }} />
-              </div>
             </div>
 
             {[
@@ -1994,6 +1992,8 @@ function MemeStep() {
   const [gFontSize, setGFontSize] = useState(65);
   const [gCropTopPct, setGCropTopPct] = useState(0);
   const [gCropBottomPct, setGCropBottomPct] = useState(0);
+  const [gCropLeftPct, setGCropLeftPct] = useState(0);
+  const [gCropRightPct, setGCropRightPct] = useState(0);
   const [gCornerRadius, setGCornerRadius] = useState(0);
   const [cropPreviewImg, setCropPreviewImg] = useState(null);
   const [reexportingAll, setReexportingAll] = useState(false);
@@ -2001,6 +2001,8 @@ function MemeStep() {
   const [cropEnabled, setCropEnabled] = useState(false);
   const [cropTopPct, setCropTopPct] = useState(0);
   const [cropBottomPct, setCropBottomPct] = useState(0);
+  const [cropLeftPct, setCropLeftPct] = useState(0);
+  const [cropRightPct, setCropRightPct] = useState(0);
   const [cropFrameUrl, setCropFrameUrl] = useState(null);
   const [detectingCrop, setDetectingCrop] = useState(false);
   const [cropDetectError, setCropDetectError] = useState("");
@@ -2051,6 +2053,8 @@ function MemeStep() {
       const result = await api.detectMemeCrop(files[0]);
       setCropTopPct(Math.round(result.crop_top_pct * 100));
       setCropBottomPct(Math.round(result.crop_bottom_pct * 100));
+      setCropLeftPct(Math.round((result.crop_left_pct || 0) * 100));
+      setCropRightPct(Math.round((result.crop_right_pct || 0) * 100));
     } catch (e) {
       setCropDetectError("No se pudo detectar automáticamente. Ajusta los sliders manualmente.");
     } finally {
@@ -2076,7 +2080,9 @@ function MemeStep() {
     try {
       const topPct = cropEnabled ? cropTopPct / 100 : 0;
       const bottomPct = cropEnabled ? cropBottomPct / 100 : 0;
-      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct, contentType, topPct, bottomPct);
+      const leftPct = cropEnabled ? cropLeftPct / 100 : 0;
+      const rightPct = cropEnabled ? cropRightPct / 100 : 0;
+      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct, contentType, topPct, bottomPct, leftPct, rightPct);
       setBatchId(result.batch_id);
     } catch (e) {
       setError(e.message || "Error al subir los videos");
@@ -2132,7 +2138,7 @@ function MemeStep() {
     setReexportingAll(true);
     const readyItems = batch.items.map((item, i) => ({ item, i })).filter(({ item }) => item.status === "ready");
     await Promise.all(readyItems.map(({ i }) =>
-      api.reexportMeme(batchId, i, gTextY, gTextX, gVideoScale, gVideoY, gFontSize, "", gCropTopPct / 100, gCropBottomPct / 100, gCornerRadius).catch(() => {})
+      api.reexportMeme(batchId, i, gTextY, gTextX, gVideoScale, gVideoY, gFontSize, "", gCropTopPct / 100, gCropBottomPct / 100, gCornerRadius, gCropLeftPct / 100, gCropRightPct / 100).catch(() => {})
     ));
     setReexportingAll(false);
   };
@@ -2307,24 +2313,22 @@ function MemeStep() {
 
                   {/* Sliders */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                    <div>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 6 }}>
-                        <span>⬆️ Crop superior (tweet card)</span>
-                        <span style={{ color: "#6366f1", fontWeight: 700 }}>{cropTopPct}%</span>
+                    {[
+                      { label: "⬆️ Crop superior (marco/tweet arriba)", value: cropTopPct, setValue: setCropTopPct, max: 60 },
+                      { label: "⬇️ Crop inferior (marco/player UI abajo)", value: cropBottomPct, setValue: setCropBottomPct, max: 40 },
+                      { label: "◀️ Crop izquierdo (barra lateral izq)", value: cropLeftPct, setValue: setCropLeftPct, max: 40 },
+                      { label: "▶️ Crop derecho (barra lateral der)", value: cropRightPct, setValue: setCropRightPct, max: 40 },
+                    ].map(({ label, value, setValue, max }) => (
+                      <div key={label}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 6 }}>
+                          <span>{label}</span>
+                          <span style={{ color: "#6366f1", fontWeight: 700 }}>{value}%</span>
+                        </div>
+                        <input type="range" min={0} max={max} value={value}
+                          onChange={e => setValue(Number(e.target.value))}
+                          style={{ width: "100%", accentColor: "#6366f1" }} />
                       </div>
-                      <input type="range" min={0} max={60} value={cropTopPct}
-                        onChange={e => setCropTopPct(Number(e.target.value))}
-                        style={{ width: "100%", accentColor: "#6366f1" }} />
-                    </div>
-                    <div>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginBottom: 6 }}>
-                        <span>⬇️ Crop inferior (player UI)</span>
-                        <span style={{ color: "#6366f1", fontWeight: 700 }}>{cropBottomPct}%</span>
-                      </div>
-                      <input type="range" min={0} max={30} value={cropBottomPct}
-                        onChange={e => setCropBottomPct(Number(e.target.value))}
-                        style={{ width: "100%", accentColor: "#6366f1" }} />
-                    </div>
+                    ))}
                   </div>
 
                   {!cropFrameUrl && (
@@ -2509,6 +2513,8 @@ function MemeStep() {
                 {[
                   { label: "⬆️ Crop superior (elimina tweet de arriba)", value: gCropTopPct, setValue: setGCropTopPct, min: 0, max: 70 },
                   { label: "⬇️ Crop inferior (elimina player UI de abajo)", value: gCropBottomPct, setValue: setGCropBottomPct, min: 0, max: 40 },
+                  { label: "◀️ Crop izquierdo (elimina barra lateral izq)", value: gCropLeftPct, setValue: setGCropLeftPct, min: 0, max: 40 },
+                  { label: "▶️ Crop derecho (elimina barra lateral der)", value: gCropRightPct, setValue: setGCropRightPct, min: 0, max: 40 },
                 ].map(({ label, value, setValue, min, max }) => (
                   <div key={label}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#ccc", marginBottom: 5 }}>
@@ -2523,10 +2529,10 @@ function MemeStep() {
               </div>
 
               {/* Preview button */}
-              {(gCropTopPct > 0 || gCropBottomPct > 0) && batchId && batch?.items?.length > 0 && (
+              {(gCropTopPct > 0 || gCropBottomPct > 0 || gCropLeftPct > 0 || gCropRightPct > 0) && batchId && batch?.items?.length > 0 && (
                 <button
                   onClick={() => {
-                    const url = api.getCropPreviewUrl(batchId, 0, gCropTopPct / 100, gCropBottomPct / 100);
+                    const url = api.getCropPreviewUrl(batchId, 0, gCropTopPct / 100, gCropBottomPct / 100, gCropLeftPct / 100, gCropRightPct / 100);
                     setCropPreviewImg(url);
                   }}
                   style={{
@@ -2554,34 +2560,23 @@ function MemeStep() {
                 </div>
               )}
 
-              {/* Corner radius global */}
-              <div style={{ borderTop: "1px solid #2a1800", paddingTop: 12, marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#ccc", marginBottom: 5 }}>
-                  <span>⬛ Esquinas redondeadas (a todos)</span>
-                  <span style={{ color: "#a78bfa", fontWeight: 700 }}>{gCornerRadius === 0 ? "Sin redondear" : `${gCornerRadius}px`}</span>
-                </div>
-                <input type="range" min={0} max={80} step={4} value={gCornerRadius}
-                  onChange={e => setGCornerRadius(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "#a78bfa" }} />
-              </div>
-
               <button
                 onClick={handleReexportAll}
-                disabled={reexportingAll || (gCropTopPct === 0 && gCropBottomPct === 0 && gCornerRadius === 0)}
+                disabled={reexportingAll || (gCropTopPct === 0 && gCropBottomPct === 0 && gCropLeftPct === 0 && gCropRightPct === 0)}
                 style={{
                   width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
-                  fontWeight: 700, fontSize: 14, cursor: (reexportingAll || (gCropTopPct === 0 && gCropBottomPct === 0)) ? "not-allowed" : "pointer",
-                  background: (gCropTopPct > 0 || gCropBottomPct > 0 || gCornerRadius > 0)
+                  fontWeight: 700, fontSize: 14, cursor: (reexportingAll || (gCropTopPct === 0 && gCropBottomPct === 0 && gCropLeftPct === 0 && gCropRightPct === 0)) ? "not-allowed" : "pointer",
+                  background: (gCropTopPct > 0 || gCropBottomPct > 0 || gCropLeftPct > 0 || gCropRightPct > 0)
                     ? "linear-gradient(135deg, #d97706, #f59e0b)"
                     : "#222",
-                  color: (gCropTopPct > 0 || gCropBottomPct > 0 || gCornerRadius > 0) ? "#000" : "#555",
+                  color: (gCropTopPct > 0 || gCropBottomPct > 0 || gCropLeftPct > 0 || gCropRightPct > 0) ? "#000" : "#555",
                   transition: "all 0.2s",
                 }}
               >
                 {reexportingAll
                   ? "⏳ Re-exportando..."
-                  : (gCropTopPct > 0 || gCropBottomPct > 0 || gCornerRadius > 0)
-                    ? `🔄 Re-exportar todos${gCropTopPct > 0 ? ` · crop top ${gCropTopPct}%` : ""}${gCropBottomPct > 0 ? ` · bottom ${gCropBottomPct}%` : ""}${gCornerRadius > 0 ? ` · esquinas ${gCornerRadius}px` : ""}`
+                  : (gCropTopPct > 0 || gCropBottomPct > 0 || gCropLeftPct > 0 || gCropRightPct > 0)
+                    ? `🔄 Re-exportar todos${gCropTopPct > 0 ? ` · top ${gCropTopPct}%` : ""}${gCropBottomPct > 0 ? ` · bot ${gCropBottomPct}%` : ""}${gCropLeftPct > 0 ? ` · izq ${gCropLeftPct}%` : ""}${gCropRightPct > 0 ? ` · der ${gCropRightPct}%` : ""}`
                     : "← Mueve los sliders para activar"}
               </button>
             </div>
@@ -2605,6 +2600,8 @@ function MemeStep() {
                     {[
                       { label: "⬆️ Crop superior (tweet card)", value: gCropTopPct, setValue: setGCropTopPct, min: 0, max: 60, step: 1, fmt: v => `${v}%` },
                       { label: "⬇️ Crop inferior (player UI)",  value: gCropBottomPct, setValue: setGCropBottomPct, min: 0, max: 30, step: 1, fmt: v => `${v}%` },
+                      { label: "◀️ Crop izquierdo (barra lateral izq)", value: gCropLeftPct, setValue: setGCropLeftPct, min: 0, max: 40, step: 1, fmt: v => `${v}%` },
+                      { label: "▶️ Crop derecho (barra lateral der)",   value: gCropRightPct, setValue: setGCropRightPct, min: 0, max: 40, step: 1, fmt: v => `${v}%` },
                     ].map(({ label, value, setValue, min, max, step, fmt }) => (
                       <div key={label} style={{ marginBottom: 8 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 4 }}>
@@ -2616,7 +2613,7 @@ function MemeStep() {
                           style={{ width: "100%", accentColor: "#f59e0b" }} />
                       </div>
                     ))}
-                    {(gCropTopPct > 0 || gCropBottomPct > 0) && (
+                    {(gCropTopPct > 0 || gCropBottomPct > 0 || gCropLeftPct > 0 || gCropRightPct > 0) && (
                       <div style={{ fontSize: 11, color: "#f59e0b88", marginTop: 4 }}>
                         Se aplica al re-exportar ↓
                       </div>
@@ -2668,6 +2665,8 @@ function MemeStep() {
                 statusLabel={statusLabel}
                 globalCropTopPct={gCropTopPct}
                 globalCropBottomPct={gCropBottomPct}
+                globalCropLeftPct={gCropLeftPct}
+                globalCropRightPct={gCropRightPct}
                 globalCornerRadius={gCornerRadius}
               />
             ))}

@@ -63,10 +63,12 @@ async def process_memes(
     text_x: float = Form(0.05),
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
-    font_size: int = Form(80),
+    font_size: int = Form(60),
     content_type: str = Form("meme"),
     crop_top_pct: float = Form(0.0),
     crop_bottom_pct: float = Form(0.0),
+    crop_left_pct: float = Form(0.0),
+    crop_right_pct: float = Form(0.0),
     videos: list[UploadFile] = File(...),
 ):
     """Upload multiple videos and start meme batch processing."""
@@ -88,7 +90,8 @@ async def process_memes(
     batch_id = start_meme_batch(video_paths, filenames, bg_color,
                                  text_y=text_y, text_x=text_x, video_scale=video_scale,
                                  video_y=video_y, font_size=font_size, content_type=content_type,
-                                 crop_top_pct=crop_top_pct, crop_bottom_pct=crop_bottom_pct)
+                                 crop_top_pct=crop_top_pct, crop_bottom_pct=crop_bottom_pct,
+                                 crop_left_pct=crop_left_pct, crop_right_pct=crop_right_pct)
     return {"batch_id": batch_id, "count": len(video_paths)}
 
 
@@ -107,6 +110,8 @@ async def crop_preview(
     index: int,
     crop_top_pct: float = 0.0,
     crop_bottom_pct: float = 0.0,
+    crop_left_pct: float = 0.0,
+    crop_right_pct: float = 0.0,
 ):
     """Extract a frame from original video, apply crop, return JPEG preview."""
     from ..services.meme_service import crop_video_pct
@@ -128,12 +133,14 @@ async def crop_preview(
     uid = uuid.uuid4().hex[:8]
     frame_path = os.path.join(TEMP_DIR, f"cprev_{uid}.jpg")
 
-    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001
+    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001 or crop_left_pct > 0.001 or crop_right_pct > 0.001
     if do_crop:
         # Apply crop filter directly to a single frame (fast)
-        top_expr = f"trunc(ih*{crop_top_pct:.6f}/2)*2"
-        h_expr   = f"trunc(ih*(1-{crop_top_pct:.6f}-{crop_bottom_pct:.6f})/2)*2"
-        vf = f"crop=iw:{h_expr}:0:{top_expr}"
+        left_expr = f"trunc(iw*{crop_left_pct:.6f}/2)*2"
+        w_expr    = f"trunc(iw*(1-{crop_left_pct:.6f}-{crop_right_pct:.6f})/2)*2"
+        top_expr  = f"trunc(ih*{crop_top_pct:.6f}/2)*2"
+        h_expr    = f"trunc(ih*(1-{crop_top_pct:.6f}-{crop_bottom_pct:.6f})/2)*2"
+        vf = f"crop={w_expr}:{h_expr}:{left_expr}:{top_expr}"
     else:
         vf = "scale=iw:ih"  # no-op
 
@@ -159,10 +166,12 @@ async def reexport_meme(
     text_x: float = Form(0.05),
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
-    font_size: int = Form(80),
+    font_size: int = Form(60),
     custom_text: str = Form(""),
     crop_top_pct: float = Form(0.0),
     crop_bottom_pct: float = Form(0.0),
+    crop_left_pct: float = Form(0.0),
+    crop_right_pct: float = Form(0.0),
     corner_radius: int = Form(0),
 ):
     """Re-export a meme with updated settings (no Gemini call). Supports crop + rounded corners."""
@@ -186,12 +195,12 @@ async def reexport_meme(
         item["meme_text"] = custom_text.strip()
 
     # Crop original video if requested
-    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001
+    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001 or crop_left_pct > 0.001 or crop_right_pct > 0.001
     cropped_path = None
     if do_crop:
         cropped_path = video_path + "_reexport_crop.mp4"
         try:
-            video_path = crop_video_pct(video_path, cropped_path, crop_top_pct, crop_bottom_pct)
+            video_path = crop_video_pct(video_path, cropped_path, crop_top_pct, crop_bottom_pct, crop_left_pct, crop_right_pct)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Crop failed: {e}")
 

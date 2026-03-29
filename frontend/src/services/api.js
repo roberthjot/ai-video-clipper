@@ -237,7 +237,7 @@ export function getVideoFrameUrl(file) {
     });
 }
 
-export function processMemes(files, bgColor, textY, videoScale, onProgress, contentType = "meme", cropTopPct = 0, cropBottomPct = 0) {
+export function processMemes(files, bgColor, textY, videoScale, onProgress, contentType = "meme", cropTopPct = 0, cropBottomPct = 0, cropLeftPct = 0, cropRightPct = 0) {
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append("bg_color", bgColor);
@@ -246,6 +246,8 @@ export function processMemes(files, bgColor, textY, videoScale, onProgress, cont
         formData.append("content_type", contentType);
         formData.append("crop_top_pct", cropTopPct);
         formData.append("crop_bottom_pct", cropBottomPct);
+        formData.append("crop_left_pct", cropLeftPct);
+        formData.append("crop_right_pct", cropRightPct);
         for (const file of files) {
             formData.append("videos", file);
         }
@@ -283,11 +285,11 @@ export function getMemeDownloadUrl(batchId, index, bust) {
     return `${API_BASE}/meme/download/${batchId}/${index}${bust ? `?t=${bust}` : ""}`;
 }
 
-export function getCropPreviewUrl(batchId, index, cropTopPct, cropBottomPct) {
-    return `${API_BASE}/meme/crop-preview/${batchId}/${index}?crop_top_pct=${cropTopPct}&crop_bottom_pct=${cropBottomPct}&t=${Date.now()}`;
+export function getCropPreviewUrl(batchId, index, cropTopPct, cropBottomPct, cropLeftPct = 0, cropRightPct = 0) {
+    return `${API_BASE}/meme/crop-preview/${batchId}/${index}?crop_top_pct=${cropTopPct}&crop_bottom_pct=${cropBottomPct}&crop_left_pct=${cropLeftPct}&crop_right_pct=${cropRightPct}&t=${Date.now()}`;
 }
 
-export async function reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText = "", cropTopPct = 0, cropBottomPct = 0, cornerRadius = 0) {
+export async function reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText = "", cropTopPct = 0, cropBottomPct = 0, cornerRadius = 0, cropLeftPct = 0, cropRightPct = 0) {
     const formData = new FormData();
     formData.append("text_y", textY);
     formData.append("text_x", textX);
@@ -296,6 +298,8 @@ export async function reexportMeme(batchId, index, textY, textX, videoScale, vid
     formData.append("font_size", fontSize);
     formData.append("crop_top_pct", cropTopPct);
     formData.append("crop_bottom_pct", cropBottomPct);
+    formData.append("crop_left_pct", cropLeftPct);
+    formData.append("crop_right_pct", cropRightPct);
     formData.append("corner_radius", cornerRadius);
     if (customText) formData.append("custom_text", customText);
     const res = await fetch(`${API_BASE}/meme/reexport/${batchId}/${index}`, {

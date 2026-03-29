@@ -45,9 +45,10 @@ def create_caption_overlay(lines: list, font_size: int = 72,
         x = (box_w - tw) // 2
         draw.text((x, y), line, font=font, fill=(0, 0, 0, 255))
 
+    import uuid as _uuid
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
-    png_path = os.path.join(temp_dir, f"caption_{int(time.time() * 1000)}.png")
+    png_path = os.path.join(temp_dir, f"caption_{_uuid.uuid4().hex}.png")
     img.save(png_path)
     return png_path, box_w, box_h
 
@@ -100,9 +101,10 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
         # White text on top
         draw.text((x, y), line, font=font, fill=(255, 255, 255, 255))
 
+    import uuid as _uuid
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
-    png_path = os.path.join(temp_dir, f"caption_tiktok_{int(time.time() * 1000)}.png")
+    png_path = os.path.join(temp_dir, f"caption_tiktok_{_uuid.uuid4().hex}.png")
     img.save(png_path)
     return png_path, box_w, box_h
 
@@ -183,7 +185,8 @@ def create_instagram_frame_bg(
 
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
-    png_path = os.path.join(temp_dir, f"ig_frame_{int(time.time() * 1000)}.png")
+    import uuid as _uuid
+    png_path = os.path.join(temp_dir, f"ig_frame_{_uuid.uuid4().hex}.png")
     img.save(png_path)
     # Return (png_path, video_top_fixed, text_bottom_actual)
     return png_path, video_top, text_bottom
@@ -338,7 +341,8 @@ def generate_instagram_preview_frame(
 
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
-    raw_frame_path = os.path.join(temp_dir, f"ig_raw_{int(time.time() * 1000)}.jpg")
+    import uuid as _uuid
+    raw_frame_path = os.path.join(temp_dir, f"ig_raw_{_uuid.uuid4().hex}.jpg")
 
     # Step 1: Extract video frame scaled according to fill_mode
     if fill_mode == "fill":

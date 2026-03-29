@@ -82,7 +82,7 @@ def analyze_video(
         instruction = custom_prompt.strip()
     else:
         instruction = (
-            "Scan the ENTIRE video from start to finish. Pick only the moments that will make someone stop scrolling instantly. "
+            "Scan the ENTIRE video from start to finish — every second. Pick the moments that will make someone stop scrolling instantly. "
             "Prioritize: shocking reveals, explosive arguments, emotional breakdowns, unexpected plot twists, "
             "hilarious reactions, jaw-dropping confessions, and intense confrontations. "
             "Skip boring transitions, slow dialogue, or anything that wouldn't hook someone in the first 2 seconds. "
@@ -96,7 +96,9 @@ def analyze_video(
     Target Audience: USA (English speakers).
     Platform: TikTok / Instagram Reels / YouTube Shorts.
 
-    YOUR GOAL: Find exactly {target_clips} clips. Each clip MUST be at least {min_duration} seconds long.
+    YOUR GOAL: Find AS MANY unique clips as possible — up to {target_clips}. Spread them across the ENTIRE video, not just the beginning.
+    Scan every minute of the video. Do NOT cluster all clips in the first half — distribute them from start to finish.
+    Each clip MUST be at least {min_duration} seconds long.
 
     WHAT MAKES A CLIP GO VIRAL:
     - Hooks viewers in the first 2 seconds — starts at the peak of the action
@@ -108,7 +110,6 @@ def analyze_video(
     WHAT TO AVOID:
     - Slow build-ups or boring introductions
     - Clips that need context from earlier in the video
-    - Repetitive or similar moments — each clip must be UNIQUE
     - Dead air, silence, or transitions
 
     INSTRUCTION: {instruction}
@@ -309,5 +310,101 @@ def analyze_video(
             print(f"[Gemini] Retry gave {len(retry_clips)} valid clips. Total: {len(clips)}")
         except Exception as e:
             print(f"[Gemini] Retry failed (ignoring): {e}")
+
+    # If still under target, fill remaining slots with duplicate clips (different captions)
+    if len(clips) < target_clips:
+        still_needed = target_clips - len(clips)
+        print(f"[Gemini] Only {len(clips)} unique clips found. Generating {still_needed} alternate-caption duplicates...")
+        clips = _fill_with_alternates(file_obj, clips, still_needed, system_prompt)
+
+    return clips
+
+
+def _fill_with_alternates(file_obj, clips: list, needed: int, system_prompt: str) -> list:
+    """Fill remaining slots by reusing best clips with alternative captions."""
+    if not clips or needed <= 0:
+        return clips
+
+    # Pick the best clips to duplicate (cycle through them)
+    best = sorted(clips, key=lambda c: len(c.viral_reason or ""), reverse=True)
+    targets = [best[i % len(best)] for i in range(needed)]
+
+    # Ask Gemini for alternative captions for these clips
+    clips_info = "\n".join([
+        f"- Clip at {c.start_time:.1f}s-{c.end_time:.1f}s (current caption: \"{c.viral_caption}\")"
+        for c in targets
+    ])
+
+    try:
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=[types.Content(role="user", parts=[
+                types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+                types.Part.from_text(text=(
+                    f"For each clip listed below, write ONE alternative viral caption that approaches "
+                    f"the moment from a DIFFERENT angle than the current caption.\n"
+                    f"Each new caption must feel fresh — different wording, different emotion, different hook.\n\n"
+                    f"{clips_info}\n\n"
+                    f"Return ONLY a raw JSON array where each object has:\n"
+                    f"- \"start_time\": (float) same start time as the clip\n"
+                    f"- \"viral_caption\": (string) NEW caption, max 10 words, no punctuation except apostrophes, "
+                    f"all lowercase except first letter\n"
+                    f"Return exactly {needed} objects."
+                )),
+            ])],
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                response_mime_type="application/json",
+                temperature=1.0,
+            ),
+        )
+
+        raw = response.text.strip()
+        if raw.startswith("```json"):
+            raw = raw[7:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+        raw = re.sub(r"\b0+(\d)", r"\1", raw)
+        alt_data = json.loads(raw)
+
+        # Build lookup by start_time so order doesn't matter
+        alt_by_start = {float(a.get("start_time", -1)): a for a in alt_data}
+
+        for i in range(min(needed, len(targets))):
+            orig = targets[i]
+            # Try to match by start_time first, fall back to array index
+            alt = alt_by_start.get(orig.start_time) or (alt_data[i] if i < len(alt_data) else {})
+            caption = alt.get("viral_caption", orig.viral_caption)
+            caption = caption.replace('\u2019', "'").replace('\u2018', "'")
+            caption = re.sub(r"[^\w\s']", '', caption).strip()
+            caption = re.sub(r'\s+', ' ', caption).strip()
+            caption = caption[:1].upper() + caption[1:].lower() if caption else caption
+
+            new_clip = ClipData(
+                id=len(clips) + 1,
+                start_time=orig.start_time,
+                end_time=orig.end_time,
+                description=orig.description + " (alt)",
+                viral_caption=caption,
+                viral_reason=orig.viral_reason,
+                ig_description=orig.ig_description,
+            )
+            clips.append(new_clip)
+            print(f"[Gemini] Alt clip {new_clip.id}: {orig.start_time:.1f}s reused with new caption: {caption!r}")
+
+    except Exception as e:
+        print(f"[Gemini] Alt caption generation failed, using originals as fallback: {e}")
+        for i in range(needed):
+            orig = targets[i]
+            new_clip = ClipData(
+                id=len(clips) + 1,
+                start_time=orig.start_time,
+                end_time=orig.end_time,
+                description=orig.description + " (alt)",
+                viral_caption=orig.viral_caption,
+                viral_reason=orig.viral_reason,
+                ig_description=orig.ig_description,
+            )
+            clips.append(new_clip)
 
     return clips

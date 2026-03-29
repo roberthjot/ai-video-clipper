@@ -50,14 +50,14 @@ def detect_crop_boundaries(frame_path: str) -> dict:
             types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
             types.Part.from_text(text=(
                 "This is a frame from an Instagram meme video. "
-                "It has a tweet/text card section at the top and an actual video clip below it. "
-                "There may also be player controls or padding at the very bottom. "
-                "Your job: determine the exact percentages to crop so only the video remains. "
-                "TOP: percentage of total image height to crop from the top (removes the tweet card). "
-                "BOTTOM: percentage of total image height to crop from the bottom (removes player UI or black padding). "
+                "The actual video content is displayed INSIDE a rectangular frame or box. "
+                "Around this box there are borders/padding on all four sides (top, bottom, left, right) "
+                "that may be white, black, or a solid color. "
+                "Your job: detect the percentage to crop from each side to remove the border/frame "
+                "and keep only the inner video content. "
                 "Return ONLY this format, no explanation:\n"
-                "TOP:X BOTTOM:Y\n"
-                "X and Y are integers 0-70. Use 0 if nothing to remove."
+                "TOP:X BOTTOM:Y LEFT:Z RIGHT:W\n"
+                "X, Y, Z, W are integers 0-50. Use 0 if there is no border on that side."
             )),
         ])],
         config=types.GenerateContentConfig(temperature=0.0),
@@ -65,29 +65,49 @@ def detect_crop_boundaries(frame_path: str) -> dict:
     raw = response.text.strip().upper()
     crop_top = 0.0
     crop_bottom = 0.0
+    crop_left = 0.0
+    crop_right = 0.0
     for token in raw.split():
         if token.startswith("TOP:"):
             try:
-                crop_top = min(70, max(0, int(token[4:]))) / 100.0
+                crop_top = min(50, max(0, int(token[4:]))) / 100.0
             except Exception:
                 pass
         elif token.startswith("BOTTOM:"):
             try:
-                crop_bottom = min(70, max(0, int(token[7:]))) / 100.0
+                crop_bottom = min(50, max(0, int(token[7:]))) / 100.0
             except Exception:
                 pass
-    return {"crop_top_pct": round(crop_top, 4), "crop_bottom_pct": round(crop_bottom, 4)}
+        elif token.startswith("LEFT:"):
+            try:
+                crop_left = min(50, max(0, int(token[5:]))) / 100.0
+            except Exception:
+                pass
+        elif token.startswith("RIGHT:"):
+            try:
+                crop_right = min(50, max(0, int(token[6:]))) / 100.0
+            except Exception:
+                pass
+    return {
+        "crop_top_pct": round(crop_top, 4),
+        "crop_bottom_pct": round(crop_bottom, 4),
+        "crop_left_pct": round(crop_left, 4),
+        "crop_right_pct": round(crop_right, 4),
+    }
 
 
 def crop_video_pct(video_path: str, output_path: str,
-                   crop_top_pct: float, crop_bottom_pct: float) -> str:
-    """Crop video removing top/bottom percentages. Returns output_path."""
+                   crop_top_pct: float, crop_bottom_pct: float,
+                   crop_left_pct: float = 0.0, crop_right_pct: float = 0.0) -> str:
+    """Crop video by removing top/bottom/left/right percentages. Returns output_path."""
     # Ensure even pixel counts required by libx264
-    top_expr = f"trunc(ih*{crop_top_pct:.6f}/2)*2"
-    h_expr = f"trunc(ih*(1-{crop_top_pct:.6f}-{crop_bottom_pct:.6f})/2)*2"
+    left_expr = f"trunc(iw*{crop_left_pct:.6f}/2)*2"
+    w_expr    = f"trunc(iw*(1-{crop_left_pct:.6f}-{crop_right_pct:.6f})/2)*2"
+    top_expr  = f"trunc(ih*{crop_top_pct:.6f}/2)*2"
+    h_expr    = f"trunc(ih*(1-{crop_top_pct:.6f}-{crop_bottom_pct:.6f})/2)*2"
     cmd = [
         FFMPEG_EXE, "-i", video_path,
-        "-vf", f"crop=iw:{h_expr}:0:{top_expr}",
+        "-vf", f"crop={w_expr}:{h_expr}:{left_expr}:{top_expr}",
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-c:a", "copy", "-y", output_path,
     ]
@@ -105,12 +125,17 @@ def generate_meme_text(file_obj) -> str:
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
             types.Part.from_text(text=(
                 "Watch this short video carefully. "
-                "Write the funniest, most relatable meme caption for it. "
-                "Rules: English only. Maximum 12 words total across all lines. "
-                "No hashtags. No emojis. No punctuation except apostrophes. "
-                "Split into 2-3 short lines. "
-                "Make it punchy, funny, and instantly shareable. "
-                "Return ONLY the meme text — nothing else, no explanations, no labels, no extra words."
+                "Write a Gen Z meme caption that perfectly matches what's happening. "
+                "Use any format that fits naturally — for example: "
+                "'When [situation]', 'POV: [scenario]', 'Me [doing something]', "
+                "'Nobody: / Me:', 'That one [thing]', '[setup line] / [punchline]', "
+                "'The [thing]: [reaction]', 'Us [doing X] vs [reality]', or any other "
+                "meme format that makes it instantly funny and relatable. "
+                "Rules: English only. Maximum 15 words total. No hashtags. No emojis. "
+                "No punctuation except apostrophes and colons. "
+                "Use a newline to separate setup from punchline when needed. "
+                "Make it feel natural, punchy, and shareable for a young audience. "
+                "Return ONLY the meme text — nothing else, no explanations, no labels."
             )),
         ])],
         config=types.GenerateContentConfig(temperature=1.0),
@@ -158,18 +183,25 @@ def detect_music_artist(file_obj) -> dict:
 
 
 def generate_music_vibe(file_obj) -> str:
-    """Ask Gemini to generate a vibe phrase for a music video."""
+    """Ask Gemini to generate an emotion-driven vibe phrase for a music video."""
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
             types.Part.from_text(text=(
-                "Watch this music video or audio clip carefully. "
-                "Write a short, punchy phrase that perfectly captures the VIBE and FEELING of this music. "
-                "Rules: English only. Maximum 10 words. No hashtags. No emojis. No punctuation except apostrophes and commas. "
-                "Make it feel like a mood that people instantly relate to. "
-                "Examples of the style: 'That one song you replay 10 times', 'Late night drives only', 'Pure serotonin', 'This hits different at 2am', 'The song that lives rent free in your head'. "
-                "Return ONLY the vibe phrase — nothing else, no explanations, no labels."
+                "Watch this music clip carefully and identify the PRIMARY emotion it triggers in the listener. "
+                "Then write a short, punchy phrase designed to make people on Instagram stop scrolling, "
+                "comment, tag a friend, or repost it. "
+                "Base the phrase on the emotion you detected:\n"
+                "- Nostalgia → make them think of a person or memory ('That song that takes you right back')\n"
+                "- Awe/talent → make them feel they witnessed something rare ('I was NOT ready for those vocals')\n"
+                "- Cultural pride → celebrate the sound or roots ('This is what [genre] is supposed to sound like')\n"
+                "- Euphoria/energy → capture the electricity ('The energy in this room is unreal')\n"
+                "- Sadness/longing → make them feel understood ('The song that hits when you least expect it')\n"
+                "- Discovery → make them feel like insiders ('How does this artist not have millions of followers')\n"
+                "Rules: English only. Maximum 12 words. No hashtags. No emojis. "
+                "No punctuation except apostrophes and commas. "
+                "Return ONLY the phrase — nothing else."
             )),
         ])],
         config=types.GenerateContentConfig(temperature=1.0),
@@ -189,18 +221,20 @@ def generate_ig_description(file_obj, meme_text: str, content_type: str = "meme"
             "Write it as an engaging music fan account post in English. "
             "Talk about the feeling, energy, and mood of the song. "
             "Use 3-4 short paragraphs (1-3 sentences each). "
-            "Include 12-15 relevant music hashtags at the end (e.g. #music #vibes #nowplaying). "
             "Max 2 emojis total. "
+            "At the very end, after all the text, include EXACTLY 3 relevant music hashtags. "
+            "The hashtags must be the absolute last thing in the caption, on their own line. "
             "Return ONLY the caption — no labels, no extra words."
         )
     else:
         prompt = (
             f'This video\'s meme caption is: "{meme_text}"\n\n'
             "Write a long Instagram post caption for this meme video. "
-            "Write it as a funny, relatable fan account post in English. "
+            "Write it as a funny, relatable Gen Z meme account post in English. "
             "Use 3-4 short paragraphs (1-3 sentences each). "
-            "Include 12-15 relevant hashtags at the end. "
-            "Make it engaging and shareable. Max 2 emojis total. "
+            "Max 2 emojis total. "
+            "At the very end, after all the text, include EXACTLY 3 relevant hashtags. "
+            "The hashtags must be the absolute last thing in the caption, on their own line. "
             "Return ONLY the caption — no labels, no extra words."
         )
     response = client.models.generate_content(
@@ -239,7 +273,7 @@ def _wrap_text_px(text: str, font, max_width: int) -> list:
 
 
 def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int = 1920,
-                        text_y_ratio: float = 0.08, font_size: int = 80, text_x_ratio: float = 0.05) -> tuple:
+                        text_y_ratio: float = 0.08, font_size: int = 60, text_x_ratio: float = 0.05) -> tuple:
     """Create meme background PNG: solid color + meme text at given Y ratio.
     Returns (png_path, text_bottom_y)."""
     bg_rgb = (0, 0, 0) if bg_color == "black" else (255, 255, 255)
@@ -268,7 +302,8 @@ def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int
 
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
-    png_path = os.path.join(temp_dir, f"meme_bg_{int(time.time() * 1000)}.png")
+    import uuid as _uuid
+    png_path = os.path.join(temp_dir, f"meme_bg_{_uuid.uuid4().hex}.png")
     img.save(png_path)
     return png_path, y  # y = bottom of last text line
 
@@ -293,7 +328,7 @@ def create_rounded_corner_blocker(W: int, H: int, radius: int, bg_color: str, ou
 def export_meme_video(video_path: str, meme_text: str, output_path: str,
                       bg_color: str = "black", text_y: float = 0.08,
                       video_scale: float = 0.9, video_y: float = 0.6,
-                      font_size: int = 80, text_x: float = 0.05,
+                      font_size: int = 60, text_x: float = 0.05,
                       corner_radius: int = 0) -> None:
     """Export full video (no cuts) overlaid on meme background."""
     W, H = 1080, 1920
@@ -314,7 +349,7 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
     corner_png = None
 
     if corner_radius > 0:
-        corner_png = os.path.join(TEMP_DIR, f"corners_{int(time.time() * 1000)}.png")
+        corner_png = os.path.join(TEMP_DIR, f"corners_{_uuid.uuid4().hex}.png")
         create_rounded_corner_blocker(W, H, corner_radius, bg_color, corner_png)
         extra_inputs = ["-loop", "1", "-i", corner_png]
         filter_complex = (
@@ -357,11 +392,11 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
         raise RuntimeError(f"FFmpeg failed: {result.stderr[-600:]}")
 
 
-def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 80, text_x: float = 0.05, content_type: str = "meme", crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0) -> None:
+def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 60, text_x: float = 0.05, content_type: str = "meme", crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0, crop_left_pct: float = 0.0, crop_right_pct: float = 0.0) -> None:
     """Background thread: process each video in the batch sequentially."""
     batch = meme_batches[batch_id]
     os.makedirs(MEME_OUTPUT_DIR, exist_ok=True)
-    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001
+    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001 or crop_left_pct > 0.001 or crop_right_pct > 0.001
 
     for i, video_path in enumerate(video_paths):
         item = batch["items"][i]
@@ -371,8 +406,8 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             if do_crop:
                 item["status"] = "cropping"
                 cropped_path = video_path.replace(".mp4", "_cropped.mp4").replace(".mov", "_cropped.mp4")
-                video_path = crop_video_pct(video_path, cropped_path, crop_top_pct, crop_bottom_pct)
-                print(f"[Meme] Batch {batch_id} item {i}: cropped ({crop_top_pct:.1%} top, {crop_bottom_pct:.1%} bottom)")
+                video_path = crop_video_pct(video_path, cropped_path, crop_top_pct, crop_bottom_pct, crop_left_pct, crop_right_pct)
+                print(f"[Meme] Batch {batch_id} item {i}: cropped (top={crop_top_pct:.1%} bot={crop_bottom_pct:.1%} left={crop_left_pct:.1%} right={crop_right_pct:.1%})")
 
             # 1. Upload to Gemini
             item["status"] = "uploading"
@@ -421,8 +456,15 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
             label = "Vibe text" if content_type == "music" else "Meme text"
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write(f"{label}:\n{meme_text}\n\n")
-                f.write(f"Instagram Description:\n{ig_description}\n")
                 if content_type == "music":
+                    # Separate hashtag lines from body text so artist goes before hashtags
+                    desc_lines = ig_description.splitlines()
+                    hashtag_lines = [l for l in desc_lines if l.strip().startswith("#")]
+                    body_lines = [l for l in desc_lines if not l.strip().startswith("#")]
+                    body_text = "\n".join(body_lines).strip()
+                    hashtags_text = "\n".join(hashtag_lines).strip()
+
+                    f.write(f"Instagram Description:\n{body_text}\n")
                     ai = item.get("artist_info", {})
                     if ai.get("artist") or ai.get("instagram"):
                         f.write("\n")
@@ -430,6 +472,18 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
                         f.write(f"Artist: {ai['artist']}\n")
                     if ai.get("instagram"):
                         f.write(f"Instagram: {ai['instagram']}\n")
+                    if hashtags_text:
+                        f.write(f"\n{hashtags_text}\n")
+                else:
+                    # Separate hashtags to end for memes too
+                    desc_lines = ig_description.splitlines()
+                    hashtag_lines = [l for l in desc_lines if l.strip().startswith("#")]
+                    body_lines = [l for l in desc_lines if not l.strip().startswith("#")]
+                    body_text = "\n".join(body_lines).strip()
+                    hashtags_text = "\n".join(hashtag_lines).strip()
+                    f.write(f"Instagram Description:\n{body_text}\n")
+                    if hashtags_text:
+                        f.write(f"\n{hashtags_text}\n")
             item["txt_path"] = txt_path
 
             item["video_path"] = video_path
@@ -448,8 +502,9 @@ def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: floa
 
 def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black",
                      text_y: float = 0.08, video_scale: float = 0.9, video_y: float = 0.6,
-                     font_size: int = 80, text_x: float = 0.05, content_type: str = "meme",
-                     crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0) -> str:
+                     font_size: int = 60, text_x: float = 0.05, content_type: str = "meme",
+                     crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0,
+                     crop_left_pct: float = 0.0, crop_right_pct: float = 0.0) -> str:
     """Start a meme batch. Returns batch_id."""
     batch_id = uuid.uuid4().hex[:12]
     meme_batches[batch_id] = {
@@ -474,7 +529,7 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
     }
     threading.Thread(
         target=_process_batch,
-        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size, text_x, content_type, crop_top_pct, crop_bottom_pct),
+        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size, text_x, content_type, crop_top_pct, crop_bottom_pct, crop_left_pct, crop_right_pct),
         daemon=True,
     ).start()
     return batch_id
