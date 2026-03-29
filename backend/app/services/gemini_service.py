@@ -147,6 +147,16 @@ def analyze_video(
        - "start_time" MUST be less than {video_duration - min_duration}.
        - "end_time" MUST be less than or equal to {video_duration}.
        - Clips beyond {video_duration} seconds DO NOT EXIST and will be rejected.
+
+    TIMESTAMP ACCURACY (EXTREMELY IMPORTANT):
+    Before writing each clip's start_time and end_time, STOP and ask yourself:
+    - "If I seek to exactly this second in the video, will I see THIS specific moment?"
+    - "Am I 100% sure this timestamp is NOT from a different topic or segment?"
+    - "Does the viral_caption describe EXACTLY what happens at these seconds — not what happens elsewhere?"
+    A caption about person X MUST have timestamps where person X actually appears.
+    A caption about topic Y MUST have timestamps where topic Y is actually discussed.
+    NEVER assign a caption from one moment to the timestamps of a different moment.
+    When in doubt about a timestamp, skip that clip entirely.
     """
 
     print(f"[Gemini] Analyzing video: duration={video_duration:.1f}s, target={target_clips} clips, min_duration={min_duration}s")
@@ -311,6 +321,10 @@ def analyze_video(
         except Exception as e:
             print(f"[Gemini] Retry failed (ignoring): {e}")
 
+    # Verification pass: ask Gemini to confirm each clip's timestamp matches its content
+    if clips:
+        clips = _verify_clip_timestamps(file_obj, clips, video_duration, min_duration)
+
     # If still under target, fill remaining slots with duplicate clips (different captions)
     if len(clips) < target_clips:
         still_needed = target_clips - len(clips)
@@ -318,6 +332,86 @@ def analyze_video(
         clips = _fill_with_alternates(file_obj, clips, still_needed, system_prompt)
 
     return clips
+
+
+def _verify_clip_timestamps(file_obj, clips: list, video_duration: float, min_duration: int) -> list:
+    """Ask Gemini to verify each clip's timestamp actually matches its caption/description.
+    Returns corrected list — invalid clips are dropped, wrong timestamps are fixed."""
+    if not clips:
+        return clips
+
+    clips_info = "\n".join([
+        f'  {{"id": {c.id}, "start_time": {c.start_time:.1f}, "end_time": {c.end_time:.1f}, "caption": "{c.viral_caption}", "description": "{c.description}"}}'
+        for c in clips
+    ])
+
+    print(f"[Gemini] Verifying timestamps for {len(clips)} clips...")
+
+    try:
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=[types.Content(role="user", parts=[
+                types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+                types.Part.from_text(text=(
+                    f"You previously identified these clips from this video:\n[\n{clips_info}\n]\n\n"
+                    f"For EACH clip, seek to its start_time and verify:\n"
+                    f"1. Does the video content at that timestamp actually match the caption and description?\n"
+                    f"2. If NOT, find the CORRECT start_time and end_time where that caption/description actually occurs.\n"
+                    f"3. If the content described in the caption does NOT exist anywhere in the video, mark it invalid.\n\n"
+                    f"Return ONLY a raw JSON array. Each object must have:\n"
+                    f"- \"id\": (int) the clip id\n"
+                    f"- \"valid\": (bool) true if content matches OR was corrected, false if content doesn't exist in video\n"
+                    f"- \"start_time\": (float) correct start time in seconds\n"
+                    f"- \"end_time\": (float) correct end time in seconds\n"
+                    f"- \"corrected\": (bool) true if you changed the timestamps\n"
+                    f"The video is {video_duration:.1f} seconds long. All timestamps must be within this range."
+                )),
+            ])],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1,
+            ),
+        )
+
+        raw = response.text.strip()
+        if raw.startswith("```json"):
+            raw = raw[7:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+        raw = re.sub(r"\b0+(\d)", r"\1", raw)
+        verified = json.loads(raw)
+
+        # Build lookup by id
+        verified_by_id = {int(v.get("id", -1)): v for v in verified}
+
+        corrected_clips = []
+        for clip in clips:
+            v = verified_by_id.get(clip.id)
+            if v is None:
+                # Not in response — keep original
+                corrected_clips.append(clip)
+                continue
+            if not v.get("valid", True):
+                print(f"[Gemini] Clip {clip.id} INVALID — dropping: {clip.viral_caption!r}")
+                continue
+            if v.get("corrected", False):
+                new_start = float(v.get("start_time", clip.start_time))
+                new_end = float(v.get("end_time", clip.end_time))
+                # Validate corrected timestamps
+                if new_start < video_duration and new_end <= video_duration and (new_end - new_start) >= min_duration:
+                    print(f"[Gemini] Clip {clip.id} CORRECTED: {clip.start_time:.1f}-{clip.end_time:.1f} → {new_start:.1f}-{new_end:.1f}")
+                    clip.start_time = new_start
+                    clip.end_time = new_end
+                else:
+                    print(f"[Gemini] Clip {clip.id} correction invalid, keeping original timestamps")
+            corrected_clips.append(clip)
+
+        print(f"[Gemini] Verification done: {len(corrected_clips)}/{len(clips)} clips passed")
+        return corrected_clips
+
+    except Exception as e:
+        print(f"[Gemini] Verification failed (keeping original clips): {e}")
+        return clips
 
 
 def _fill_with_alternates(file_obj, clips: list, needed: int, system_prompt: str) -> list:
