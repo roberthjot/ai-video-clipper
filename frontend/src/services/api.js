@@ -314,6 +314,15 @@ export function getMemeDescriptionUrl(batchId, index) {
     return `${API_BASE}/meme/description/${batchId}/${index}`;
 }
 
+export async function reanalyzeClip(projectId, clipId) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/reanalyze`, { method: "POST" });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Reanalyze failed");
+    }
+    return res.json();
+}
+
 export async function getMemeIgDescription(batchId, index) {
     const res = await fetch(`${API_BASE}/meme/description/${batchId}/${index}`);
     if (!res.ok) throw new Error("Description not found");

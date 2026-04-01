@@ -298,6 +298,91 @@ async def preview_clip_instagram_frame(project_id: str, clip_id: int):
     return FileResponse(ig_frame_path, media_type="image/jpeg")
 
 
+@router.post("/{project_id}/{clip_id}/reanalyze")
+async def reanalyze_clip(project_id: str, clip_id: int):
+    """Extract this clip's exact segment and re-analyze with Gemini to fix wrong captions."""
+    import uuid as _uuid
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    clip = next((c for c in project.clips if c.id == clip_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    # Extract the exact clip segment to a temp file
+    temp_dir = os.path.join(os.path.dirname(__file__), "..", "services", "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    segment_path = os.path.join(temp_dir, f"reanalyze_{_uuid.uuid4().hex}.mp4")
+
+    FFMPEG_EXE = video_service.FFMPEG_EXE
+    duration = clip.end_time - clip.start_time
+    extract_cmd = [
+        FFMPEG_EXE,
+        "-ss", str(clip.start_time),
+        "-i", project.video_path,
+        "-t", str(duration),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-c:a", "aac", "-y", segment_path
+    ]
+
+    active_file = None
+    try:
+        result = await asyncio.to_thread(
+            __import__("subprocess").run,
+            extract_cmd, capture_output=True, timeout=120
+        )
+        if not os.path.exists(segment_path):
+            raise HTTPException(status_code=500, detail="Failed to extract clip segment")
+
+        # Upload just this short segment to Gemini
+        active_file = await asyncio.to_thread(gemini_service.upload_video, segment_path)
+        active_file = await asyncio.to_thread(gemini_service.wait_for_processing, active_file)
+
+        # Ask Gemini what's actually happening in this short clip
+        from google.genai import types as _types
+        response = await asyncio.to_thread(
+            gemini_service.client.models.generate_content,
+            model=gemini_service.settings.GEMINI_MODEL,
+            contents=[_types.Content(role="user", parts=[
+                _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
+                _types.Part.from_text(text=(
+                    "Watch this short video clip carefully. "
+                    "Write a new viral caption that accurately describes what is ACTUALLY happening in this clip. "
+                    "Rules: English only. Maximum 10 words. Third person only (no I/me/my). "
+                    "No punctuation except apostrophes. All lowercase except first letter. "
+                    "Return ONLY the caption text — nothing else."
+                )),
+            ])],
+            config=_types.GenerateContentConfig(temperature=0.5),
+        )
+
+        import re as _re
+        new_caption = response.text.strip().rstrip(".")
+        new_caption = _re.sub(r"[^\w\s']", '', new_caption).strip()
+        new_caption = _re.sub(r'\s+', ' ', new_caption).strip()
+        new_caption = new_caption[:1].upper() + new_caption[1:].lower() if new_caption else new_caption
+
+        # Update the clip in memory
+        clip.viral_caption = new_caption
+        return {"status": "updated", "clip": clip.model_dump()}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if active_file:
+            await asyncio.to_thread(gemini_service.delete_file, active_file)
+        if os.path.exists(segment_path):
+            try:
+                os.remove(segment_path)
+            except:
+                pass
+
+
 @router.get("/{project_id}/{clip_id}/instagram-video-preview")
 async def preview_clip_instagram(project_id: str, clip_id: int):
     """Generate and return a short Instagram-format video preview of a clip."""

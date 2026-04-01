@@ -270,6 +270,10 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
   const [playingClip, setPlayingClip] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
   const [loadingVideo, setLoadingVideo] = useState(false);
+  const [reanalyzingClip, setReanalyzingClip] = useState(null);
+  const [selectedClips, setSelectedClips] = useState(new Set());
+  const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentId: null });
 
   const formatTime = (sec) => {
     const m = Math.floor(sec / 60);
@@ -292,7 +296,47 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
     setPlayingClip(clip);
     setLoadingVideo(true);
     setVideoUrl(api.getVideoPreviewUrl(projectId, clip.id));
-    // loadingVideo stays true until onCanPlay fires on the video element
+  };
+
+  const handleReanalyze = async (clip) => {
+    setReanalyzingClip(clip.id);
+    try {
+      const result = await api.reanalyzeClip(projectId, clip.id);
+      onEdit(clip.id, result.clip.viral_caption);
+    } catch (err) {
+      alert("Re-análisis falló: " + err.message);
+    } finally {
+      setReanalyzingClip(null);
+    }
+  };
+
+  const toggleSelect = (clipId) => {
+    setSelectedClips(prev => {
+      const next = new Set(prev);
+      if (next.has(clipId)) next.delete(clipId);
+      else next.add(clipId);
+      return next;
+    });
+  };
+
+  const handleReanalyzeBatch = async () => {
+    if (selectedClips.size === 0) return;
+    const ids = Array.from(selectedClips);
+    setReanalyzingBatch(true);
+    setBatchProgress({ current: 0, total: ids.length, currentId: null });
+    for (let i = 0; i < ids.length; i++) {
+      const clipId = ids[i];
+      setBatchProgress({ current: i + 1, total: ids.length, currentId: clipId });
+      try {
+        const result = await api.reanalyzeClip(projectId, clipId);
+        onEdit(clipId, result.clip.viral_caption);
+      } catch (err) {
+        console.error(`Re-análisis falló para clip ${clipId}:`, err.message);
+      }
+    }
+    setReanalyzingBatch(false);
+    setBatchProgress({ current: 0, total: 0, currentId: null });
+    setSelectedClips(new Set());
   };
 
   return (
@@ -302,33 +346,83 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
         Review clips, edit captions, play previews, then style & export.
       </p>
 
-      <div className="clips-list">
-        {clips.map((clip) => (
-          <div className="clip-card" key={clip.id}>
-            <div className="clip-number">{clip.id}</div>
-            <div className="clip-info">
-              <h4>{clip.description}</h4>
-              <p className="caption">"{clip.viral_caption}"</p>
-            </div>
-            <div className="clip-meta">
-              <span className="tag">⏱ {clip.duration.toFixed(0)}s</span>
-              <span className="tag">
-                📍 {formatTime(clip.start_time)} — {formatTime(clip.end_time)}
-              </span>
-            </div>
-            <div className="clip-actions">
-              <button onClick={() => handlePlayClip(clip)}>▶ Play</button>
-              <button
-                onClick={() => {
-                  setEditingClip(clip);
-                  setEditText(clip.viral_caption);
-                }}
-              >
-                ✏️ Edit
+      {selectedClips.size > 0 && (
+        <div style={{ marginBottom: 16, padding: "12px 16px", background: "var(--bg-secondary)", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 14, color: "var(--text-secondary)" }}>
+            {selectedClips.size} clip{selectedClips.size > 1 ? "s" : ""} seleccionado{selectedClips.size > 1 ? "s" : ""}
+          </span>
+          {reanalyzingBatch ? (
+            <span style={{ fontSize: 13, color: "var(--accent)" }}>
+              ⏳ Analizando clip {batchProgress.current}/{batchProgress.total} (ID {batchProgress.currentId})...
+            </span>
+          ) : (
+            <>
+              <button className="btn btn-primary" style={{ padding: "6px 14px", fontSize: 13 }} onClick={handleReanalyzeBatch}>
+                🔄 Re-analizar seleccionados
               </button>
+              <button className="btn btn-secondary" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => setSelectedClips(new Set())}>
+                Deseleccionar
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="clips-list">
+        {clips.map((clip) => {
+          const isSelected = selectedClips.has(clip.id);
+          const isBeingAnalyzed = reanalyzingBatch && batchProgress.currentId === clip.id;
+          return (
+            <div
+              className="clip-card"
+              key={clip.id}
+              style={{ outline: isSelected ? "2px solid var(--accent)" : undefined, cursor: "pointer" }}
+              onClick={() => toggleSelect(clip.id)}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleSelect(clip.id)}
+                  onClick={e => e.stopPropagation()}
+                  style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)" }}
+                />
+                <div className="clip-number">{clip.id}</div>
+              </div>
+              <div className="clip-info">
+                <h4>{clip.description}</h4>
+                <p className="caption">
+                  {isBeingAnalyzed ? "⏳ Re-analizando..." : `"${clip.viral_caption}"`}
+                </p>
+              </div>
+              <div className="clip-meta">
+                <span className="tag">⏱ {clip.duration.toFixed(0)}s</span>
+                <span className="tag">
+                  📍 {formatTime(clip.start_time)} — {formatTime(clip.end_time)}
+                </span>
+              </div>
+              <div className="clip-actions" onClick={e => e.stopPropagation()}>
+                <button onClick={() => handlePlayClip(clip)}>▶ Play</button>
+                <button
+                  onClick={() => {
+                    setEditingClip(clip);
+                    setEditText(clip.viral_caption);
+                  }}
+                >
+                  ✏️ Edit
+                </button>
+                <button
+                  onClick={() => handleReanalyze(clip)}
+                  disabled={reanalyzingClip === clip.id || reanalyzingBatch}
+                  title="Re-analizar con IA este clip específico"
+                  style={{ opacity: reanalyzingClip === clip.id ? 0.6 : 1 }}
+                >
+                  {reanalyzingClip === clip.id ? "⏳ Analizando..." : "🔄 Re-analizar"}
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="btn-group">
