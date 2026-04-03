@@ -37,6 +37,11 @@ function UploadStep({ onComplete }) {
     if (!file) return;
     setLoading(true);
 
+    // Request notification permission early
+    if (Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+
     try {
       // Phase 1: Upload to server (with progress)
       setPhase("upload");
@@ -84,6 +89,16 @@ function UploadStep({ onComplete }) {
         clearInterval(pollingRef.current);
         pollingRef.current = null;
       }
+
+      // Browser notification
+      try {
+        if (Notification.permission === "granted") {
+          new Notification("✅ Análisis listo", {
+            body: `${analyzeRes.clips.length} clips encontrados en "${file.name}"`,
+            icon: "/favicon.ico",
+          });
+        }
+      } catch {}
 
       onComplete({
         projectId: uploadRes.project_id,
@@ -264,7 +279,7 @@ function UploadStep({ onComplete }) {
 // ================================================
 // STEP 2: Clip Results
 // ================================================
-function ClipsStep({ projectId, clips, onEdit, onNext }) {
+function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
   const [editingClip, setEditingClip] = useState(null);
   const [editText, setEditText] = useState("");
   const [playingClip, setPlayingClip] = useState(null);
@@ -274,12 +289,26 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentId: null });
+  // Image preview
+  const [imagePreviewClip, setImagePreviewClip] = useState(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
+  const [imageLoading, setImageLoading] = useState(false);
+  // Filter by duration
+  const [filterMin, setFilterMin] = useState(0);
+  const [filterMax, setFilterMax] = useState(300);
+  // Drag and drop
+  const [draggedId, setDraggedId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
 
   const formatTime = (sec) => {
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
+
+  const maxDuration = Math.max(...clips.map(c => Math.ceil(c.duration)), 60);
+
+  const filteredClips = clips.filter(c => c.duration >= filterMin && c.duration <= filterMax);
 
   const handleSaveEdit = async () => {
     if (!editingClip) return;
@@ -296,6 +325,12 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
     setPlayingClip(clip);
     setLoadingVideo(true);
     setVideoUrl(api.getVideoPreviewUrl(projectId, clip.id));
+  };
+
+  const handleImagePreview = (clip) => {
+    setImagePreviewClip(clip);
+    setImageLoading(true);
+    setImagePreviewUrl(api.getPreviewUrl(projectId, clip.id));
   };
 
   const handleReanalyze = async (clip) => {
@@ -339,6 +374,40 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
     setSelectedClips(new Set());
   };
 
+  // Drag and drop handlers
+  const handleDragStart = (e, clipId) => {
+    setDraggedId(clipId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e, clipId) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverId(clipId);
+  };
+
+  const handleDrop = (e, targetId) => {
+    e.preventDefault();
+    if (draggedId === null || draggedId === targetId) {
+      setDraggedId(null);
+      setDragOverId(null);
+      return;
+    }
+    const newClips = [...clips];
+    const fromIdx = newClips.findIndex(c => c.id === draggedId);
+    const toIdx = newClips.findIndex(c => c.id === targetId);
+    const [moved] = newClips.splice(fromIdx, 1);
+    newClips.splice(toIdx, 0, moved);
+    onReorder(newClips);
+    setDraggedId(null);
+    setDragOverId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setDragOverId(null);
+  };
+
   return (
     <div>
       <h2 className="section-title">📋 Detected Clips ({clips.length})</h2>
@@ -346,8 +415,39 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
         Review clips, edit captions, play previews, then style & export.
       </p>
 
+      {/* Filter by duration */}
+      <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "14px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+          ⏱ Filtrar por duración:
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Mín</span>
+          <input type="range" min={0} max={maxDuration} value={filterMin}
+            onChange={e => setFilterMin(Math.min(Number(e.target.value), filterMax - 1))}
+            style={{ flex: 1, minWidth: 80 }} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)", minWidth: 28 }}>{filterMin}s</span>
+          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Máx</span>
+          <input type="range" min={0} max={maxDuration} value={filterMax}
+            onChange={e => setFilterMax(Math.max(Number(e.target.value), filterMin + 1))}
+            style={{ flex: 1, minWidth: 80 }} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)", minWidth: 28 }}>{filterMax}s</span>
+        </div>
+        {(filterMin > 0 || filterMax < maxDuration) && (
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {filteredClips.length}/{clips.length} clips
+          </span>
+        )}
+        {(filterMin > 0 || filterMax < maxDuration) && (
+          <button className="btn btn-secondary" style={{ padding: "4px 10px", fontSize: 12 }}
+            onClick={() => { setFilterMin(0); setFilterMax(maxDuration); }}>
+            Reset
+          </button>
+        )}
+      </div>
+
+      {/* Batch re-analyze bar */}
       {selectedClips.size > 0 && (
-        <div style={{ marginBottom: 16, padding: "12px 16px", background: "var(--bg-secondary)", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ marginBottom: 14, padding: "12px 16px", background: "var(--bg-secondary)", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, color: "var(--text-secondary)" }}>
             {selectedClips.size} clip{selectedClips.size > 1 ? "s" : ""} seleccionado{selectedClips.size > 1 ? "s" : ""}
           </span>
@@ -369,17 +469,30 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
       )}
 
       <div className="clips-list">
-        {clips.map((clip) => {
+        {filteredClips.map((clip) => {
           const isSelected = selectedClips.has(clip.id);
           const isBeingAnalyzed = reanalyzingBatch && batchProgress.currentId === clip.id;
+          const isDragging = draggedId === clip.id;
+          const isDragOver = dragOverId === clip.id;
           return (
             <div
               className="clip-card"
               key={clip.id}
-              style={{ outline: isSelected ? "2px solid var(--accent)" : undefined, cursor: "pointer" }}
+              draggable
+              onDragStart={(e) => handleDragStart(e, clip.id)}
+              onDragOver={(e) => handleDragOver(e, clip.id)}
+              onDrop={(e) => handleDrop(e, clip.id)}
+              onDragEnd={handleDragEnd}
+              style={{
+                outline: isSelected ? "2px solid var(--accent)" : isDragOver ? "2px dashed #888" : undefined,
+                opacity: isDragging ? 0.4 : 1,
+                cursor: "grab",
+                transition: "opacity 0.15s, outline 0.15s",
+              }}
               onClick={() => toggleSelect(clip.id)}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 16, color: "#444", cursor: "grab", userSelect: "none" }}>⠿</span>
                 <input
                   type="checkbox"
                   checked={isSelected}
@@ -402,6 +515,7 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
                 </span>
               </div>
               <div className="clip-actions" onClick={e => e.stopPropagation()}>
+                <button onClick={() => handleImagePreview(clip)} title="Preview rápido (imagen)">🖼 Preview</button>
                 <button onClick={() => handlePlayClip(clip)}>▶ Play</button>
                 <button
                   onClick={() => {
@@ -417,7 +531,7 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
                   title="Re-analizar con IA este clip específico"
                   style={{ opacity: reanalyzingClip === clip.id ? 0.6 : 1 }}
                 >
-                  {reanalyzingClip === clip.id ? "⏳ Analizando..." : "🔄 Re-analizar"}
+                  {reanalyzingClip === clip.id ? "⏳..." : "🔄"}
                 </button>
               </div>
             </div>
@@ -430,6 +544,38 @@ function ClipsStep({ projectId, clips, onEdit, onNext }) {
           🎨 Style & Export →
         </button>
       </div>
+
+      {/* Image Preview Modal */}
+      {imagePreviewClip && (
+        <div className="modal-overlay" onClick={() => { setImagePreviewClip(null); setImagePreviewUrl(null); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <h3>🖼 Clip {imagePreviewClip.id}: {imagePreviewClip.description}</h3>
+            <p style={{ color: "var(--text-secondary)", marginBottom: 12, fontSize: 13 }}>
+              {formatTime(imagePreviewClip.start_time)} — {formatTime(imagePreviewClip.end_time)}
+            </p>
+            {imageLoading && (
+              <div style={{ textAlign: "center", padding: "20px 0", color: "var(--text-muted)" }}>
+                <div className="loading-spinner" style={{ margin: "0 auto 10px" }}></div>
+                <p style={{ fontSize: 13 }}>Generando imagen... (~3s)</p>
+              </div>
+            )}
+            {imagePreviewUrl && (
+              <img
+                src={imagePreviewUrl}
+                alt="preview"
+                onLoad={() => setImageLoading(false)}
+                onError={() => { setImageLoading(false); alert("No se pudo generar el preview."); }}
+                style={{ width: "100%", borderRadius: 10, display: imageLoading ? "none" : "block" }}
+              />
+            )}
+            <div className="btn-group" style={{ marginTop: 12 }}>
+              <button className="btn btn-secondary" onClick={() => { setImagePreviewClip(null); setImagePreviewUrl(null); }}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Video Player Modal */}
       {playingClip && (
@@ -3027,6 +3173,10 @@ function App() {
     );
   };
 
+  const handleReorderClips = (newClips) => {
+    setClips(newClips);
+  };
+
   const handleReset = () => {
     setStep(1);
     setProjectId(null);
@@ -3105,6 +3255,7 @@ function App() {
               projectId={projectId}
               clips={clips}
               onEdit={handleEditCaption}
+              onReorder={handleReorderClips}
               onNext={() => setStep(3)}
             />
           )}
