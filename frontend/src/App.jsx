@@ -2774,8 +2774,241 @@ function MemeStep() {
 
 // MAIN APP
 // ================================================
+// ─── Analyzer Mode ────────────────────────────────────────────────────────────
+
+function AnalyzerStep() {
+  const [file, setFile] = useState(null);
+  const [clipCount, setClipCount] = useState(15);
+  const [phase, setPhase] = useState("idle"); // idle | uploading | analyzing | done | error
+  const [uploadPct, setUploadPct] = useState(0);
+  const [moments, setMoments] = useState([]);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [copied, setCopied] = useState(null);
+  const [dragging, setDragging] = useState(false);
+
+  const formatTime = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const handleFile = (f) => {
+    if (f && f.type.startsWith("video/")) setFile(f);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files[0];
+    handleFile(f);
+  };
+
+  const handleAnalyze = async () => {
+    if (!file) return;
+    setPhase("uploading");
+    setUploadPct(0);
+    setMoments([]);
+    setErrorMsg("");
+
+    try {
+      // Upload video
+      const uploadResult = await api.uploadVideo(file, clipCount, 15, "", (pct) => setUploadPct(pct));
+      const projectId = uploadResult.project_id;
+
+      // Analyze
+      setPhase("analyzing");
+      const result = await api.analyzeVideo(projectId);
+      setMoments(result.clips || []);
+      setPhase("done");
+    } catch (err) {
+      setErrorMsg(err.message);
+      setPhase("error");
+    }
+  };
+
+  const handleCopy = (moment) => {
+    const text = `${formatTime(moment.start_time)} — ${formatTime(moment.end_time)}\n${moment.description}\n"${moment.viral_caption}"\n${moment.viral_reason}`;
+    navigator.clipboard.writeText(text);
+    setCopied(moment.id);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleReset = () => {
+    setFile(null);
+    setPhase("idle");
+    setMoments([]);
+    setErrorMsg("");
+    setUploadPct(0);
+  };
+
+  return (
+    <div style={{ maxWidth: 700, margin: "32px auto", padding: "0 16px" }}>
+      <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>🔍 Video Analyzer</h2>
+      <p style={{ color: "var(--text-secondary)", fontSize: 14, marginBottom: 24 }}>
+        Sube un video y Gemini te dice qué momentos son los mejores — con timestamps y texto de clickbait listo para usar.
+      </p>
+
+      {phase === "idle" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Drop zone */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => document.getElementById("analyzer-file-input").click()}
+            style={{
+              border: `2px dashed ${dragging ? "var(--accent)" : file ? "#4ade80" : "#333"}`,
+              borderRadius: 14, padding: "40px 20px", textAlign: "center",
+              cursor: "pointer", background: dragging ? "rgba(99,102,241,0.05)" : "var(--bg-secondary)",
+              transition: "all 0.2s",
+            }}
+          >
+            <input id="analyzer-file-input" type="file" accept="video/*" style={{ display: "none" }}
+              onChange={(e) => handleFile(e.target.files[0])} />
+            {file ? (
+              <>
+                <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
+                <div style={{ fontWeight: 600, color: "#4ade80", marginBottom: 4 }}>{file.name}</div>
+                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  {(file.size / 1024 / 1024).toFixed(1)} MB — Click para cambiar
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 10 }}>🎬</div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Arrastra un video aquí</div>
+                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>o haz click para seleccionar</div>
+              </>
+            )}
+          </div>
+
+          {/* Clip count */}
+          <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "16px 20px" }}>
+            <label style={{ fontSize: 14, fontWeight: 600, display: "block", marginBottom: 10 }}>
+              ¿Cuántos momentos buscar? <span style={{ color: "var(--accent)", fontWeight: 700 }}>{clipCount}</span>
+            </label>
+            <input type="range" min={5} max={30} value={clipCount}
+              onChange={(e) => setClipCount(Number(e.target.value))}
+              style={{ width: "100%" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+              <span>5 (rápido)</span><span>30 (completo)</span>
+            </div>
+          </div>
+
+          <button
+            className="btn btn-primary"
+            onClick={handleAnalyze}
+            disabled={!file}
+            style={{ fontSize: 16, padding: "14px 0", width: "100%" }}
+          >
+            🔍 Analizar Video
+          </button>
+        </div>
+      )}
+
+      {(phase === "uploading" || phase === "analyzing") && (
+        <div style={{ textAlign: "center", padding: "60px 20px" }}>
+          <div className="loading-spinner" style={{ margin: "0 auto 20px", width: 48, height: 48 }}></div>
+          {phase === "uploading" ? (
+            <>
+              <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Subiendo video... {uploadPct}%</div>
+              <div style={{ background: "#1a1a1a", borderRadius: 8, height: 8, overflow: "hidden", maxWidth: 300, margin: "0 auto" }}>
+                <div style={{ background: "var(--accent)", height: "100%", width: `${uploadPct}%`, transition: "width 0.3s" }} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Gemini analizando el video...</div>
+              <div style={{ fontSize: 14, color: "var(--text-secondary)" }}>Esto puede tardar 1-3 minutos dependiendo del largo del video</div>
+            </>
+          )}
+        </div>
+      )}
+
+      {phase === "error" && (
+        <div style={{ textAlign: "center", padding: 40 }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>❌</div>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Error</div>
+          <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20 }}>{errorMsg}</div>
+          <button className="btn btn-secondary" onClick={handleReset}>Intentar de nuevo</button>
+        </div>
+      )}
+
+      {phase === "done" && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: 18 }}>✅ {moments.length} momentos encontrados</h3>
+            <button className="btn btn-secondary" onClick={handleReset} style={{ fontSize: 13, padding: "6px 14px" }}>
+              🔄 Nuevo video
+            </button>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {moments.map((m) => (
+              <div key={m.id} style={{
+                background: "var(--bg-secondary)", borderRadius: 14, padding: "16px 20px",
+                border: "1px solid #2a2a2a",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    {/* Timestamp */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      <span style={{
+                        background: "var(--accent)", color: "#fff", borderRadius: 8,
+                        padding: "3px 10px", fontSize: 13, fontWeight: 700, fontFamily: "monospace"
+                      }}>
+                        ⏱ {formatTime(m.start_time)} — {formatTime(m.end_time)}
+                      </span>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        {(m.end_time - m.start_time).toFixed(0)}s
+                      </span>
+                    </div>
+
+                    {/* Description */}
+                    <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{m.description}</div>
+
+                    {/* Viral reason */}
+                    <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 10 }}>
+                      {m.viral_reason}
+                    </div>
+
+                    {/* Clickbait text */}
+                    <div style={{
+                      background: "#111", borderRadius: 8, padding: "8px 12px",
+                      fontSize: 14, fontWeight: 600, color: "#e2e8f0", fontStyle: "italic",
+                      borderLeft: "3px solid var(--accent)"
+                    }}>
+                      "{m.viral_caption}"
+                    </div>
+                  </div>
+
+                  {/* Copy button */}
+                  <button
+                    onClick={() => handleCopy(m)}
+                    style={{
+                      background: copied === m.id ? "#4ade80" : "#2a2a2a",
+                      color: copied === m.id ? "#000" : "#fff",
+                      border: "none", borderRadius: 10, padding: "8px 14px",
+                      fontSize: 13, cursor: "pointer", fontWeight: 600,
+                      whiteSpace: "nowrap", transition: "all 0.2s", flexShrink: 0,
+                    }}
+                  >
+                    {copied === m.id ? "✅ Copiado" : "📋 Copiar"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+
 function App() {
-  const [mode, setMode] = useState("video"); // "video" | "stream" | "meme"
+  const [mode, setMode] = useState("video"); // "video" | "stream" | "meme" | "analyzer"
   const [step, setStep] = useState(1);
   const [projectId, setProjectId] = useState(null);
   const [clips, setClips] = useState([]);
@@ -2825,9 +3058,10 @@ function App() {
             padding: 6, border: "1px solid #2a2a2a", boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
           }}>
             {[
-              { key: "video",  icon: "📹", label: "Video Clipper",   active: "linear-gradient(135deg,#6366f1,#8b5cf6)" },
-              { key: "stream", icon: "🔴", label: "Live Stream",      active: "linear-gradient(135deg,#dc2626,#ef4444)" },
-              { key: "meme",   icon: "😂", label: "Meme Generator",   active: "linear-gradient(135deg,#d97706,#f59e0b)" },
+              { key: "video",    icon: "📹", label: "Video Clipper",   active: "linear-gradient(135deg,#6366f1,#8b5cf6)" },
+              { key: "analyzer", icon: "🔍", label: "Analyzer",         active: "linear-gradient(135deg,#0891b2,#06b6d4)" },
+              { key: "stream",   icon: "🔴", label: "Live Stream",      active: "linear-gradient(135deg,#dc2626,#ef4444)" },
+              { key: "meme",     icon: "😂", label: "Meme Generator",   active: "linear-gradient(135deg,#d97706,#f59e0b)" },
             ].map(({ key, icon, label, active }) => (
               <button
                 key={key}
@@ -2847,6 +3081,7 @@ function App() {
           </div>
         </div>
 
+        {mode === "analyzer" && <AnalyzerStep />}
         {mode === "stream" && <LiveStreamStep />}
         {mode === "meme" && <MemeStep />}
 
