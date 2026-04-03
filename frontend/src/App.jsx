@@ -1364,6 +1364,16 @@ function EditorStep({ projectId, clips, onExportDone }) {
                   <input type="range" min={10} max={100} value={style.watermark_opacity * 100}
                     onChange={(e) => setStyle((s) => ({ ...s, watermark_opacity: parseInt(e.target.value) / 100 }))} />
                 </div>
+                <div className="slider-group">
+                  <label>
+                    Posición vertical
+                    <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
+                      {style.watermark_y <= 0.25 ? "⬆ Arriba" : style.watermark_y >= 0.75 ? "⬇ Abajo" : "↕ Centro"}
+                    </span>
+                  </label>
+                  <input type="range" min={0} max={1} step={0.05} value={style.watermark_y}
+                    onChange={(e) => setStyle((s) => ({ ...s, watermark_y: parseFloat(e.target.value) }))} />
+                </div>
               </>
             )}
           </div>
