@@ -8,10 +8,9 @@ FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 def create_caption_overlay(lines: list, font_size: int = 72,
                             pad_x: int = 18, pad_y: int = 10,
-                            line_gap: int = 14) -> tuple:
-    """Render per-line white rounded boxes + text with PIL.
-    Each line gets its own box sized to fit that line exactly — TikTok style.
-    Returns (png_path, canvas_w, canvas_h).
+                            line_gap: int = 6) -> tuple:
+    """Render single white rounded box + text with PIL. Returns (png_path, box_w, box_h).
+    One box for all lines, each line centered independently inside it.
     """
     from PIL import ImageFont as _IF
     import uuid as _uuid
@@ -25,47 +24,32 @@ def create_caption_overlay(lines: list, font_size: int = 72,
 
     line_h = int(font_size * 1.15)
 
-    # Measure each line individually
-    line_widths = []
-    for line in lines:
-        try:
-            tw = int(font.getlength(line))
-        except Exception:
-            tw = int(len(line) * font_size * 0.55)
-        box_w = min(W_vid - 60, tw + pad_x * 2)
-        line_widths.append(box_w)
+    try:
+        max_line_px = max(font.getlength(line) for line in lines) if lines else 0
+    except Exception:
+        max_line_px = max(len(line) for line in lines) * font_size * 0.55 if lines else 0
 
-    # Canvas is wide enough for the widest line, tall enough for all lines
-    canvas_w = max(line_widths) if line_widths else 100
-    canvas_h = line_h * len(lines) + line_gap * max(len(lines) - 1, 0) + pad_y * 2
+    box_w = min(W_vid - 60, int(max_line_px + pad_x * 2))
+    box_h = line_h * len(lines) + line_gap * max(len(lines) - 1, 0) + pad_y * 2
 
-    img = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 0))
+    img = Image.new('RGBA', (box_w, box_h), (255, 255, 255, 0))
     draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle([(0, 0), (box_w, box_h)], radius=14, fill=(255, 255, 255, 242))
 
     for i, line in enumerate(lines):
-        box_w = line_widths[i]
-        y_top = pad_y + i * (line_h + line_gap)
-        y_bot = y_top + line_h
-        x_left = (canvas_w - box_w) // 2  # center each box horizontally
-        x_right = x_left + box_w
-
-        # Draw individual rounded box per line
-        draw.rounded_rectangle([(x_left, y_top), (x_right, y_bot)], radius=14, fill=(255, 255, 255, 242))
-
-        # Draw text centered inside its own box
+        y = pad_y + i * (line_h + line_gap)
         try:
             tw = int(font.getlength(line))
         except Exception:
             tw = int(len(line) * font_size * 0.55)
-        text_x = x_left + (box_w - tw) // 2
-        text_y = y_top + (line_h - font_size) // 2
-        draw.text((text_x, text_y), line, font=font, fill=(0, 0, 0, 255))
+        x = (box_w - tw) // 2
+        draw.text((x, y), line, font=font, fill=(0, 0, 0, 255))
 
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
     png_path = os.path.join(temp_dir, f"caption_{_uuid.uuid4().hex}.png")
     img.save(png_path)
-    return png_path, canvas_w, canvas_h
+    return png_path, box_w, box_h
 
 
 def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
