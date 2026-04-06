@@ -8,7 +8,7 @@ FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 def create_caption_overlay(lines: list, font_size: int = 72,
                             pad_x: int = 18, pad_y: int = 10,
-                            line_gap: int = 8) -> tuple:
+                            line_gap: int = 14) -> tuple:
     """Render per-line white rounded boxes + text with PIL.
     Each line gets its own box sized to fit that line exactly — TikTok style.
     Returns (png_path, canvas_w, canvas_h).
