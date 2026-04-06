@@ -8,48 +8,79 @@ FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 def create_caption_overlay(lines: list, font_size: int = 72,
                             pad_x: int = 18, pad_y: int = 10,
-                            line_gap: int = 6) -> tuple:
-    """Render single white rounded box + text with PIL. Returns (png_path, box_w, box_h).
-    One box for all lines, each line centered independently inside it.
+                            line_gap: int = 0) -> tuple:
+    """TikTok-style caption: per-line boxes with different widths, seamlessly joined.
+    Top box: rounded top corners only. Bottom box: rounded bottom corners only.
+    Middle boxes (if any): no rounded corners. All flush against each other = no seam.
     """
     from PIL import ImageFont as _IF
     import uuid as _uuid
 
     W_vid = 1080
+    radius = 14
+    fill = (255, 255, 255, 242)
     font_path = 'C:/Windows/Fonts/calibrib.ttf'
     try:
         font = _IF.truetype(font_path, font_size)
     except Exception:
         font = _IF.load_default()
 
-    line_h = int(font_size * 1.15)
+    line_h = int(font_size * 1.3)
 
-    try:
-        max_line_px = max(font.getlength(line) for line in lines) if lines else 0
-    except Exception:
-        max_line_px = max(len(line) for line in lines) * font_size * 0.55 if lines else 0
-
-    box_w = min(W_vid - 60, int(max_line_px + pad_x * 2))
-    box_h = line_h * len(lines) + line_gap * max(len(lines) - 1, 0) + pad_y * 2
-
-    img = Image.new('RGBA', (box_w, box_h), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle([(0, 0), (box_w, box_h)], radius=14, fill=(255, 255, 255, 242))
-
-    for i, line in enumerate(lines):
-        y = pad_y + i * (line_h + line_gap)
+    # Measure each line's box width
+    line_widths = []
+    for line in lines:
         try:
             tw = int(font.getlength(line))
         except Exception:
             tw = int(len(line) * font_size * 0.55)
-        x = (box_w - tw) // 2
-        draw.text((x, y), line, font=font, fill=(0, 0, 0, 255))
+        line_widths.append(min(W_vid - 60, tw + pad_x * 2))
+
+    canvas_w = max(line_widths) if line_widths else 100
+    canvas_h = line_h * len(lines) + pad_y * 2
+
+    img = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+
+    for i, line in enumerate(lines):
+        bw = line_widths[i]
+        x0 = (canvas_w - bw) // 2
+        x1 = x0 + bw
+        y0 = pad_y + i * line_h
+        y1 = y0 + line_h
+
+        is_first = (i == 0)
+        is_last = (i == len(lines) - 1)
+
+        if len(lines) == 1:
+            # Single line: fully rounded
+            draw.rounded_rectangle([(x0, y0), (x1, y1)], radius=radius, fill=fill)
+        elif is_first:
+            # Top box: round top corners, flat bottom
+            draw.rounded_rectangle([(x0, y0), (x1, y1 + radius)], radius=radius, fill=fill,
+                                   corners=(True, True, False, False))
+        elif is_last:
+            # Bottom box: flat top, round bottom corners
+            draw.rounded_rectangle([(x0, y0 - radius), (x1, y1)], radius=radius, fill=fill,
+                                   corners=(False, False, True, True))
+        else:
+            # Middle box: no rounded corners
+            draw.rectangle([(x0, y0), (x1, y1)], fill=fill)
+
+        # Draw text centered in its box
+        try:
+            tw = int(font.getlength(line))
+        except Exception:
+            tw = int(len(line) * font_size * 0.55)
+        text_x = x0 + (bw - tw) // 2
+        text_y = y0 + (line_h - font_size) // 2
+        draw.text((text_x, text_y), line, font=font, fill=(0, 0, 0, 255))
 
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
     png_path = os.path.join(temp_dir, f"caption_{_uuid.uuid4().hex}.png")
     img.save(png_path)
-    return png_path, box_w, box_h
+    return png_path, canvas_w, canvas_h
 
 
 def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
