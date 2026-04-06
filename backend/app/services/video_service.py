@@ -17,7 +17,7 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     import uuid as _uuid
 
     W_vid = 1080
-    radius = 14
+    radius = 22
     fill = (255, 255, 255, 242)
     font_path = 'C:/Windows/Fonts/calibrib.ttf'
     try:
@@ -25,7 +25,7 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     except Exception:
         font = _IF.load_default()
 
-    line_h = int(font_size * 1.3)
+    line_h = int(font_size * 1.2)
 
     # Measure each line's box width
     line_widths = []
