@@ -119,22 +119,81 @@ function UploadStep({ onComplete }) {
   };
 
   if (loading) {
+    const phases = [
+      { key: "upload",    icon: "📤", label: "Subiendo video",       desc: "Enviando el archivo al servidor local..." },
+      { key: "analyzing", icon: "🧠", label: "Analizando con IA",    desc: "Gemini está viendo tu video completo. No cierres esta ventana." },
+    ];
+    const currentPhaseIdx = phases.findIndex(p => p.key === phase);
+    const currentPhase = phases[currentPhaseIdx] || phases[0];
+
     return (
-      <div className="loading-container">
-        <div className="loading-spinner"></div>
-        <h3>{statusMsg}</h3>
-        {phase === "upload" && (
-          <p>Sending file to local server...</p>
-        )}
-        {phase === "analyzing" && (
-          <p>Don't close this window. The AI is watching your entire video.</p>
-        )}
-        <div className="progress-bar" style={{ marginTop: 16 }}>
-          <div className="fill" style={{ width: `${percent}%` }}></div>
+      <div style={{ maxWidth: 500, margin: "60px auto", padding: "0 20px" }}>
+        {/* Phase steps */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0, marginBottom: 36 }}>
+          {phases.map((p, idx) => {
+            const isDone = idx < currentPhaseIdx;
+            const isActive = idx === currentPhaseIdx;
+            return (
+              <div key={p.key} style={{ display: "flex", alignItems: "center" }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                  <div style={{
+                    width: 44, height: 44, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 20,
+                    background: isDone ? "#4ade80" : isActive ? "var(--accent)" : "#1a1a1a",
+                    border: isActive ? "2px solid var(--accent)" : isDone ? "2px solid #4ade80" : "2px solid #333",
+                    boxShadow: isActive ? "0 0 16px rgba(99,102,241,0.5)" : "none",
+                    transition: "all 0.3s",
+                  }}>
+                    {isDone ? "✓" : p.icon}
+                  </div>
+                  <span style={{ fontSize: 11, color: isActive ? "#fff" : isDone ? "#4ade80" : "#555", fontWeight: isActive ? 700 : 400 }}>
+                    {p.label}
+                  </span>
+                </div>
+                {idx < phases.length - 1 && (
+                  <div style={{ width: 60, height: 2, background: isDone ? "#4ade80" : "#222", margin: "0 8px", marginBottom: 20, transition: "background 0.3s" }} />
+                )}
+              </div>
+            );
+          })}
         </div>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 8 }}>
-          {percent}%
-        </p>
+
+        {/* Main card */}
+        <div style={{
+          background: "#111", borderRadius: 18, padding: "32px 28px", textAlign: "center",
+          border: "1px solid #2a2a2a", boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>{currentPhase.icon}</div>
+          <h3 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 700 }}>{currentPhase.label}</h3>
+          <p style={{ color: "var(--text-secondary)", fontSize: 14, margin: "0 0 4px" }}>
+            {currentPhase.desc}
+          </p>
+          {statusMsg && (
+            <p style={{ color: "#6366f1", fontSize: 13, margin: "0 0 20px", fontFamily: "monospace" }}>
+              {statusMsg}
+            </p>
+          )}
+
+          {/* Progress bar */}
+          <div style={{ background: "#1a1a1a", borderRadius: 99, height: 8, overflow: "hidden", marginBottom: 8 }}>
+            <div style={{
+              height: "100%", borderRadius: 99,
+              background: "linear-gradient(90deg, #6366f1, #8b5cf6)",
+              width: `${percent}%`,
+              transition: "width 0.4s ease",
+              boxShadow: "0 0 8px rgba(99,102,241,0.6)",
+            }} />
+          </div>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, margin: 0 }}>{percent}%</p>
+
+          {phase === "analyzing" && (
+            <div style={{ marginTop: 20, padding: "12px 16px", background: "#0a0a0a", borderRadius: 10, border: "1px solid #2a2a2a" }}>
+              <p style={{ fontSize: 12, color: "#555", margin: 0, lineHeight: 1.6 }}>
+                💡 Mientras esperas, Gemini identifica los momentos más virales, analiza las reacciones y genera los captions automáticamente.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     );
   }

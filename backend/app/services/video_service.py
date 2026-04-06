@@ -9,14 +9,15 @@ FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 def create_caption_overlay(lines: list, font_size: int = 72,
                             pad_x: int = 18, pad_y: int = 10,
                             line_gap: int = 0) -> tuple:
-    """TikTok-style caption: each line has its own fully-rounded box.
-    Seams between adjacent boxes are filled solid white so no gap is visible.
+    """TikTok-style caption: each line is a fully-rounded box (all 4 corners).
+    Boxes drawn bottom-to-top, each overlapping the one below by `radius` px
+    so junctions are seamless. Where widths differ, the wider box's rounded
+    corners stick out creating the TikTok staircase step effect.
     """
     from PIL import ImageFont as _IF
     import uuid as _uuid
 
     W_vid = 1080
-    radius = 12
     fill = (255, 255, 255, 242)
     font_path = 'C:/Windows/Fonts/calibrib.ttf'
     try:
@@ -25,6 +26,8 @@ def create_caption_overlay(lines: list, font_size: int = 72,
         font = _IF.load_default()
 
     line_h = int(font_size * 1.25)
+    radius = int(line_h * 0.19)
+    overlap = radius  # each box overlaps the next by radius px to close the gap
 
     # Measure each line's box width
     line_widths = []
@@ -35,38 +38,31 @@ def create_caption_overlay(lines: list, font_size: int = 72,
             tw = int(len(line) * font_size * 0.55)
         line_widths.append(min(W_vid - 60, tw + pad_x * 2))
 
+    n = len(lines)
     canvas_w = max(line_widths) if line_widths else 100
-    canvas_h = line_h * len(lines) + pad_y * 2
+    # Total height shrinks by overlap for each junction between lines
+    canvas_h = n * line_h - (n - 1) * overlap + pad_y * 2
 
     img = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 0))
     draw = ImageDraw.Draw(img)
 
-    # Draw each line as a fully rounded box
-    for i, line in enumerate(lines):
+    # Draw boxes bottom-to-top so upper boxes paint over the top rounded corners
+    # of the box below, hiding the gap at each junction.
+    for i in range(n - 1, -1, -1):
         bw = line_widths[i]
         x0 = (canvas_w - bw) // 2
         x1 = x0 + bw
-        y0 = pad_y + i * line_h
+        y0 = pad_y + i * (line_h - overlap)
         y1 = y0 + line_h
+
         draw.rounded_rectangle([(x0, y0), (x1, y1)], radius=radius, fill=fill)
 
-    # Fill seams between adjacent boxes so no gap/line is visible
-    for i in range(len(lines) - 1):
-        bw_curr = line_widths[i]
-        bw_next = line_widths[i + 1]
-        x0_curr = (canvas_w - bw_curr) // 2
-        x0_next = (canvas_w - bw_next) // 2
-        seam_x0 = max(x0_curr, x0_next)
-        seam_x1 = min(x0_curr + bw_curr, x0_next + bw_next)
-        seam_y = pad_y + (i + 1) * line_h
-        if seam_x0 < seam_x1:
-            draw.rectangle([(seam_x0, seam_y - radius), (seam_x1, seam_y + radius)], fill=fill)
-
-    # Draw text on top
+    # Draw text in a second pass (on top of all boxes)
     for i, line in enumerate(lines):
         bw = line_widths[i]
         x0 = (canvas_w - bw) // 2
-        y0 = pad_y + i * line_h
+        y0 = pad_y + i * (line_h - overlap)
+
         try:
             tw = int(font.getlength(line))
         except Exception:
