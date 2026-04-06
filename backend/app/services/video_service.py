@@ -17,7 +17,7 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     import uuid as _uuid
 
     W_vid = 1080
-    radius = 22
+    radius = 16
     fill = (255, 255, 255, 242)
     font_path = 'C:/Windows/Fonts/calibrib.ttf'
     try:
@@ -530,7 +530,7 @@ def generate_preview_frame(
 
     # Caption overlay — Y position relative to video portion in split mode
     if caption_text:
-        lines = split_text_into_lines(caption_text, max_chars=25)
+        lines = split_text_into_lines(caption_text, max_chars=30)
         pad_x, pad_y = 12, 8
         line_gap = 5
         base_y = int(text_y * target_h)
@@ -679,7 +679,7 @@ def generate_preview_clip(
 
     # Caption overlay — Y relative to video portion in split mode
     if caption_text:
-        lines = split_text_into_lines(caption_text, max_chars=25)
+        lines = split_text_into_lines(caption_text, max_chars=30)
         pad_x, pad_y = 12, 8
         line_gap = 5
         base_y = int(text_y * target_h)

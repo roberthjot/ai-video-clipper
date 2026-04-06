@@ -117,7 +117,7 @@ def analyze_video(
     CAPTION RULES (CRITICAL):
     - Write in THIRD PERSON only (e.g. "She finally told the truth" not "I told the truth")
     - NO first person: no "I", "me", "my", "we"
-    - Maximum 10 words — short, punchy, scroll-stopping
+    - Maximum 15 words — short, punchy, scroll-stopping
     - Write like a fan account teasing the drama
     - NO punctuation of any kind: no periods, no commas, no exclamation marks, no question marks
     - Apostrophes in contractions ARE allowed: he's, she's, don't, can't, won't, it's, that's, they're — use them naturally
@@ -129,7 +129,7 @@ def analyze_video(
     - "start_time": (float) Start time in seconds.
     - "end_time": (float) End time in seconds.
     - "description": (string) 3-5 word label for the clip (English).
-    - "viral_caption": (string) Short punchy overlay text. MAX 10 words. No punctuation.
+    - "viral_caption": (string) Short punchy overlay text. MAX 15 words. No punctuation.
     - "viral_reason": (string) One sentence explaining the viral potential.
     - "viral_score": (int) A score from 1 to 10 rating the viral potential of this clip. 10 = guaranteed viral, 1 = boring. Be honest and vary the scores.
     - "viral_score_reason": (string) One short phrase (max 6 words) explaining the score. Examples: "Strong emotional hook", "Slow build-up", "Unexpected twist ending", "Weak payoff".
