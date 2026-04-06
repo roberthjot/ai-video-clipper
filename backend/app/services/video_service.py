@@ -9,15 +9,14 @@ FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 def create_caption_overlay(lines: list, font_size: int = 72,
                             pad_x: int = 18, pad_y: int = 10,
                             line_gap: int = 0) -> tuple:
-    """TikTok-style caption: per-line boxes with different widths, seamlessly joined.
-    Top box: rounded top corners only. Bottom box: rounded bottom corners only.
-    Middle boxes (if any): no rounded corners. All flush against each other = no seam.
+    """TikTok-style caption: each line has its own fully-rounded box.
+    Seams between adjacent boxes are filled solid white so no gap is visible.
     """
     from PIL import ImageFont as _IF
     import uuid as _uuid
 
     W_vid = 1080
-    radius = 16
+    radius = 12
     fill = (255, 255, 255, 242)
     font_path = 'C:/Windows/Fonts/calibrib.ttf'
     try:
@@ -25,7 +24,7 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     except Exception:
         font = _IF.load_default()
 
-    line_h = int(font_size * 1.2)
+    line_h = int(font_size * 1.25)
 
     # Measure each line's box width
     line_widths = []
@@ -42,32 +41,32 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     img = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 0))
     draw = ImageDraw.Draw(img)
 
+    # Draw each line as a fully rounded box
     for i, line in enumerate(lines):
         bw = line_widths[i]
         x0 = (canvas_w - bw) // 2
         x1 = x0 + bw
         y0 = pad_y + i * line_h
         y1 = y0 + line_h
+        draw.rounded_rectangle([(x0, y0), (x1, y1)], radius=radius, fill=fill)
 
-        is_first = (i == 0)
-        is_last = (i == len(lines) - 1)
+    # Fill seams between adjacent boxes so no gap/line is visible
+    for i in range(len(lines) - 1):
+        bw_curr = line_widths[i]
+        bw_next = line_widths[i + 1]
+        x0_curr = (canvas_w - bw_curr) // 2
+        x0_next = (canvas_w - bw_next) // 2
+        seam_x0 = max(x0_curr, x0_next)
+        seam_x1 = min(x0_curr + bw_curr, x0_next + bw_next)
+        seam_y = pad_y + (i + 1) * line_h
+        if seam_x0 < seam_x1:
+            draw.rectangle([(seam_x0, seam_y - radius), (seam_x1, seam_y + radius)], fill=fill)
 
-        if len(lines) == 1:
-            # Single line: fully rounded
-            draw.rounded_rectangle([(x0, y0), (x1, y1)], radius=radius, fill=fill)
-        elif is_first:
-            # Top box: round top corners, flat bottom
-            draw.rounded_rectangle([(x0, y0), (x1, y1 + radius)], radius=radius, fill=fill,
-                                   corners=(True, True, False, False))
-        elif is_last:
-            # Bottom box: flat top, round bottom corners
-            draw.rounded_rectangle([(x0, y0 - radius), (x1, y1)], radius=radius, fill=fill,
-                                   corners=(False, False, True, True))
-        else:
-            # Middle box: no rounded corners
-            draw.rectangle([(x0, y0), (x1, y1)], fill=fill)
-
-        # Draw text centered in its box
+    # Draw text on top
+    for i, line in enumerate(lines):
+        bw = line_widths[i]
+        x0 = (canvas_w - bw) // 2
+        y0 = pad_y + i * line_h
         try:
             tw = int(font.getlength(line))
         except Exception:
@@ -140,13 +139,13 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
 
 
 def split_text_into_lines(text: str, max_chars: int = 40) -> list:
-    """Split text into up to 3 lines, each capped at max_chars. Extra words are dropped."""
+    """Split text into up to 4 lines, each capped at max_chars. Extra words are dropped."""
     words = text.split()
     lines = []
     current = []
 
     for word in words:
-        if len(lines) == 3:
+        if len(lines) == 4:
             break
         test = " ".join(current + [word])
         if len(test) <= max_chars:
@@ -154,11 +153,11 @@ def split_text_into_lines(text: str, max_chars: int = 40) -> list:
         else:
             if current:
                 lines.append(" ".join(current))
-            if len(lines) == 3:
+            if len(lines) == 4:
                 break
             current = [word]
 
-    if current and len(lines) < 3:
+    if current and len(lines) < 4:
         lines.append(" ".join(current))
 
     return lines
