@@ -159,7 +159,7 @@ def analyze_video(
     A caption about topic Y MUST have timestamps where topic Y is actually discussed.
     NEVER assign a caption from one moment to the timestamps of a different moment.
     When in doubt about a timestamp, skip that clip entirely.
-    {transcript_section}
+    __TRANSCRIPT_SECTION__
     """
 
     # Build transcript section if available
@@ -180,7 +180,7 @@ def analyze_video(
     else:
         transcript_section = ""
 
-    system_prompt = system_prompt.replace("{transcript_section}", transcript_section)
+    system_prompt = system_prompt.replace("__TRANSCRIPT_SECTION__", transcript_section)
 
     print(f"[Gemini] Analyzing video: duration={video_duration:.1f}s, target={target_clips} clips, min_duration={min_duration}s, transcript={'yes' if transcript else 'no'}")
 
