@@ -61,6 +61,7 @@ def analyze_video(
     min_duration: int = 15,
     custom_prompt: str = "",
     start_time_offset: float = 0,
+    transcript: dict = None,
 ) -> list[ClipData]:
     """
     Use Gemini to analyze a video and identify viral clip candidates.
@@ -130,6 +131,8 @@ def analyze_video(
     - "description": (string) 3-5 word label for the clip (English).
     - "viral_caption": (string) Short punchy overlay text. MAX 10 words. No punctuation.
     - "viral_reason": (string) One sentence explaining the viral potential.
+    - "viral_score": (int) A score from 1 to 10 rating the viral potential of this clip. 10 = guaranteed viral, 1 = boring. Be honest and vary the scores.
+    - "viral_score_reason": (string) One short phrase (max 6 words) explaining the score. Examples: "Strong emotional hook", "Slow build-up", "Unexpected twist ending", "Weak payoff".
     - "ig_description": (string) A long Instagram post caption for this clip. Follow these rules:
         * First, try to identify the creator's name from audio, text on screen, or context in the video. If identified, use their real name naturally throughout.
         * Write 3-4 paragraphs in English. Start with a hook sentence about this specific moment.
@@ -156,9 +159,30 @@ def analyze_video(
     A caption about topic Y MUST have timestamps where topic Y is actually discussed.
     NEVER assign a caption from one moment to the timestamps of a different moment.
     When in doubt about a timestamp, skip that clip entirely.
+    {transcript_section}
     """
 
-    print(f"[Gemini] Analyzing video: duration={video_duration:.1f}s, target={target_clips} clips, min_duration={min_duration}s")
+    # Build transcript section if available
+    if transcript and transcript.get("words"):
+        words_summary = " ".join(
+            f"{w['word']}[{w['start']:.1f}s]" for w in transcript["words"]
+        )
+        transcript_section = f"""
+    AUDIO TRANSCRIPT WITH EXACT TIMESTAMPS (USE THESE FOR ACCURACY):
+    Language detected: {transcript.get('language', 'unknown')}
+    Full text: {transcript.get('text', '')}
+    Word-level timestamps: {words_summary[:3000]}{"..." if len(words_summary) > 3000 else ""}
+
+    CRITICAL: The word timestamps above are 100% accurate. When you identify a viral moment,
+    use the word timestamps to set start_time and end_time precisely.
+    Start the clip 0.2s BEFORE the first relevant word. End it 0.3s AFTER the last relevant word.
+    """
+    else:
+        transcript_section = ""
+
+    system_prompt = system_prompt.replace("{transcript_section}", transcript_section)
+
+    print(f"[Gemini] Analyzing video: duration={video_duration:.1f}s, target={target_clips} clips, min_duration={min_duration}s, transcript={'yes' if transcript else 'no'}")
 
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
@@ -264,6 +288,8 @@ def analyze_video(
                 description=clip.get("description", "clip"),
                 viral_caption=caption,
                 viral_reason=clip.get("viral_reason", ""),
+                viral_score=max(1, min(10, int(clip.get("viral_score", 5)))),
+                viral_score_reason=clip.get("viral_score_reason", ""),
                 ig_description=clip.get("ig_description", ""),
             ))
         return clips, skipped

@@ -3,7 +3,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from ..services import gemini_service, video_service
+from ..services import gemini_service, video_service, whisper_service
 from .upload import get_project_store
 
 router = APIRouter(prefix="/api/clips", tags=["clips"])
@@ -51,6 +51,14 @@ async def analyze_video(req: AnalyzeRequest):
             )
         duration = req.duration_override or project.video_duration
 
+        # Transcribe audio with Whisper for more accurate timestamps
+        transcript = None
+        try:
+            print("[Whisper] Transcribing audio for timestamp accuracy...")
+            transcript = await asyncio.to_thread(whisper_service.transcribe, project.video_path)
+        except Exception as e:
+            print(f"[Whisper] Transcription failed (continuing without it): {e}")
+
         clips = await asyncio.to_thread(
             gemini_service.analyze_video,
             active_file,
@@ -58,6 +66,8 @@ async def analyze_video(req: AnalyzeRequest):
             project.clip_count,
             project.min_duration,
             project.custom_prompt,
+            0,
+            transcript,
         )
 
         project.clips = clips

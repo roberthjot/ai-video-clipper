@@ -10,6 +10,8 @@ class ClipData(BaseModel):
     description: str
     viral_caption: str
     viral_reason: str
+    viral_score: int = 5        # 1-10 viral potential score from AI
+    viral_score_reason: str = ""  # Short reason for the score
     ig_description: str = ""   # Long Instagram post caption (3-4 paragraphs + hashtags)
     duration: float = 0.0
 

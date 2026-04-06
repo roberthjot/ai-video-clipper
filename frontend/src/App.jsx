@@ -296,6 +296,8 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
   // Filter by duration
   const [filterMin, setFilterMin] = useState(0);
   const [filterMax, setFilterMax] = useState(300);
+  // Sort
+  const [sortBy, setSortBy] = useState("default"); // "default" | "score_desc" | "score_asc"
   // Drag and drop
   const [draggedId, setDraggedId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
@@ -308,7 +310,13 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
 
   const maxDuration = Math.max(...clips.map(c => Math.ceil(c.duration)), 60);
 
-  const filteredClips = clips.filter(c => c.duration >= filterMin && c.duration <= filterMax);
+  const filteredClips = clips
+    .filter(c => c.duration >= filterMin && c.duration <= filterMax)
+    .sort((a, b) => {
+      if (sortBy === "score_desc") return (b.viral_score || 5) - (a.viral_score || 5);
+      if (sortBy === "score_asc") return (a.viral_score || 5) - (b.viral_score || 5);
+      return 0; // default: keep original order
+    });
 
   const handleSaveEdit = async () => {
     if (!editingClip) return;
@@ -415,6 +423,22 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
         Review clips, edit captions, play previews, then style & export.
       </p>
 
+      {/* Sort + Filter toolbar */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Ordenar:</span>
+        {[
+          { val: "default", label: "Original" },
+          { val: "score_desc", label: "🔥 Mayor score" },
+          { val: "score_asc", label: "⬇ Menor score" },
+        ].map(({ val, label }) => (
+          <button key={val} className={`btn ${sortBy === val ? "btn-primary" : "btn-secondary"}`}
+            style={{ padding: "5px 12px", fontSize: 12 }}
+            onClick={() => setSortBy(val)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Filter by duration */}
       <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "14px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
@@ -513,6 +537,16 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
                 <span className="tag">
                   📍 {formatTime(clip.start_time)} — {formatTime(clip.end_time)}
                 </span>
+                {clip.viral_score && (
+                  <span style={{
+                    padding: "2px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                    background: clip.viral_score >= 8 ? "#dc2626" : clip.viral_score >= 6 ? "#d97706" : "#374151",
+                    color: "#fff",
+                  }}>
+                    {clip.viral_score >= 8 ? "🔥" : clip.viral_score >= 6 ? "⚡" : "·"} {clip.viral_score}/10
+                    {clip.viral_score_reason ? ` · ${clip.viral_score_reason}` : ""}
+                  </span>
+                )}
               </div>
               <div className="clip-actions" onClick={e => e.stopPropagation()}>
                 <button onClick={() => handleImagePreview(clip)} title="Preview rápido (imagen)">🖼 Preview</button>
