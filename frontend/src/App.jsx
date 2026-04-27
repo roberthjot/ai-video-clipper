@@ -435,6 +435,10 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
       } catch (err) {
         console.error(`Re-análisis falló para clip ${clipId}:`, err.message);
       }
+      // Wait 20s between requests to avoid Gemini 503 rate limit errors
+      if (i < ids.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 20000));
+      }
     }
     setReanalyzingBatch(false);
     setBatchProgress({ current: 0, total: 0, currentId: null });

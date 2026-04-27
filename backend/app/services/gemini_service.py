@@ -100,6 +100,12 @@ def analyze_video(
     YOUR GOAL: Find exactly {target_clips} clips. Each clip MUST be at least {min_duration} seconds long.
     Scan the ENTIRE video from start to finish — do not miss moments in the second half.
 
+    DISTRIBUTION RULE (CRITICAL): Your {target_clips} clips MUST be spread across the full {video_duration/60:.1f} minutes.
+    - First third (0s to {video_duration/3:.0f}s): find clips here
+    - Middle third ({video_duration/3:.0f}s to {video_duration*2/3:.0f}s): find clips here
+    - Last third ({video_duration*2/3:.0f}s to {video_duration:.0f}s): find clips here
+    Do NOT return more than 40% of clips from the first third alone.
+
     WHAT MAKES A CLIP GO VIRAL:
     - Hooks viewers in the first 2 seconds — starts at the peak of the action
     - Creates an emotional reaction: shock, laughter, tears, anger, or disbelief
@@ -295,6 +301,12 @@ def analyze_video(
         return clips, skipped
 
     clips, skipped = build_clips(clips_raw, video_duration, min_duration)
+
+    # Truncate to requested count if Gemini returned more than asked
+    if len(clips) > target_clips:
+        print(f"[Gemini] Truncating {len(clips)} clips to requested {target_clips}")
+        clips = clips[:target_clips]
+        skipped = 0  # Don't retry if we already have enough
 
     # If Gemini gave invalid clips, retry once asking for exactly the missing amount
     if skipped > 0:
