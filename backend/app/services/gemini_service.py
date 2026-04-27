@@ -358,6 +358,11 @@ def analyze_video(
         except Exception as e:
             print(f"[Gemini] Retry failed (ignoring): {e}")
 
+    # Truncate again after retry in case it returned too many
+    if len(clips) > target_clips:
+        print(f"[Gemini] Post-retry truncating {len(clips)} clips to {target_clips}")
+        clips = clips[:target_clips]
+
     # If still under target, fill remaining slots with duplicate clips (different captions)
     if len(clips) < target_clips:
         still_needed = target_clips - len(clips)
