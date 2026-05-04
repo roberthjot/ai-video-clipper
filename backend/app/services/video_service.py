@@ -626,6 +626,8 @@ def generate_preview_clip(
     flip_horizontal: bool = False,
     boost_contrast: bool = False,
     caption_style: str = "box",
+    subtitle_style: str = "none",
+    transcript: dict = None,
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -704,6 +706,27 @@ def generate_preview_clip(
         filter_complex += f";[{last_label}]{','.join(preview_vf)}[detected]"
         last_label = "detected"
 
+    # Burn-in subtitles in preview (so user can see exactly what will be exported)
+    ass_subtitle_path = None
+    if subtitle_style and subtitle_style != 'none' and transcript:
+        try:
+            from . import subtitle_service
+            temp_dir = os.path.join(os.path.dirname(__file__), "temp")
+            ass_subtitle_path = subtitle_service.generate_ass_for_clip(
+                transcript=transcript,
+                clip_start=start_time,
+                clip_end=start_time + clip_duration,
+                style=subtitle_style,
+                output_dir=temp_dir,
+            )
+            if ass_subtitle_path:
+                ass_for_ffmpeg = ass_subtitle_path.replace('\\', '/').replace(':', '\\\\:')
+                filter_complex += f";[{last_label}]subtitles='{ass_for_ffmpeg}'[subbed]"
+                last_label = "subbed"
+                print(f"[Preview] Subtitle style='{subtitle_style}' applied")
+        except Exception as e:
+            print(f"[Preview] Subtitle generation failed (continuing without): {e}")
+
     end_time = start_time + clip_duration
     cmd = [FFMPEG_EXE, "-ss", str(start_time), "-to", str(end_time), "-i", video_path]
 
@@ -734,6 +757,12 @@ def generate_preview_clip(
     if rounded_box_path and os.path.exists(rounded_box_path):
         try:
             os.remove(rounded_box_path)
+        except:
+            pass
+
+    if ass_subtitle_path and os.path.exists(ass_subtitle_path):
+        try:
+            os.remove(ass_subtitle_path)
         except:
             pass
 
