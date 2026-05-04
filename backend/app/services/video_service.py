@@ -708,6 +708,7 @@ def generate_preview_clip(
 
     # Burn-in subtitles in preview (so user can see exactly what will be exported)
     ass_subtitle_path = None
+    ass_subtitle_path_extra = None  # cwd copy for FFmpeg-friendly relative path
     if subtitle_style and subtitle_style != 'none' and transcript:
         try:
             from . import subtitle_service
@@ -720,10 +721,18 @@ def generate_preview_clip(
                 output_dir=temp_dir,
             )
             if ass_subtitle_path:
-                ass_for_ffmpeg = ass_subtitle_path.replace('\\', '/').replace(':', '\\\\:')
-                filter_complex += f";[{last_label}]subtitles='{ass_for_ffmpeg}'[subbed]"
+                # FFmpeg subtitles filter is fragile with Windows paths.
+                # Workaround: copy the ASS to the current working directory and use
+                # a relative filename — no colons to escape.
+                import shutil as _shutil
+                ass_basename = os.path.basename(ass_subtitle_path)
+                ass_in_cwd = os.path.join(os.getcwd(), ass_basename)
+                _shutil.copy2(ass_subtitle_path, ass_in_cwd)
+                # Track for cleanup
+                ass_subtitle_path_extra = ass_in_cwd
+                filter_complex += f";[{last_label}]subtitles={ass_basename}[subbed]"
                 last_label = "subbed"
-                print(f"[Preview] Subtitle style='{subtitle_style}' applied")
+                print(f"[Preview] Subtitle style='{subtitle_style}' applied (ass={ass_basename})")
         except Exception as e:
             print(f"[Preview] Subtitle generation failed (continuing without): {e}")
 
@@ -763,6 +772,12 @@ def generate_preview_clip(
     if ass_subtitle_path and os.path.exists(ass_subtitle_path):
         try:
             os.remove(ass_subtitle_path)
+        except:
+            pass
+    # Clean the cwd copy used by FFmpeg
+    if ass_subtitle_path_extra and os.path.exists(ass_subtitle_path_extra):
+        try:
+            os.remove(ass_subtitle_path_extra)
         except:
             pass
 

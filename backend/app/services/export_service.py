@@ -127,6 +127,7 @@ def export_clip_with_style(
 
     # Burn-in subtitles from Whisper transcript (if requested)
     ass_subtitle_path = None
+    ass_subtitle_path_extra = None  # cwd copy for relative-path workaround
     sub_style = getattr(style, 'subtitle_style', 'none')
     if sub_style and sub_style != 'none' and transcript:
         try:
@@ -139,11 +140,15 @@ def export_clip_with_style(
                 output_dir=temp_dir,
             )
             if ass_subtitle_path:
-                # Escape path for FFmpeg subtitles filter (Windows quirks)
-                ass_for_ffmpeg = ass_subtitle_path.replace('\\', '/').replace(':', '\\\\:')
-                filter_complex += f";[{current_label}]subtitles='{ass_for_ffmpeg}'[subbed]"
+                # Workaround Windows path issues with FFmpeg subtitles filter:
+                # copy ASS to current working dir and use the basename only.
+                import shutil as _shutil
+                ass_basename = os.path.basename(ass_subtitle_path)
+                ass_subtitle_path_extra = os.path.join(os.getcwd(), ass_basename)
+                _shutil.copy2(ass_subtitle_path, ass_subtitle_path_extra)
+                filter_complex += f";[{current_label}]subtitles={ass_basename}[subbed]"
                 current_label = "subbed"
-                print(f"[Export] Clip {clip.id}: subtitle style='{sub_style}' applied")
+                print(f"[Export] Clip {clip.id}: subtitle style='{sub_style}' applied (ass={ass_basename})")
         except Exception as e:
             print(f"[Export] Clip {clip.id}: subtitle generation failed (continuing without): {e}")
 
@@ -201,6 +206,11 @@ def export_clip_with_style(
         if ass_subtitle_path and os.path.exists(ass_subtitle_path):
             try:
                 os.remove(ass_subtitle_path)
+            except:
+                pass
+        if ass_subtitle_path_extra and os.path.exists(ass_subtitle_path_extra):
+            try:
+                os.remove(ass_subtitle_path_extra)
             except:
                 pass
 
