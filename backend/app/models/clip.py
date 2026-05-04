@@ -54,6 +54,9 @@ class StyleConfig(BaseModel):
     # Caption style: "box" = white rounded box (default), "tiktok" = white text + black outline
     caption_style: str = "box"
 
+    # Subtitle style (burned into video on export): "none" | "clean" | "karaoke" | "popup"
+    subtitle_style: str = "none"
+
     # Anti-detect / uniquify (export only, not applied to preview)
     strip_metadata: bool = False
     flip_horizontal: bool = False

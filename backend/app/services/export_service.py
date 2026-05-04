@@ -3,7 +3,7 @@ import subprocess
 import threading
 from ..config import settings
 from ..models.clip import ClipData, StyleConfig
-from . import video_service
+from . import video_service, subtitle_service
 
 FFMPEG_EXE = video_service.FFMPEG_EXE
 
@@ -33,8 +33,9 @@ def export_clip_with_style(
     clip: ClipData,
     style: StyleConfig,
     output_path: str,
+    transcript: dict = None,
 ) -> str:
-    """Export clip with blur + rounded box + text + watermark + optional split-screen."""
+    """Export clip with blur + rounded box + text + watermark + optional split-screen + subtitles."""
     W, H = 1080, 1920
     duration = clip.end_time - clip.start_time
 
@@ -124,6 +125,28 @@ def export_clip_with_style(
         filter_complex += f";[{current_label}]{','.join(extra_vf)}[uniquified]"
         current_label = "uniquified"
 
+    # Burn-in subtitles from Whisper transcript (if requested)
+    ass_subtitle_path = None
+    sub_style = getattr(style, 'subtitle_style', 'none')
+    if sub_style and sub_style != 'none' and transcript:
+        try:
+            temp_dir = os.path.join(os.path.dirname(__file__), "temp")
+            ass_subtitle_path = subtitle_service.generate_ass_for_clip(
+                transcript=transcript,
+                clip_start=clip.start_time,
+                clip_end=clip.end_time,
+                style=sub_style,
+                output_dir=temp_dir,
+            )
+            if ass_subtitle_path:
+                # Escape path for FFmpeg subtitles filter (Windows quirks)
+                ass_for_ffmpeg = ass_subtitle_path.replace('\\', '/').replace(':', '\\\\:')
+                filter_complex += f";[{current_label}]subtitles='{ass_for_ffmpeg}'[subbed]"
+                current_label = "subbed"
+                print(f"[Export] Clip {clip.id}: subtitle style='{sub_style}' applied")
+        except Exception as e:
+            print(f"[Export] Clip {clip.id}: subtitle generation failed (continuing without): {e}")
+
     filter_complex += f";[{current_label}]format=yuv420p[out]"
 
     # Two-pass seek: fast input seek (keyframe) + accurate output trim
@@ -175,6 +198,11 @@ def export_clip_with_style(
                 os.remove(rounded_box_path)
             except:
                 pass
+        if ass_subtitle_path and os.path.exists(ass_subtitle_path):
+            try:
+                os.remove(ass_subtitle_path)
+            except:
+                pass
 
     return output_path
 
@@ -185,6 +213,7 @@ def export_all_clips_background(
     clips: list[ClipData],
     style: StyleConfig,
     output_dir: str,
+    transcript: dict = None,
 ):
     """Run export in background thread with progress tracking."""
 
@@ -208,7 +237,7 @@ def export_all_clips_background(
                 export_progress[project_id]["current"] = i + 1
                 export_progress[project_id]["current_file"] = filename
 
-                export_clip_with_style(video_path, clip, style, filepath)
+                export_clip_with_style(video_path, clip, style, filepath, transcript=transcript)
                 export_progress[project_id]["files"].append(filename)
 
             except Exception as e:

@@ -10,6 +10,7 @@ function UploadStep({ onComplete }) {
   const [clipCount, setClipCount] = useState(25);
   const [minDuration, setMinDuration] = useState(15);
   const [customPrompt, setCustomPrompt] = useState("");
+  const [contentType, setContentType] = useState("drama"); // "drama" | "motivational"
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState(""); // upload, analyzing
   const [statusMsg, setStatusMsg] = useState("");
@@ -296,6 +297,49 @@ function UploadStep({ onComplete }) {
             padding: "8px 12px", color: "#6366f1", fontSize: 14, fontWeight: 600,
           }}>
             9:16 — TikTok / Reels / Shorts
+          </div>
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 8 }}>
+            Tipo de contenido
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setContentType("drama");
+                setCustomPrompt("");
+              }}
+              style={{
+                padding: "12px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                cursor: "pointer", transition: "all 0.2s",
+                background: contentType === "drama" ? "linear-gradient(135deg, #ef4444, #f97316)" : "#111",
+                border: contentType === "drama" ? "1px solid #f97316" : "1px solid #333",
+                color: contentType === "drama" ? "#fff" : "#888",
+                boxShadow: contentType === "drama" ? "0 4px 14px rgba(249,115,22,0.3)" : "none",
+              }}
+            >
+              🎭 Drama / Entretenimiento
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setContentType("motivational");
+                setCustomPrompt(
+                  "Find the most powerful, inspiring, and motivational moments. Prioritize: life-changing quotes, transformation stories, breakthrough realizations, words of wisdom, advice that hits hard, success principles, mindset shifts, and statements that make viewers want to take action. Skip drama, conflict, complaints, or negative emotions. Each clip MUST leave the viewer feeling inspired, motivated, or with a powerful insight. Start at the PEAK of the impactful statement — not before it builds up."
+                );
+              }}
+              style={{
+                padding: "12px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                cursor: "pointer", transition: "all 0.2s",
+                background: contentType === "motivational" ? "linear-gradient(135deg, #6366f1, #8b5cf6)" : "#111",
+                border: contentType === "motivational" ? "1px solid #8b5cf6" : "1px solid #333",
+                color: contentType === "motivational" ? "#fff" : "#888",
+                boxShadow: contentType === "motivational" ? "0 4px 14px rgba(99,102,241,0.3)" : "none",
+              }}
+            >
+              💪 Motivacional
+            </button>
           </div>
         </div>
         <div>
@@ -769,6 +813,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     split_screen_enabled: false,
     split_ratio: 0.5,
     caption_style: "box",
+    subtitle_style: "none",
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [exportMode, setExportMode] = useState("tiktok"); // "tiktok" | "instagram"
@@ -1268,6 +1313,32 @@ function EditorStep({ projectId, clips, onExportDone }) {
                   className={`btn ${style.caption_style === val ? "btn-primary" : "btn-secondary"}`}
                   onClick={() => setStyle((s) => ({ ...s, caption_style: val }))}
                   style={{ flex: 1, textAlign: "left", padding: "10px 14px" }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
+                  <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Subtitles (burned into export) */}
+          <div className="control-section">
+            <h3>💬 Subtítulos automáticos</h3>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -4, marginBottom: 8 }}>
+              Generados con Whisper. Solo se aplican al exportar (no al preview).
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {[
+                { val: "none",     label: "✕ Ninguno",  desc: "Sin subtítulos" },
+                { val: "clean",    label: "📝 Limpio",   desc: "Texto blanco con borde" },
+                { val: "karaoke",  label: "🎤 Karaoke",  desc: "Palabra resaltada en amarillo" },
+                { val: "popup",    label: "💥 Pop-up",   desc: "Una palabra a la vez" },
+              ].map(({ val, label, desc }) => (
+                <button
+                  key={val}
+                  className={`btn ${style.subtitle_style === val ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => setStyle((s) => ({ ...s, subtitle_style: val }))}
+                  style={{ textAlign: "left", padding: "10px 14px" }}
                 >
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
                   <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{desc}</div>

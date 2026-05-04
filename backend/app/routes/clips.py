@@ -51,11 +51,12 @@ async def analyze_video(req: AnalyzeRequest):
             )
         duration = req.duration_override or project.video_duration
 
-        # Transcribe audio with Whisper for more accurate timestamps
+        # Transcribe audio with Whisper for more accurate timestamps + subtitles
         transcript = None
         try:
             print("[Whisper] Transcribing audio for timestamp accuracy...")
             transcript = await asyncio.to_thread(whisper_service.transcribe, project.video_path)
+            project.transcript = transcript  # Save for subtitle generation later
         except Exception as e:
             print(f"[Whisper] Transcription failed (continuing without it): {e}")
 

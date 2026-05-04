@@ -95,6 +95,7 @@ async def render_clips(project_id: str, clip_ids: list[int] = Query(default=None
         clips=clips_to_export,
         style=project.style,
         output_dir=export_dir,
+        transcript=getattr(project, 'transcript', None),
     )
 
     return {
