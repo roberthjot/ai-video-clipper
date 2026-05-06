@@ -307,9 +307,9 @@ function UploadStep({ onComplete }) {
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
             {[
-              { val: "gemini-2.5-pro",         label: "🥇 2.5 Pro",     desc: "~50/día · mejor calidad" },
-              { val: "gemini-2.5-flash",       label: "⚡ 2.5 Flash",   desc: "1500/día · recomendado" },
-              { val: "gemini-3-flash-preview", label: "🆕 3 Flash",     desc: "20/día · más nuevo" },
+              { val: "gemini-2.5-flash",       label: "⚡ 2.5 Flash",   desc: "1500/día · GRATIS" },
+              { val: "gemini-3-flash-preview", label: "🆕 3 Flash",     desc: "20/día · GRATIS" },
+              { val: "gemini-2.5-pro",         label: "🥇 2.5 Pro",     desc: "Solo con pago 💰" },
             ].map(({ val, label, desc }) => (
               <button
                 key={val}
