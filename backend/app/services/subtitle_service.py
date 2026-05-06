@@ -195,6 +195,7 @@ def generate_ass_for_clip(
     clip_end: float,
     style: str,
     output_dir: str,
+    time_offset: float = 0.0,
 ) -> str:
     """
     Generate an ASS subtitle file for a single clip.
@@ -205,6 +206,9 @@ def generate_ass_for_clip(
         clip_end: Clip end time
         style: "clean" | "karaoke" | "popup"
         output_dir: Directory to write the .ass file
+        time_offset: Seconds to add to all subtitle timestamps. Used by the
+            export pipeline which fast-seeks 4s before the clip then trims —
+            without this offset subtitles appear during the trimmed buffer.
 
     Returns:
         Absolute path to the generated .ass file. Returns None if no words in range.
@@ -215,6 +219,12 @@ def generate_ass_for_clip(
     clip_words = _filter_words_for_clip(transcript["words"], clip_start, clip_end)
     if not clip_words:
         return None
+
+    # Shift all word timestamps by the offset (compensates for fast-seek buffer)
+    if time_offset > 0:
+        for w in clip_words:
+            w["start"] += time_offset
+            w["end"] += time_offset
 
     header = _ass_header(style)
 

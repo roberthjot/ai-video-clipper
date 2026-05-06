@@ -968,7 +968,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast]);
+  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style]);
 
   // Poll progress
   useEffect(() => {

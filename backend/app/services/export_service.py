@@ -131,6 +131,11 @@ def export_clip_with_style(
     sub_style = getattr(style, 'subtitle_style', 'none')
     if sub_style and sub_style != 'none' and transcript:
         try:
+            # The export uses fast-seek (clip.start - 4s) + output trim.
+            # Subtitles must be shifted by `buffer` so they appear at the
+            # correct moment AFTER the trim discards the seek overshoot.
+            _fast_seek = max(0.0, clip.start_time - 4.0)
+            _buffer = clip.start_time - _fast_seek
             temp_dir = os.path.join(os.path.dirname(__file__), "temp")
             ass_subtitle_path = subtitle_service.generate_ass_for_clip(
                 transcript=transcript,
@@ -138,6 +143,7 @@ def export_clip_with_style(
                 clip_end=clip.end_time,
                 style=sub_style,
                 output_dir=temp_dir,
+                time_offset=_buffer,
             )
             if ass_subtitle_path:
                 # Workaround Windows path issues with FFmpeg subtitles filter:
