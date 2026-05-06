@@ -10,6 +10,7 @@ The generated ASS file is burned into the exported video by FFmpeg via the
 `subtitles=` filter.
 """
 import os
+import re
 import uuid
 
 
@@ -22,6 +23,8 @@ BLACK_OUTLINE = "&H00000000"
 
 def _format_time(seconds: float) -> str:
     """ASS time format: H:MM:SS.cs (centiseconds)"""
+    if seconds < 0:
+        seconds = 0
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
@@ -29,18 +32,25 @@ def _format_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+def _clean_word(word: str) -> str:
+    """Strip punctuation and weird symbols. Keep letters, digits, apostrophes."""
+    # Remove anything that isn't a letter, digit, apostrophe, or space
+    cleaned = re.sub(r"[^\w\s']", '', word, flags=re.UNICODE)
+    # Collapse multiple spaces
+    cleaned = re.sub(r"\s+", ' ', cleaned).strip()
+    return cleaned
+
+
 def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920) -> str:
     """Generate ASS header with the chosen visual style."""
     if style == "popup":
-        # Big bold single-word style
         font_size = 110
         outline = 8
-        marginV = int(video_h * 0.45)  # near vertical center
+        marginV = int(video_h * 0.45)
     elif style == "karaoke":
-        # 3-5 words per line, current word highlighted
         font_size = 80
         outline = 6
-        marginV = int(video_h * 0.30)  # lower third area
+        marginV = int(video_h * 0.30)
     else:  # clean
         font_size = 75
         outline = 5
@@ -56,7 +66,6 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,Arial Black,{font_size},{WHITE},{YELLOW},{BLACK_OUTLINE},{BLACK_BG},-1,0,0,0,100,100,0,0,1,{outline},2,2,40,40,{marginV},1
-Style: Highlight,Arial Black,{font_size},{YELLOW},{YELLOW},{BLACK_OUTLINE},{BLACK_BG},-1,0,0,0,100,100,0,0,1,{outline},2,2,40,40,{marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -64,20 +73,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def _filter_words_for_clip(words: list, clip_start: float, clip_end: float) -> list:
-    """Get words within the clip's time range, with timestamps relative to clip start."""
+    """Get words within the clip's time range, with timestamps relative to clip start.
+    Words are returned in the same order as the original transcript and cleaned."""
     result = []
     for w in words:
+        # Skip words completely outside the clip range
         if w["end"] < clip_start:
             continue
         if w["start"] > clip_end:
             break
-        # Clip the word to the clip range and shift to relative time
+
+        cleaned = _clean_word(w["word"])
+        if not cleaned:
+            continue  # Skip words that are pure punctuation
+
+        # Shift timestamps to be relative to clip start
         rel_start = max(0.0, w["start"] - clip_start)
         rel_end = min(clip_end - clip_start, w["end"] - clip_start)
         if rel_end <= rel_start:
             continue
+
         result.append({
-            "word": w["word"].strip(),
+            "word": cleaned,
             "start": rel_start,
             "end": rel_end,
         })
@@ -90,77 +107,61 @@ def _escape_ass_text(text: str) -> str:
 
 
 def _generate_clean(words: list) -> str:
-    """Group words into lines of 3-4 words and show each line for its duration."""
-    lines = []
-    chunk = []
-    chunk_start = None
+    """Group words into chunks of 3-4 and show each chunk for its full duration."""
     MAX_WORDS = 4
-
-    for w in words:
-        if chunk_start is None:
-            chunk_start = w["start"]
-        chunk.append(w)
-        # Flush chunk on punctuation or word count limit
-        is_long_pause = (len(chunk) >= 2 and
-                         w == chunk[-1] and
-                         len(words) > words.index(w) + 1 and
-                         words[words.index(w) + 1]["start"] - w["end"] > 0.3)
-        if len(chunk) >= MAX_WORDS or is_long_pause:
-            text = " ".join(c["word"] for c in chunk).upper()
-            lines.append({
-                "start": chunk_start,
-                "end": chunk[-1]["end"],
-                "text": _escape_ass_text(text),
-            })
-            chunk = []
-            chunk_start = None
-
-    if chunk:
-        text = " ".join(c["word"] for c in chunk).upper()
-        lines.append({
-            "start": chunk_start,
-            "end": chunk[-1]["end"],
-            "text": _escape_ass_text(text),
-        })
-
     events = []
-    for line in lines:
+
+    # Build chunks of MAX_WORDS each, in order
+    for i in range(0, len(words), MAX_WORDS):
+        chunk = words[i:i + MAX_WORDS]
+        if not chunk:
+            continue
+        chunk_start = chunk[0]["start"]
+        chunk_end = chunk[-1]["end"]
+        text = " ".join(_escape_ass_text(c["word"].upper()) for c in chunk)
         events.append(
-            f"Dialogue: 0,{_format_time(line['start'])},{_format_time(line['end'])},"
-            f"Default,,0,0,0,,{line['text']}"
+            f"Dialogue: 0,{_format_time(chunk_start)},{_format_time(chunk_end)},"
+            f"Default,,0,0,0,,{text}"
         )
+
     return "\n".join(events)
 
 
 def _generate_karaoke(words: list) -> str:
-    """Show 3-5 words at a time with the current word highlighted in yellow."""
+    """Show 3-4 words at a time, highlighting the current word in yellow.
+    The whole group is visible from first word's start to last word's end —
+    only the highlight color moves between words."""
     WORDS_PER_GROUP = 4
     events = []
 
-    # Group words into chunks
-    groups = []
-    for i in range(0, len(words), WORDS_PER_GROUP):
-        groups.append(words[i:i + WORDS_PER_GROUP])
-
-    for group in groups:
+    for gi in range(0, len(words), WORDS_PER_GROUP):
+        group = words[gi:gi + WORDS_PER_GROUP]
         if not group:
             continue
-        group_start = group[0]["start"]
-        group_end = group[-1]["end"]
 
-        # For each word in group, render the whole group with current word highlighted
-        for idx, word in enumerate(group):
+        for idx, current in enumerate(group):
+            # The dialogue for this word lasts from this word's start to the
+            # next word's start (or to the last word's end if it's the last one)
+            seg_start = current["start"]
+            if idx < len(group) - 1:
+                seg_end = group[idx + 1]["start"]
+            else:
+                seg_end = current["end"]
+
+            if seg_end <= seg_start:
+                continue
+
+            # Render the whole group, with the current word in yellow + slightly bigger
             parts = []
             for j, w in enumerate(group):
-                text = _escape_ass_text(w["word"].upper())
+                txt = _escape_ass_text(w["word"].upper())
                 if j == idx:
-                    # Highlighted word — yellow + slightly bigger via \fscx/\fscy
-                    parts.append(f"{{\\c{YELLOW}\\fscx110\\fscy110}}{text}{{\\r}}")
+                    parts.append(f"{{\\c{YELLOW}\\fscx112\\fscy112}}{txt}{{\\r}}")
                 else:
-                    parts.append(text)
+                    parts.append(txt)
             line = " ".join(parts)
             events.append(
-                f"Dialogue: 0,{_format_time(word['start'])},{_format_time(word['end'])},"
+                f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
                 f"Default,,0,0,0,,{line}"
             )
 
@@ -168,15 +169,21 @@ def _generate_karaoke(words: list) -> str:
 
 
 def _generate_popup(words: list) -> str:
-    """One word at a time, big and bold with a bounce-in effect."""
+    """One word at a time, big and bold. Each word lasts from its start to the
+    next word's start, so there are no visual gaps between words."""
     events = []
-    for w in words:
+    n = len(words)
+    for i, w in enumerate(words):
         text = _escape_ass_text(w["word"].upper())
-        # \fad(80,40) = fade-in 80ms, fade-out 40ms
-        # \t(0,150,\fscx100\fscy100) = scale up from initial size for bounce
-        animated = f"{{\\fad(60,30)\\fscx80\\fscy80\\t(0,120,\\fscx105\\fscy105)\\t(120,180,\\fscx100\\fscy100)}}{text}"
+        seg_start = w["start"]
+        # Each word visible until the next word starts (no gaps)
+        seg_end = words[i + 1]["start"] if i + 1 < n else w["end"]
+        if seg_end <= seg_start:
+            continue
+        # Quick fade-in + slight bounce scale
+        animated = f"{{\\fad(60,30)\\fscx80\\fscy80\\t(0,120,\\fscx108\\fscy108)\\t(120,180,\\fscx100\\fscy100)}}{text}"
         events.append(
-            f"Dialogue: 0,{_format_time(w['start'])},{_format_time(w['end'])},"
+            f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
             f"Default,,0,0,0,,{animated}"
         )
     return "\n".join(events)
