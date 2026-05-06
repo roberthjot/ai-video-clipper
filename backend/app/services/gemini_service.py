@@ -62,6 +62,7 @@ def analyze_video(
     custom_prompt: str = "",
     start_time_offset: float = 0,
     transcript: dict = None,
+    model: str = None,
 ) -> list[ClipData]:
     """
     Use Gemini to analyze a video and identify viral clip candidates.
@@ -188,10 +189,11 @@ def analyze_video(
 
     system_prompt = system_prompt.replace("__TRANSCRIPT_SECTION__", transcript_section)
 
-    print(f"[Gemini] Analyzing video: duration={video_duration:.1f}s, target={target_clips} clips, min_duration={min_duration}s, transcript={'yes' if transcript else 'no'}")
+    active_model = model or settings.GEMINI_MODEL
+    print(f"[Gemini] Analyzing video: model={active_model}, duration={video_duration:.1f}s, target={target_clips} clips, min_duration={min_duration}s, transcript={'yes' if transcript else 'no'}")
 
     response = client.models.generate_content(
-        model=settings.GEMINI_MODEL,
+        model=active_model,
         contents=[
             types.Content(
                 role="user",
@@ -312,7 +314,7 @@ def analyze_video(
     if skipped > 0:
         print(f"[Gemini] {skipped} clips were out of range. Retrying to get {skipped} more valid clips...")
         retry_response = client.models.generate_content(
-            model=settings.GEMINI_MODEL,
+            model=active_model,
             contents=[
                 types.Content(
                     role="user",

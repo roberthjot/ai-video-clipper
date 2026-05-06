@@ -69,6 +69,7 @@ async def analyze_video(req: AnalyzeRequest):
             project.custom_prompt,
             0,
             transcript,
+            project.gemini_model,
         )
 
         project.clips = clips

@@ -20,6 +20,7 @@ class Project(BaseModel):
     output_dir: str = ""
     token_count: int = 0
     transcript: Optional[dict] = None  # Whisper transcript with word-level timestamps
+    gemini_model: str = "gemini-2.5-flash"  # which Gemini model to use for analysis
 
     def model_post_init(self, __context):
         if self.created_at == 0.0:

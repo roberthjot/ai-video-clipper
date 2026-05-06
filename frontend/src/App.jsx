@@ -11,6 +11,7 @@ function UploadStep({ onComplete }) {
   const [minDuration, setMinDuration] = useState(15);
   const [customPrompt, setCustomPrompt] = useState("");
   const [contentType, setContentType] = useState("drama"); // "drama" | "motivational"
+  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash"); // which API model
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState(""); // upload, analyzing
   const [statusMsg, setStatusMsg] = useState("");
@@ -54,7 +55,8 @@ function UploadStep({ onComplete }) {
         (pct) => {
           setPercent(pct);
           setStatusMsg(`Uploading video to server... ${pct}%`);
-        }
+        },
+        geminiModel
       );
 
       setProjectIdRef(uploadRes.project_id);
@@ -298,6 +300,39 @@ function UploadStep({ onComplete }) {
           }}>
             9:16 — TikTok / Reels / Shorts
           </div>
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 8 }}>
+            Modelo de IA
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            {[
+              { val: "gemini-2.5-pro",         label: "🥇 2.5 Pro",     desc: "~50/día · mejor calidad" },
+              { val: "gemini-2.5-flash",       label: "⚡ 2.5 Flash",   desc: "1500/día · recomendado" },
+              { val: "gemini-3-flash-preview", label: "🆕 3 Flash",     desc: "20/día · más nuevo" },
+            ].map(({ val, label, desc }) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setGeminiModel(val)}
+                style={{
+                  padding: "10px 8px", borderRadius: 10, fontSize: 12, fontWeight: 700,
+                  cursor: "pointer", transition: "all 0.2s",
+                  background: geminiModel === val ? "linear-gradient(135deg, #10b981, #14b8a6)" : "#111",
+                  border: geminiModel === val ? "1px solid #14b8a6" : "1px solid #333",
+                  color: geminiModel === val ? "#fff" : "#888",
+                  boxShadow: geminiModel === val ? "0 4px 14px rgba(20,184,166,0.3)" : "none",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
+                <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{desc}</div>
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, marginBottom: 0 }}>
+            Si un modelo da error 429 (cuota agotada), cambia a otro.
+          </p>
         </div>
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 8 }}>
