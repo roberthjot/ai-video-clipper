@@ -264,6 +264,8 @@ def generate_instagram_preview_clip(
         fg_filter = f"scale=-2:{int(video_h * 0.78)}"
     elif fill_mode == "medium":
         fg_filter = f"scale=-2:{int(video_h * 0.65)}"
+    elif fill_mode == "mini":
+        fg_filter = f"scale=-2:{int(video_h * 0.50)}"
     else:  # fit
         fg_filter = f"scale={W}:{video_h}:force_original_aspect_ratio=decrease"
 
@@ -382,6 +384,9 @@ def generate_instagram_preview_frame(
     elif fill_mode == "medium":
         # 65% of zone height — noticeably bigger than fit, slight side crop for landscape
         vf = f"scale=-2:{int(video_h * 0.65)}"
+    elif fill_mode == "mini":
+        # 50% of zone height — smallest option, more blur visible
+        vf = f"scale=-2:{int(video_h * 0.50)}"
     else:  # fit — scale to fit width, may have top/bottom white space
         vf = f"scale={W}:-2"
 
@@ -499,6 +504,8 @@ def generate_preview_frame(
         fg_filter = f"scale=-2:{int(target_h * 0.78)}"
     elif fill_mode == "medium":
         fg_filter = f"scale=-2:{int(target_h * 0.65)}"
+    elif fill_mode == "mini":
+        fg_filter = f"scale=-2:{int(target_h * 0.50)}"
     else:
         fg_filter = f"scale={W}:-2"
 
@@ -653,6 +660,8 @@ def generate_preview_clip(
         fg_filter = f"scale=-2:{int(target_h * 0.78)}"
     elif fill_mode == "medium":
         fg_filter = f"scale=-2:{int(target_h * 0.65)}"
+    elif fill_mode == "mini":
+        fg_filter = f"scale=-2:{int(target_h * 0.50)}"
     else:
         fg_filter = f"scale={W}:-2"
 

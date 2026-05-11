@@ -1321,7 +1321,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
           <div className="control-section">
             <h3>🎬 Video Format</h3>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["fit", "medium", "zoom", "fill", "small"].map((m) => (
+              {["fit", "medium", "mini", "zoom", "fill", "small"].map((m) => (
                 <button
                   key={m}
                   className={`btn ${style.fill_mode === m ? "btn-primary" : "btn-secondary"}`}
@@ -1331,7 +1331,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
               ))}
             </div>
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-              Fit = full · Medium = un poco más chico · Zoom = grande · Fill = frame completo · Small = reducido
+              Fit = full · Medium = un poco más chico · Mini = el más pequeño · Zoom = grande · Fill = frame completo · Small = reducido
             </p>
           </div>
 
@@ -1386,7 +1386,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
           <div className="control-section">
             <h3>📸 IG Video Size</h3>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["fit", "medium", "zoom", "fill", "small"].map((m) => (
+              {["fit", "medium", "mini", "zoom", "fill", "small"].map((m) => (
                 <button
                   key={m}
                   className={`btn ${style.ig_fill_mode === m ? "btn-primary" : "btn-secondary"}`}

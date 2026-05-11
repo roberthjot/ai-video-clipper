@@ -59,6 +59,8 @@ def export_clip_with_style(
         fg_filter = f"scale=-2:{int(target_h * 0.78)}"
     elif style.fill_mode == "medium":
         fg_filter = f"scale=-2:{int(target_h * 0.65)}"
+    elif style.fill_mode == "mini":
+        fg_filter = f"scale=-2:{int(target_h * 0.50)}"
     else:
         fg_filter = f"scale={W}:-2"
 
@@ -322,6 +324,8 @@ def export_instagram_clip(
         fg_filter = f"scale=-2:{int(video_h * 0.78)}"
     elif ig_fill_mode == "medium":
         fg_filter = f"scale=-2:{int(video_h * 0.65)}"
+    elif ig_fill_mode == "mini":
+        fg_filter = f"scale=-2:{int(video_h * 0.50)}"
     else:  # fit
         fg_filter = f"scale={W}:-2"
 
