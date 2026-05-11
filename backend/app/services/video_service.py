@@ -10,6 +10,30 @@ FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 _QSV_AVAILABLE = None
 
 
+def get_visual_filter_chain(filter_name: str) -> str:
+    """Return an FFmpeg filter string for a cinematic look. Empty string = no filter."""
+    f = (filter_name or "none").lower()
+    if f == "cinematic":
+        # Teal shadows + orange highlights, mild desaturation, increased contrast
+        return ("eq=saturation=0.88:contrast=1.12,"
+                "colorbalance=rs=-0.05:bs=0.12:rh=0.08:bh=-0.05")
+    if f == "warm":
+        # Golden/yellow main-character look
+        return ("eq=saturation=1.10,"
+                "colorbalance=rm=0.08:gm=0.03:bm=-0.12")
+    if f == "vivid":
+        # Punchy saturation + contrast for stop-scroll effect
+        return "eq=saturation=1.40:contrast=1.15:brightness=0.02"
+    if f == "moody":
+        # Desaturated, darker, slight cool tint
+        return ("eq=saturation=0.75:contrast=1.10:brightness=-0.03,"
+                "colorbalance=bs=0.05")
+    if f == "bw":
+        # Black & white
+        return "hue=s=0"
+    return ""
+
+
 def _qsv_supported() -> bool:
     """Check once whether the bundled FFmpeg supports h264_qsv encoder."""
     global _QSV_AVAILABLE
@@ -714,6 +738,7 @@ def generate_preview_clip(
     caption_style: str = "box",
     subtitle_style: str = "none",
     transcript: dict = None,
+    visual_filter: str = "none",
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -790,6 +815,10 @@ def generate_preview_clip(
         preview_vf.append("hflip")
     if boost_contrast:
         preview_vf.append("eq=contrast=1.05:brightness=0.02:saturation=1.05")
+    # Cinematic visual filter applied last
+    cinematic = get_visual_filter_chain(visual_filter)
+    if cinematic:
+        preview_vf.append(cinematic)
     if preview_vf:
         filter_complex += f";[{last_label}]{','.join(preview_vf)}[detected]"
         last_label = "detected"

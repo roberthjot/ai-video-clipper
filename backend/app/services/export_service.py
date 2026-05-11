@@ -123,6 +123,10 @@ def export_clip_with_style(
         extra_vf.append(f"scale={zoom_w}:{zoom_h},crop={W}:{H}")
     if style.boost_contrast:
         extra_vf.append("eq=contrast=1.05:brightness=0.02:saturation=1.05")
+    # Cinematic visual filter (last so it shapes the final look)
+    cinematic = video_service.get_visual_filter_chain(getattr(style, 'visual_filter', 'none'))
+    if cinematic:
+        extra_vf.append(cinematic)
     if extra_vf:
         filter_complex += f";[{current_label}]{','.join(extra_vf)}[uniquified]"
         current_label = "uniquified"

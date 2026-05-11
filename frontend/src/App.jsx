@@ -890,6 +890,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     split_ratio: 0.5,
     caption_style: "box",
     subtitle_style: "none",
+    visual_filter: "none",
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [exportMode, setExportMode] = useState("tiktok"); // "tiktok" | "instagram"
@@ -1009,7 +1010,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style]);
+  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter]);
 
   // Poll progress
   useEffect(() => {
@@ -1392,6 +1393,34 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 >
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
                   <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Cinematic visual filter */}
+          <div className="control-section">
+            <h3>🎨 Filtro cinematográfico</h3>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -4, marginBottom: 8 }}>
+              Cambia el look del video. Se aplica al preview y al export.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {[
+                { val: "none",      label: "✕ Ninguno",   desc: "Sin filtro" },
+                { val: "cinematic", label: "🎬 Cinematic", desc: "Teal & orange · drama" },
+                { val: "warm",      label: "🌅 Warm",      desc: "Dorado · motivacional" },
+                { val: "vivid",     label: "⚡ Vivid",     desc: "Saturado · stop scroll" },
+                { val: "moody",     label: "🌑 Moody",     desc: "Oscuro · storytime" },
+                { val: "bw",        label: "⚫ B&W",       desc: "Blanco y negro" },
+              ].map(({ val, label, desc }) => (
+                <button
+                  key={val}
+                  className={`btn ${style.visual_filter === val ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => setStyle((s) => ({ ...s, visual_filter: val }))}
+                  style={{ textAlign: "left", padding: "10px 12px" }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>{label}</div>
+                  <div style={{ fontSize: 10, opacity: 0.65, marginTop: 2 }}>{desc}</div>
                 </button>
               ))}
             </div>

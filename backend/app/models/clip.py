@@ -57,6 +57,9 @@ class StyleConfig(BaseModel):
     # Subtitle style (burned into video on export): "none" | "clean" | "karaoke" | "popup"
     subtitle_style: str = "none"
 
+    # Cinematic visual filter: "none" | "cinematic" | "warm" | "vivid" | "moody" | "bw"
+    visual_filter: str = "none"
+
     # Anti-detect / uniquify (export only, not applied to preview)
     strip_metadata: bool = False
     flip_horizontal: bool = False
