@@ -1,4 +1,6 @@
 import os
+import math
+import uuid
 import asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -74,17 +76,27 @@ async def analyze_video(req: AnalyzeRequest):
         except Exception as e:
             print(f"[Whisper] Transcription failed (continuing without it): {e}")
 
-        clips = await asyncio.to_thread(
-            gemini_service.analyze_video,
-            active_file,
-            duration,
-            project.clip_count,
-            project.min_duration,
-            project.custom_prompt,
-            0,
-            transcript,
-            project.gemini_model,
-        )
+        # If the video is long enough, switch to chunked analysis (much more
+        # accurate timestamps because Gemini focuses on a smaller time window).
+        if duration > gemini_service.CHUNK_THRESHOLD_SECONDS:
+            print(f"[Analyze] Video is {duration/60:.1f} min — using chunked analysis")
+            # We don't need the full-video upload for the chunked path; delete it
+            # before processing chunks so we don't hit storage quota.
+            await asyncio.to_thread(gemini_service.delete_file, active_file)
+            active_file = None
+            clips = await _analyze_in_chunks(project, duration, transcript)
+        else:
+            clips = await asyncio.to_thread(
+                gemini_service.analyze_video,
+                active_file,
+                duration,
+                project.clip_count,
+                project.min_duration,
+                project.custom_prompt,
+                0,
+                transcript,
+                project.gemini_model,
+            )
 
         project.clips = clips
         project.status = "ready"
@@ -107,6 +119,84 @@ async def analyze_video(req: AnalyzeRequest):
         # Always clean up the Gemini file to free storage quota
         if active_file is not None:
             await asyncio.to_thread(gemini_service.delete_file, active_file)
+
+
+async def _analyze_in_chunks(project, duration: float, transcript: dict) -> list:
+    """Split a long video into chunks of ~10 min, analyze each separately, then
+    merge the results. Each chunk gives Gemini a much smaller time window so its
+    timestamps stay precise. Chunk-local timestamps are shifted back to the
+    original video's global timeline before merging.
+    """
+    ranges = gemini_service.build_chunk_ranges(duration, gemini_service.CHUNK_DURATION_SECONDS)
+    n_chunks = len(ranges)
+    clips_per_chunk = max(1, math.ceil(project.clip_count / n_chunks))
+    print(f"[Chunked] {n_chunks} chunks, ~{clips_per_chunk} clips each")
+
+    temp_dir = os.path.join(os.path.dirname(__file__), "..", "services", "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    all_clips = []
+    for idx, (chunk_start, chunk_end) in enumerate(ranges):
+        chunk_duration = chunk_end - chunk_start
+        chunk_path = os.path.join(temp_dir, f"chunk_{uuid.uuid4().hex}.mp4")
+        chunk_file = None
+        try:
+            print(f"[Chunked] Extracting chunk {idx+1}/{n_chunks}: {chunk_start:.0f}s-{chunk_end:.0f}s")
+            await asyncio.to_thread(
+                gemini_service.extract_video_chunk,
+                project.video_path, chunk_start, chunk_end, chunk_path,
+            )
+            chunk_file = await asyncio.to_thread(gemini_service.upload_video, chunk_path)
+            chunk_file = await asyncio.to_thread(gemini_service.wait_for_processing, chunk_file)
+
+            chunk_transcript = gemini_service.filter_transcript_for_range(
+                transcript, chunk_start, chunk_end
+            ) if transcript else None
+
+            chunk_clips = await asyncio.to_thread(
+                gemini_service.analyze_video,
+                chunk_file,
+                chunk_duration,
+                clips_per_chunk,
+                project.min_duration,
+                project.custom_prompt,
+                0,
+                chunk_transcript,
+                project.gemini_model,
+            )
+
+            # Shift chunk-local timestamps to global video time
+            for c in chunk_clips:
+                c.start_time = round(c.start_time + chunk_start, 2)
+                c.end_time = round(c.end_time + chunk_start, 2)
+            all_clips.extend(chunk_clips)
+            print(f"[Chunked] Chunk {idx+1}/{n_chunks} done — {len(chunk_clips)} clips")
+        except Exception as e:
+            print(f"[Chunked] Chunk {idx+1} failed (skipping): {e}")
+        finally:
+            if chunk_file is not None:
+                try:
+                    await asyncio.to_thread(gemini_service.delete_file, chunk_file)
+                except Exception:
+                    pass
+            try:
+                if os.path.exists(chunk_path):
+                    os.remove(chunk_path)
+            except Exception:
+                pass
+
+    # Sort by global start_time and renumber IDs
+    all_clips.sort(key=lambda c: c.start_time)
+    for i, c in enumerate(all_clips):
+        c.id = i + 1
+
+    # Truncate to user-requested total
+    if len(all_clips) > project.clip_count:
+        all_clips = all_clips[:project.clip_count]
+        for i, c in enumerate(all_clips):
+            c.id = i + 1
+
+    return all_clips
 
 
 @router.get("/{project_id}/download-info")

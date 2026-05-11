@@ -1,113 +1,166 @@
-# Changelog
+# AI Video Clipper — Changelog
 
-All notable changes to this project will be documented in this file.
+A running log of all the improvements added on top of v9.5 base.
 
-## [v9.6] - 2026-03-18
+## Caption rendering
 
-### Added
-- **Medium fill mode for Video Format (TikTok)**: New `Medium` button in Video Format alongside Fit · Zoom · Fill · Small. Uses the same 65% scale as IG Medium (`scale=-2:{int(H*0.65)}`). Added to `generate_preview_frame`, `generate_preview_clip`, and `export_service.py`.
-- **Text X position slider in clip editor**: Move caption text left/right (0%–100% of canvas width). Default 50% (centered). Applied across preview frame, preview clip, and export.
-- **Font size slider in clip editor**: Adjust caption font size from 30px to 120px (default 72px). Applied across all preview and export functions.
+### TikTok-style staircase boxes
+- Each line of the caption is rendered as its own fully-rounded white box
+- Boxes are drawn bottom-to-top with a `radius`-pixel overlap so adjacent
+  boxes meet seamlessly (no visible gap, no seam fill that flattens the look)
+- When lines differ in width, the wider box's outer rounded corners stick
+  out creating the TikTok "step" effect
+- Corner radius is proportional: `int(line_h * 0.19)` ≈ 17px at font_size=72
 
-### Fixed
-- **Medium fill_mode was ignored in TikTok preview**: `medium` fell into the `else` case in `generate_preview_clip` and `generate_preview_frame`, behaving identically to `fit`. Now correctly applies `scale=-2:{int(target_h*0.65)}`.
-- **Removed TikTok preview button**: Reverted accidental addition of a 🎵 TikTok preview button that was not requested.
+### Caption text rules
+- Word limit raised to **15 words**
+- Up to **4 lines** of max **30 chars** each (was 3 × 25)
+- Apostrophes preserved (he's, don't, that's all render correctly)
+- All lowercase except first letter
 
----
+### Emoji support (Apple/CapCut style)
+- Gemini now appends exactly one emoji at the end of each caption,
+  picked to match the moment's emotion:
+  - Drama → 😱 💀 👀
+  - Funny → 😂 🤣 💀
+  - Motivational → 💪 🔥 ⚡
+  - Sad → 💔 😭 🥺
+  - Confession → 🤐 👀 😳
+  - Wholesome → 🥰 ❤️
+- Rendered with **Pilmoji** + Apple emoji source (same look as TikTok/CapCut)
+- Caption regex preserves emoji unicode instead of stripping them
+- Box width adjusts automatically to fit the emoji
 
-## [v9.5.1] - 2026-03-18
+## Subtitles (auto, burned into export & preview)
 
-### Added (Meme Generator improvements)
-- **Font size slider** per meme card: Adjust from 40px to 180px (default 80px). Changing font size resets the video offset to 0 (auto-position).
-- **Text X slider**: Move meme text left/right (0%–90% of canvas). Default 5% (left-aligned). Pixel-width-based wrapping recalculates automatically based on available width from X position to right edge.
-- **Text Y slider**: Move meme text up/down (0%–70% of canvas). Default 5%.
-- **Video offset slider**: Fine-tune video vertical position ±400px from the auto-calculated center. Resets to 0 when font size or text Y changes.
-- **Video scale slider**: Adjust video width from 40% to 100% of canvas (default 90%).
-- **Re-export button per card**: After generating, each meme shows sliders. "Re-exportar con estos ajustes" re-runs only FFmpeg (no Gemini call) with the new settings. Cache-busting `?t=` param refreshes the video preview.
-- **Sentence case formatting**: Gemini meme text is now formatted with only the first letter capitalized, rest lowercase. Applied in the backend after Gemini response.
-- **Max 12 words**: Meme text capped at 12 words total (down from 24). Truncated after generation.
-- **Left-aligned text default**: Text defaults to left-aligned starting from `text_x * W`. Lines wrap pixel-by-pixel to stay within the canvas right edge.
-- **Re-export endpoint**: `POST /api/meme/reexport/{batch_id}/{index}` — re-runs export with new `text_y`, `video_y`, `text_x`, `font_size`, `video_scale` params (no Gemini).
+Three styles selectable per project:
+- **Limpio** — white text + thick black outline, 3-4 words per line
+- **Karaoke** — TikTok-style word-by-word highlight (current word yellow + slightly bigger)
+- **Pop-up** — one word at a time with bounce-in animation (MrBeast style)
+- **Ninguno** (default) — no subtitles
 
-### Fixed
-- **Meme video not centered**: Video was centered in full 1920px canvas regardless of text height. Fixed to center in the zone below the text (from `text_bottom_y + padding` to canvas bottom).
-- **Background forced to 1080×1920**: Added explicit `scale=1080:1920,setsar=1[bg]` step in FFmpeg filter to prevent output inheriting video source dimensions.
-- **Text overflow when X > 0**: `_wrap_text(max_chars=26)` didn't account for reduced width when text starts mid-canvas. Replaced with `_wrap_text_px(font, max_width)` that measures actual pixel width per line.
+Implementation:
+- Whisper word-level transcripts saved to `Project.transcript`
+- `subtitle_service.generate_ass_for_clip()` builds ASS files per style
+- FFmpeg `subtitles=` filter burns them into the output
+- Windows path issue fixed by copying ASS to cwd and using basename only
+- Export timestamps shifted by `buffer` seconds to align with the fast-seek
+  trim (otherwise subtitles played during the trimmed-out buffer period)
+- Subtitles also visible in preview (auto-refreshes when style changes)
 
----
+## Gemini integration
 
-## [v9.5] - 2026-03-18
+### Model selector
+- 3 buttons on upload + on the clips screen:
+  - **⚡ 2.5 Flash** — 1500/day (default, recommended)
+  - **🥇 2.5 Pro** — 50/day (highest quality)
+  - **🆕 3 Flash** — 20/day (newest preview)
+- Model saved per project (`Project.gemini_model`)
+- Re-analyze uses the **project's** model, not the global config
+- New `PUT /api/clips/{id}/model` endpoint to switch model mid-session
 
-### Added
-- **Meme Generator mode**: Third mode button (😂 Meme Generator) in the header, completely independent from Video Clipper and Live Stream.
-- **Multi-video upload**: Drag-and-drop or file picker supports up to ~20 short videos at once.
-- **Gemini meme text generation**: For each video, Gemini watches the full video and generates the funniest, most relatable English meme text (max 3 short lines, no hashtags, no emojis, punchy and shareable). `temperature=1.0` for creativity.
-- **Background color selector**: Choose black or white background for the meme canvas.
-- **Full-video meme export**: Each video is exported as-is (no cuts, no timestamps) overlaid on a 1080×1920 canvas. Meme text in Calibri Bold appears at top; full video centered below in the remaining zone.
-- **Batch processing**: Videos processed sequentially in a background thread — upload → Gemini analysis → text generation → FFmpeg export. Status polling every 2s.
-- **Per-item download**: Each finished meme shows its generated text and a ⬇ Descargar button.
-- **New backend files**: `backend/app/services/meme_service.py`, `backend/app/routes/meme.py`
-- **New API endpoints**: `POST /api/meme/process`, `GET /api/meme/status/{batch_id}`, `GET /api/meme/download/{batch_id}/{index}`, `POST /api/meme/reexport/{batch_id}/{index}`
+### Better prompt
+- Caption rules: third person, lowercase, apostrophes allowed, 1 emoji at end
+- **Distribution rule**: forces clips across all three thirds of the video
+  with explicit timestamps for each third (no more clustering at the start)
+- Asks Gemini for `viral_score` (1-10), `viral_score_reason`, and a long
+  `ig_description` (3-4 paragraphs + hashtags) for Instagram posting
 
----
+### Result post-processing
+- Clips returned > requested count → truncated to requested count
+- Post-retry truncate too (was adding more after retry)
+- Whisper transcript passed to Gemini as word-level timestamps for accuracy
 
-## [v9.4] - 2026-03-18
+### Chunked analysis for long videos (>10 min)
+- Videos longer than 10 min are split into chunks of ~10 min each
+- Each chunk uploaded + analyzed separately so Gemini's timestamps stay
+  precise within a small time window
+- Chunk-local timestamps shifted back to global video time before merging
+- Whisper transcript filtered per chunk for accurate per-chunk context
+- Result: significantly fewer wrong timestamps in long videos
+- Each chunk's clip count scaled proportionally to total requested
 
-### Added
-- **IG Description per clip**: Gemini now generates a long Instagram post caption for each clip alongside the short TikTok overlay caption. The description is 3-4 paragraphs + 12-15 hashtags, written in the style of a fan account. Gemini tries to identify the creator's name from audio, on-screen text, or video context and uses it naturally throughout. Included in `clips_info.txt` under each clip as "IG Description".
-- **`ig_description` field in `ClipData`**: New field stores the long IG caption per clip.
+### Batch re-analyze
+- Checkboxes on each clip card to select multiple
+- "Re-analizar seleccionados" button processes them sequentially with
+  **20-second delay between requests** to avoid hitting rate limits
 
----
+### Whisper + Gemini in parallel
+- Whisper transcription starts as an `asyncio` task at the very beginning
+  of `/api/clips/analyze`, running concurrently with the Gemini upload +
+  processing + token count
+- Saves ~30-40% of total analysis time on long videos because Whisper is
+  local CPU and Gemini is a remote network call — they don't compete
 
-## [v9.3] - 2026-03-18
+## Performance — FFmpeg
 
-### Fixed
-- **Duplicate clips from Gemini retry**: `build_clips()` now accepts an `existing_starts` parameter. When the retry call runs (to fill skipped/invalid clips), it passes the already-accepted start times from the first pass. Deduplication now checks against ALL accepted starts (`any(abs(start - s) < min_duration ...)`), not just the last one in sequence. This prevented cases like Clip 2 (1:47) and Clip 22 (1:47) — identical timestamps that slipped through because the retry started with a fresh `last_accepted_start = -9999`.
+### Intel QSV hardware encoding (with fallback)
+- New `get_video_codec_args()` and `_qsv_supported()` helpers
+- Detects whether the bundled FFmpeg has `h264_qsv` available (cached)
+- Both preview and export try QSV first; on encoder failure they automatically
+  retry the same command with `libx264` so it never just fails
+- On Intel CPUs with working QSV drivers: 2-3x faster preview/export with no
+  visible quality difference at our CRF settings
 
----
+### Faster Play Clip preview
+- `-preset ultrafast` for x264 (was `fast`)
+- `-crf 28` for x264 (was `23`) — smaller file, faster encode
+- Output downscaled to 720x1280 at the end of the filter chain (3x fewer
+  pixels to encode while the layout is still composed at 1080x1920)
+- **Export pipeline is untouched** — keeps full 1080x1920 + preset `fast` + CRF 23
 
-## [v9.2] - 2026-03-15
+## Video formats (fill modes)
 
-### Added
-- **Live Stream Clipper mode**: New mode toggle at the top of the UI switches between Video Clipper and Live Stream Clipper.
-- **Twitch & Kick recording**: Paste any Twitch or Kick stream URL — `streamlink` resolves the HLS URL automatically, FFmpeg records it to disk in continuous segments.
-- **Segment-based recording**: Records N-minute segments one after another. Each segment is independently downloadable as an MP4. After recording, user downloads a segment and uploads it to the Video Clipper tab to analyze with Gemini.
-- **Resolution selector**: Three buttons (480p / 720p / 1080p) let you choose recording quality before starting.
-- **Segment duration selector**: 6 options — 5, 7, 10, 15, 20, 30 minutes.
-- **Live countdown timer**: Each recording segment shows a progress bar and countdown timer ("X:XX restantes").
-- **Download button**: Once a segment is `ready`, a ⬇ Descargar button appears.
-- **Graceful stop**: Stop button signals a `threading.Event`; FFmpeg terminates cleanly.
+Available sizes for both TikTok and Instagram exports:
+- **Fit** — 100% width (default, full screen width)
+- **Zoom** — 90% height
+- **Small** — 78% height
+- **Medium** — 65% height
+- **Mini** — 50% height (new, smallest)
+- **Fill** — full frame cover (crops sides)
 
-### Changed
-- Removed Gemini auto-analysis from stream segments — kept as a pure recorder.
+## UX improvements
 
----
+### Redesigned loading screen
+- Phase indicators (📤 Subiendo → 🧠 Analizando) with green checkmarks
+- Big animated icon, gradient progress bar with glow
+- Live `statusMsg` from polling shown in monospace below the title
+- Info tip during the analyzing phase
 
-## [v8.0] - 2026-02-27
+### Content type buttons (upload step)
+- **🎭 Drama / Entretenimiento** — default, uses the standard prompt
+- **💪 Motivacional** — auto-fills custom prompt with motivational-content
+  instructions (inspirational quotes, transformation stories, etc.)
 
-### Fixed
-- **Apostrophes now render correctly in ALL cases**: Replaced FFmpeg `drawtext` filter entirely with PIL-based text rendering. All captions render as PNG via PIL, overlaid via FFmpeg `overlay` filter. Apostrophes, quotes, special characters all work with zero escaping.
-- **`gemini_service.py` was stripping apostrophes**: The regex `re.sub(r'[^\w\s]', '', caption)` matched `'` — fixed to `re.sub(r"[^\w\s']", '', caption)`.
+### Clip review (clips step)
+- Viral score badge on each clip (1-10 with one-line reason)
+- Sort by: original / mayor score / menor score
+- Filter by duration (min/max sliders)
+- Drag-and-drop reorder
+- Image preview (fast JPEG) + Play Clip (video preview)
+- Browser notification when analysis completes
+- Live model switcher above the clip list
 
-### Changed
-- **Caption rendering architecture**: `create_rounded_box()` + FFmpeg `drawtext` replaced by `create_caption_overlay()` — PIL renders white rounded rectangle (r=14) + Calibri Bold text onto RGBA PNG.
+## Bug fixes worth remembering
 
----
+- `UnboundLocalError: transcript_section` — used `__TRANSCRIPT_SECTION__`
+  placeholder + `.replace()` instead of putting it inside an f-string
+- Caption seam visible — replaced "fill the gap with rectangle" approach
+  (made boxes look merged/flat) with per-corner rounding + bottom-to-top draw
+- Subtitle ordering bug — buggy `words.index(w)` lookup confused duplicate
+  words like "the" / "y"; switched to strict slice-based grouping
+- Subtitle commas/symbols — added `_clean_word()` to strip punctuation per word
+- Subtitle export misalignment — added `time_offset` (= fast-seek buffer)
+  so subs render at the right moment after the output trim
+- Caption preview not refreshing on style change — `subtitle_style` and
+  `caption_style` missing from the auto-refresh `useEffect` dep array
+- Reanalyze used global `settings.GEMINI_MODEL` instead of `project.gemini_model`
+- Clip count exceeded requested target — added post-retry truncation
 
-## [v7.x] - 2026-02-25/26
+## Notes on Gemini free tier (as of May 2026)
 
-- **v7.4**: `max_chars` 15 → 25 for better caption line distribution
-- **v7.0**: Gemini model updated to stable `gemini-2.5-pro`
-- **v6.9**: Fixed near-zero timestamps (`response_mime_type` missing), preview deadlock, clip deduplication
-- **v6.8**: FFmpeg text crash fix, video preview max_seconds fix, loading spinner fix
-
----
-
-## [2.0.0] - 2026-02-15
-
-### Added
-- **Full-Stack Web App**: Migrated from CLI to React + FastAPI web application.
-- **Visual Editor**: Interactive canvas to position text captions and watermarks.
-- **Video Preview**: Video player in clip review step.
-- **Selective Export**: Select specific clips to export.
-- **Progress Tracking**: Real-time progress bars for upload, analysis, and export.
+- **gemini-2.5-flash** — 1500/day, the workhorse, fast
+- **gemini-2.5-pro** — 50/day, best quality (lots of users hit this fast)
+- **gemini-3-flash-preview** — 20/day, newest model
+- All three return 503 UNAVAILABLE during peak USA hours — that's Google's
+  capacity, not your code/network. Retry later or switch models.

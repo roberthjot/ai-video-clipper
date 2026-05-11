@@ -1,10 +1,19 @@
+import os
+import math
 import time
 import json
 import re
+import subprocess
+import uuid
 from google import genai
 from google.genai import types
 from ..config import settings
 from ..models.clip import ClipData
+
+
+# Video chunking thresholds (videos longer than this get split for analysis)
+CHUNK_THRESHOLD_SECONDS = 10 * 60   # 10 min
+CHUNK_DURATION_SECONDS = 10 * 60    # ~10 min per chunk
 
 
 # Initialize Gemini client
@@ -35,6 +44,80 @@ def delete_file(file_obj) -> None:
         print(f"[Gemini] Deleted file: {file_obj.name}")
     except Exception as e:
         print(f"[Gemini] Failed to delete file {file_obj.name} (ignoring): {e}")
+
+
+def build_chunk_ranges(video_duration: float, max_chunk_seconds: float = CHUNK_DURATION_SECONDS) -> list:
+    """Split a video duration into (start, end) ranges of at most max_chunk_seconds each.
+    Tries to balance chunks roughly evenly instead of leaving a tiny last chunk."""
+    if video_duration <= 0:
+        return [(0.0, 0.0)]
+    n = max(1, math.ceil(video_duration / max_chunk_seconds))
+    chunk_size = video_duration / n
+    ranges = []
+    for i in range(n):
+        start = i * chunk_size
+        end = (i + 1) * chunk_size if i < n - 1 else video_duration
+        ranges.append((round(start, 2), round(end, 2)))
+    return ranges
+
+
+def extract_video_chunk(video_path: str, start: float, end: float, output_path: str) -> str:
+    """Extract [start..end] from video_path into output_path using FFmpeg stream copy
+    (no re-encoding — fast, no quality loss)."""
+    import imageio_ffmpeg
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    duration = end - start
+    cmd = [
+        ffmpeg, "-y",
+        "-ss", str(start),
+        "-i", video_path,
+        "-t", str(duration),
+        "-c", "copy",
+        "-avoid_negative_ts", "make_zero",
+        "-loglevel", "error",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if result.returncode != 0 or not os.path.exists(output_path):
+        # Stream copy can fail on some containers — fall back to re-encoding
+        cmd = [
+            ffmpeg, "-y",
+            "-ss", str(start),
+            "-i", video_path,
+            "-t", str(duration),
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            "-c:a", "aac",
+            "-loglevel", "error",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            raise RuntimeError(f"Chunk extraction failed: {result.stderr[:300]}")
+    return output_path
+
+
+def filter_transcript_for_range(transcript: dict, start: float, end: float) -> dict:
+    """Return a transcript dict containing only the words within [start..end],
+    with timestamps shifted so the chunk starts at 0. Used when analyzing a chunk."""
+    if not transcript or not transcript.get("words"):
+        return transcript
+    words_in_range = []
+    for w in transcript["words"]:
+        if w["end"] < start:
+            continue
+        if w["start"] > end:
+            break
+        words_in_range.append({
+            "word": w["word"],
+            "start": max(0.0, w["start"] - start),
+            "end": max(0.0, w["end"] - start),
+        })
+    text_in_range = " ".join(w["word"].strip() for w in words_in_range)
+    return {
+        "text": text_in_range,
+        "language": transcript.get("language", ""),
+        "words": words_in_range,
+    }
 
 
 def count_tokens(file_obj) -> int:
