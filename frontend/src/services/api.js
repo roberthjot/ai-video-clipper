@@ -61,6 +61,17 @@ export async function getClips(projectId) {
     return res.json();
 }
 
+export async function updateProjectModel(projectId, geminiModel) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/model`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gemini_model: geminiModel }),
+    });
+    if (!res.ok) throw new Error("Failed to switch model");
+    return res.json();
+}
+
+
 export async function editCaption(projectId, clipId, newCaption) {
     const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}`, {
         method: "PUT",

@@ -427,6 +427,8 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentId: null });
+  const [reanalyzeModel, setReanalyzeModel] = useState("gemini-2.5-flash");
+  const [switchingModel, setSwitchingModel] = useState(false);
   // Image preview
   const [imagePreviewClip, setImagePreviewClip] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
@@ -609,6 +611,45 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
             Reset
           </button>
         )}
+      </div>
+
+      {/* Model selector for re-analysis */}
+      <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "12px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+          🧠 Modelo para reanalizar:
+        </span>
+        {[
+          { val: "gemini-2.5-flash",       label: "⚡ 2.5 Flash",   sub: "1500/día" },
+          { val: "gemini-2.5-pro",         label: "🥇 2.5 Pro",     sub: "50/día" },
+          { val: "gemini-3-flash-preview", label: "🆕 3 Flash",     sub: "20/día" },
+        ].map(({ val, label, sub }) => (
+          <button
+            key={val}
+            disabled={switchingModel}
+            onClick={async () => {
+              setSwitchingModel(true);
+              try {
+                await api.updateProjectModel(projectId, val);
+                setReanalyzeModel(val);
+              } catch (e) {
+                alert(`No se pudo cambiar el modelo: ${e.message}`);
+              } finally {
+                setSwitchingModel(false);
+              }
+            }}
+            style={{
+              padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+              cursor: switchingModel ? "wait" : "pointer", transition: "all 0.2s",
+              background: reanalyzeModel === val ? "linear-gradient(135deg, #10b981, #14b8a6)" : "#111",
+              border: reanalyzeModel === val ? "1px solid #14b8a6" : "1px solid #333",
+              color: reanalyzeModel === val ? "#fff" : "#aaa",
+              opacity: switchingModel ? 0.6 : 1,
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700 }}>{label}</div>
+            <div style={{ fontSize: 10, opacity: 0.75, marginTop: 1 }}>{sub}</div>
+          </button>
+        ))}
       </div>
 
       {/* Batch re-analyze bar */}

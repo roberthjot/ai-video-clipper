@@ -18,6 +18,10 @@ class EditCaptionRequest(BaseModel):
     viral_caption: str
 
 
+class UpdateModelRequest(BaseModel):
+    gemini_model: str
+
+
 @router.post("/analyze")
 async def analyze_video(req: AnalyzeRequest):
     """Start AI analysis on a project's video."""
@@ -123,6 +127,19 @@ async def get_clips(project_id: str):
         "clips": [c.model_dump() for c in project.clips],
         "total": len(project.clips),
     }
+
+
+@router.put("/{project_id}/model")
+async def update_project_model(project_id: str, req: UpdateModelRequest):
+    """Switch the Gemini model used for re-analysis on this project."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    allowed = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-flash-preview"}
+    if req.gemini_model not in allowed:
+        raise HTTPException(status_code=400, detail=f"Model must be one of {allowed}")
+    projects[project_id].gemini_model = req.gemini_model
+    return {"status": "updated", "gemini_model": req.gemini_model}
 
 
 @router.put("/{project_id}/{clip_id}")
