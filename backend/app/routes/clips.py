@@ -355,10 +355,13 @@ async def reanalyze_clip(project_id: str, clip_id: int):
         active_file = await asyncio.to_thread(gemini_service.wait_for_processing, active_file)
 
         # Ask Gemini what's actually happening in this short clip
+        # Use the same model the user picked when uploading (consistent quota)
         from google.genai import types as _types
+        active_model = getattr(project, 'gemini_model', None) or gemini_service.settings.GEMINI_MODEL
+        print(f"[Reanalyze] clip {clip_id} using model={active_model}")
         response = await asyncio.to_thread(
             gemini_service.client.models.generate_content,
-            model=gemini_service.settings.GEMINI_MODEL,
+            model=active_model,
             contents=[_types.Content(role="user", parts=[
                 _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
                 _types.Part.from_text(text=(
