@@ -129,6 +129,14 @@ def analyze_video(
     - NO punctuation of any kind: no periods, no commas, no exclamation marks, no question marks
     - Apostrophes in contractions ARE allowed: he's, she's, don't, can't, won't, it's, that's, they're — use them naturally
     - All lowercase EXCEPT the very first letter of the caption
+    - END with EXACTLY ONE emoji that matches the emotion of the moment (TikTok style):
+        * Drama/shock → 😱 💀 👀
+        * Funny → 😂 🤣 💀
+        * Motivational → 💪 🔥 ⚡
+        * Sad → 💔 😭 🥺
+        * Confession → 🤐 👀 😳
+        * Wholesome → 🥰 ❤️
+      Place the emoji at the very end after a space. ONLY ONE emoji per caption.
 
     Output Format:
     Return ONLY a raw JSON list. No markdown, no ```json, no explanation — just the JSON array.
@@ -282,12 +290,23 @@ def analyze_video(
             caption = clip.get("viral_caption", "")
             # Normalize curly/smart apostrophes (U+2018, U+2019) to straight apostrophe
             caption = caption.replace('\u2019', "'").replace('\u2018', "'")
-            # Remove punctuation/symbols but keep apostrophes (for contractions like he's, don't)
-            caption = re.sub(r"[^\w\s']", '', caption).strip()
+            # Strip punctuation but PRESERVE letters, digits, apostrophes, and emoji unicode
+            # Emojis are kept by allowing characters in common emoji unicode ranges
+            caption = re.sub(
+                r"[^\w\s'\U0001F300-\U0001FAFF\U00002600-\U000027BF\u2700-\u27bf\u2600-\u26ff]",
+                '', caption
+            ).strip()
             # Remove extra spaces
             caption = re.sub(r'\s+', ' ', caption).strip()
-            # All lowercase except first letter
-            caption = caption[:1].upper() + caption[1:].lower() if caption else caption
+            # All lowercase except first letter (only on the text portion, not emojis)
+            if caption:
+                # Split off trailing emoji so case-conversion doesn't break it
+                import re as _re
+                m = _re.match(r"^(.*?)(\s*[\U0001F300-\U0001FAFF\U00002600-\U000027BF]+)?\s*$", caption)
+                if m:
+                    text_part, emoji_part = m.group(1) or "", m.group(2) or ""
+                    text_part = text_part[:1].upper() + text_part[1:].lower()
+                    caption = (text_part + emoji_part).strip()
 
             clips.append(ClipData(
                 id=len(clips) + 1,

@@ -1,9 +1,32 @@
 import os
+import re
 import subprocess
 import imageio_ffmpeg
 from PIL import Image, ImageDraw
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
+
+# Emoji unicode ranges (covers most common emojis)
+_EMOJI_RE = re.compile(
+    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F000-\U0001F9FF]"
+)
+
+
+def _count_emojis(text: str) -> int:
+    return len(_EMOJI_RE.findall(text))
+
+
+def _measure_text_with_emoji(text: str, font, font_size: int) -> int:
+    """PIL fonts can't measure emojis, so we measure text-only width and add
+    a fixed allowance per emoji."""
+    text_only = _EMOJI_RE.sub("", text)
+    try:
+        text_w = int(font.getlength(text_only))
+    except Exception:
+        text_w = int(len(text_only) * font_size * 0.55)
+    # Each emoji renders at roughly font_size square. Add small spacing.
+    emoji_w = _count_emojis(text) * int(font_size * 1.05)
+    return text_w + emoji_w
 
 
 def create_caption_overlay(lines: list, font_size: int = 72,
@@ -29,47 +52,56 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     radius = int(line_h * 0.19)
     overlap = radius  # each box overlaps the next by radius px to close the gap
 
-    # Measure each line's box width
+    # Measure each line's box width (accounting for emojis)
     line_widths = []
     for line in lines:
-        try:
-            tw = int(font.getlength(line))
-        except Exception:
-            tw = int(len(line) * font_size * 0.55)
+        tw = _measure_text_with_emoji(line, font, font_size)
         line_widths.append(min(W_vid - 60, tw + pad_x * 2))
 
     n = len(lines)
     canvas_w = max(line_widths) if line_widths else 100
-    # Total height shrinks by overlap for each junction between lines
     canvas_h = n * line_h - (n - 1) * overlap + pad_y * 2
 
     img = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 0))
     draw = ImageDraw.Draw(img)
 
     # Draw boxes bottom-to-top so upper boxes paint over the top rounded corners
-    # of the box below, hiding the gap at each junction.
     for i in range(n - 1, -1, -1):
         bw = line_widths[i]
         x0 = (canvas_w - bw) // 2
         x1 = x0 + bw
         y0 = pad_y + i * (line_h - overlap)
         y1 = y0 + line_h
-
         draw.rounded_rectangle([(x0, y0), (x1, y1)], radius=radius, fill=fill)
 
-    # Draw text in a second pass (on top of all boxes)
+    # Draw text — use Pilmoji if the line has emojis, plain PIL otherwise
+    has_any_emoji = any(_count_emojis(line) > 0 for line in lines)
+    pilmoji_ctx = None
+    if has_any_emoji:
+        try:
+            from pilmoji import Pilmoji
+            pilmoji_ctx = Pilmoji(img)
+        except Exception as e:
+            print(f"[Caption] Pilmoji unavailable, emojis will not render: {e}")
+
     for i, line in enumerate(lines):
         bw = line_widths[i]
         x0 = (canvas_w - bw) // 2
         y0 = pad_y + i * (line_h - overlap)
-
-        try:
-            tw = int(font.getlength(line))
-        except Exception:
-            tw = int(len(line) * font_size * 0.55)
+        tw = _measure_text_with_emoji(line, font, font_size)
         text_x = x0 + (bw - tw) // 2
         text_y = y0 + (line_h - font_size) // 2
-        draw.text((text_x, text_y), line, font=font, fill=(0, 0, 0, 255))
+
+        if pilmoji_ctx and _count_emojis(line) > 0:
+            pilmoji_ctx.text((text_x, text_y), line, font=font, fill=(0, 0, 0, 255))
+        else:
+            draw.text((text_x, text_y), line, font=font, fill=(0, 0, 0, 255))
+
+    if pilmoji_ctx:
+        try:
+            pilmoji_ctx.close()
+        except Exception:
+            pass
 
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)

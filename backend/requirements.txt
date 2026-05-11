@@ -5,3 +5,4 @@ fastapi[standard]
 uvicorn[standard]
 python-multipart
 pydantic
+pilmoji
