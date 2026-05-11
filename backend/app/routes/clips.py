@@ -33,6 +33,14 @@ async def analyze_video(req: AnalyzeRequest):
 
     active_file = None
     try:
+        # Start Whisper transcription IN PARALLEL with Gemini upload + processing.
+        # Whisper runs on local CPU; Gemini runs on Google's servers — they don't
+        # compete for resources. By the time Gemini is ready, Whisper is often done.
+        print("[Whisper] Starting transcription in parallel with Gemini upload...")
+        whisper_task = asyncio.create_task(
+            asyncio.to_thread(whisper_service.transcribe, project.video_path)
+        )
+
         project.status = "uploading"
         file_obj = await asyncio.to_thread(gemini_service.upload_video, project.video_path)
 
@@ -47,6 +55,8 @@ async def analyze_video(req: AnalyzeRequest):
         if token_count > MAX_TOKENS:
             project.status = "error"
             mins = int((project.video_duration or 0) / 60)
+            # Cancel the in-flight Whisper task before bailing out
+            whisper_task.cancel()
             await asyncio.to_thread(gemini_service.delete_file, active_file)
             raise HTTPException(
                 status_code=400,
@@ -55,12 +65,12 @@ async def analyze_video(req: AnalyzeRequest):
             )
         duration = req.duration_override or project.video_duration
 
-        # Transcribe audio with Whisper for more accurate timestamps + subtitles
+        # Wait for Whisper to finish (usually done by now since it ran in parallel)
         transcript = None
         try:
-            print("[Whisper] Transcribing audio for timestamp accuracy...")
-            transcript = await asyncio.to_thread(whisper_service.transcribe, project.video_path)
+            transcript = await whisper_task
             project.transcript = transcript  # Save for subtitle generation later
+            print(f"[Whisper] Transcription ready ({len(transcript.get('words', []))} words)")
         except Exception as e:
             print(f"[Whisper] Transcription failed (continuing without it): {e}")
 

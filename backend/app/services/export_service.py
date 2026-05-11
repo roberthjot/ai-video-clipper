@@ -181,26 +181,35 @@ def export_clip_with_style(
     if has_watermark:
         cmd.extend(["-loop", "1", "-t", str(loop_dur), "-i", style.watermark_path])
 
-    cmd.extend([
+    # Codec args picked at runtime — try Intel QSV first, fall back to libx264 on failure
+    qsv_codec = video_service.get_video_codec_args(preset="fast", crf=23, prefer_qsv=True)
+    cpu_codec = video_service.get_video_codec_args(preset="fast", crf=23, prefer_qsv=False)
+    tail_args = [
         "-filter_complex", filter_complex,
         "-map", "[out]",
         "-map", "0:a?",
         "-c:a", "aac",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
         "-sar", "1:1",
         "-movflags", "+faststart",
-    ])
+    ]
     if style.strip_metadata:
-        cmd.extend(["-map_metadata", "-1"])
+        tail_args.extend(["-map_metadata", "-1"])
     # Output-side accurate seek: discard the first `buffer` seconds (the fast-seek overshoot),
     # then cut at exactly `duration` seconds. This gives frame-accurate clipping.
-    cmd.extend(["-ss", str(buffer), "-t", str(duration), "-y", "-loglevel", "warning", output_path])
+    tail_args.extend(["-ss", str(buffer), "-t", str(duration), "-y", "-loglevel", "warning", output_path])
+
+    # Codec args must come BEFORE the output filename (which is the last item in tail_args)
+    cmd_qsv = cmd + qsv_codec + tail_args
+    cmd_cpu = cmd + cpu_codec + tail_args
 
     try:
-        print(f"[Export] Clip {clip.id}: Exporting... split={use_split}")
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
+        print(f"[Export] Clip {clip.id}: Exporting... split={use_split}, qsv={video_service._qsv_supported()}")
+        result = subprocess.run(cmd_qsv, check=False, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0 and video_service._qsv_supported():
+            print(f"[Export] Clip {clip.id}: QSV failed, retrying with libx264. stderr: {result.stderr[-200:]}")
+            result = subprocess.run(cmd_cpu, check=True, capture_output=True, text=True, timeout=600)
+        elif result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, cmd_cpu, output=result.stdout, stderr=result.stderr)
         print(f"[Export] Clip {clip.id}: Success!")
     except subprocess.CalledProcessError as e:
         print(f"[Export] Clip {clip.id} FAILED: {e.stderr[:500] if e.stderr else 'no stderr'}")

@@ -6,6 +6,51 @@ from PIL import Image, ImageDraw
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
+# Cache QSV availability check across the process lifetime
+_QSV_AVAILABLE = None
+
+
+def _qsv_supported() -> bool:
+    """Check once whether the bundled FFmpeg supports h264_qsv encoder."""
+    global _QSV_AVAILABLE
+    if _QSV_AVAILABLE is not None:
+        return _QSV_AVAILABLE
+    try:
+        result = subprocess.run(
+            [FFMPEG_EXE, "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=10
+        )
+        _QSV_AVAILABLE = "h264_qsv" in (result.stdout or "")
+        print(f"[FFmpeg] Intel QSV available: {_QSV_AVAILABLE}")
+    except Exception as e:
+        print(f"[FFmpeg] QSV detection failed: {e}")
+        _QSV_AVAILABLE = False
+    return _QSV_AVAILABLE
+
+
+def get_video_codec_args(preset: str = "fast", crf: int = 23, prefer_qsv: bool = True) -> list:
+    """Return the FFmpeg codec arguments for the encoder we want to use.
+    Uses Intel QSV if available; otherwise falls back to libx264."""
+    if prefer_qsv and _qsv_supported():
+        # h264_qsv preset names: veryfast, faster, fast, medium, slow, slower, veryslow
+        # global_quality is the equivalent of crf (same scale, lower = better)
+        qsv_preset = preset if preset in ("veryfast", "faster", "fast", "medium", "slow") else "fast"
+        return ["-c:v", "h264_qsv", "-preset", qsv_preset, "-global_quality", str(crf)]
+    return ["-c:v", "libx264", "-preset", preset, "-crf", str(crf)]
+
+
+def run_ffmpeg_with_fallback(cmd_builder, label: str = "FFmpeg") -> subprocess.CompletedProcess:
+    """Run an FFmpeg command built by cmd_builder(use_qsv: bool) -> list[str].
+    Tries QSV first; on failure, falls back to libx264 and reruns."""
+    if _qsv_supported():
+        cmd = cmd_builder(True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode == 0:
+            return result
+        print(f"[{label}] QSV encode failed, falling back to libx264. stderr tail: {result.stderr[-300:]}")
+    cmd = cmd_builder(False)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
 # Emoji unicode ranges (covers most common emojis)
 _EMOJI_RE = re.compile(
     r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F000-\U0001F9FF]"
@@ -795,23 +840,28 @@ def generate_preview_clip(
     if rounded_box_path:
         cmd.extend(["-loop", "1", "-t", str(clip_duration), "-i", rounded_box_path])
 
-    cmd.extend([
+    base_args = [
         "-filter_complex", filter_complex,
         "-map", f"[{last_label}]",
         "-map", "0:a?",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",   # PREVIEW ONLY: 3x faster than 'fast' (export still uses 'fast')
-        "-crf", "28",             # PREVIEW ONLY: smaller file, faster encode (export still uses 23)
         "-c:a", "aac",
         "-pix_fmt", "yuv420p",
         "-sar", "1:1",
         "-movflags", "+faststart",
         "-y",
         output_path,
-    ])
+    ]
+    # Try QSV (Intel hardware encoder) first; fall back to libx264 on failure
+    qsv_codec = get_video_codec_args(preset="veryfast", crf=28, prefer_qsv=True)
+    cpu_codec = get_video_codec_args(preset="ultrafast", crf=28, prefer_qsv=False)
+    cmd_qsv = cmd + qsv_codec + base_args
+    cmd_cpu = cmd + cpu_codec + base_args
 
-    print(f"[Preview] Generating {clip_duration}s clip with {len(lines) if caption_text else 0} text lines, split={use_split}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    print(f"[Preview] Generating {clip_duration}s clip with {len(lines) if caption_text else 0} text lines, split={use_split}, qsv={_qsv_supported()}")
+    result = subprocess.run(cmd_qsv, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0 and _qsv_supported():
+        print(f"[Preview] QSV failed, retrying with libx264. stderr: {result.stderr[-200:]}")
+        result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=120)
 
     if rounded_box_path and os.path.exists(rounded_box_path):
         try:
