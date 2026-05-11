@@ -779,6 +779,13 @@ def generate_preview_clip(
         except Exception as e:
             print(f"[Preview] Subtitle generation failed (continuing without): {e}")
 
+    # PREVIEW SPEED OPTIMIZATION: downscale final output to 720x1280 (3x fewer pixels)
+    # The full 1080x1920 layout is preserved so captions/watermark/subs look correct,
+    # we just shrink at the very end before encoding for faster output. Export still
+    # uses the full 1080x1920 — this only affects the temporary preview file.
+    filter_complex += f";[{last_label}]scale=720:1280[scaled]"
+    last_label = "scaled"
+
     end_time = start_time + clip_duration
     cmd = [FFMPEG_EXE, "-ss", str(start_time), "-to", str(end_time), "-i", video_path]
 
@@ -793,8 +800,8 @@ def generate_preview_clip(
         "-map", f"[{last_label}]",
         "-map", "0:a?",
         "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
+        "-preset", "ultrafast",   # PREVIEW ONLY: 3x faster than 'fast' (export still uses 'fast')
+        "-crf", "28",             # PREVIEW ONLY: smaller file, faster encode (export still uses 23)
         "-c:a", "aac",
         "-pix_fmt", "yuv420p",
         "-sar", "1:1",
