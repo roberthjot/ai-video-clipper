@@ -80,7 +80,9 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     if has_any_emoji:
         try:
             from pilmoji import Pilmoji
-            pilmoji_ctx = Pilmoji(img)
+            from pilmoji.source import AppleEmojiSource
+            # Apple emojis = the iOS / TikTok / CapCut look
+            pilmoji_ctx = Pilmoji(img, source=AppleEmojiSource)
         except Exception as e:
             print(f"[Caption] Pilmoji unavailable, emojis will not render: {e}")
 
