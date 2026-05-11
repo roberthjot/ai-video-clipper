@@ -51,6 +51,26 @@ def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920) -> str:
         font_size = 80
         outline = 6
         marginV = int(video_h * 0.30)
+    elif style == "highlight":
+        font_size = 78
+        outline = 6
+        marginV = int(video_h * 0.30)
+    elif style == "big_center":
+        font_size = 150
+        outline = 10
+        marginV = int(video_h * 0.45)
+    elif style == "twoword":
+        font_size = 100
+        outline = 8
+        marginV = int(video_h * 0.40)
+    elif style == "bounce":
+        font_size = 120
+        outline = 9
+        marginV = int(video_h * 0.40)
+    elif style == "typewriter":
+        font_size = 80
+        outline = 6
+        marginV = int(video_h * 0.30)
     else:  # clean
         font_size = 75
         outline = 5
@@ -189,6 +209,129 @@ def _generate_popup(words: list) -> str:
     return "\n".join(events)
 
 
+def _generate_highlight_box(words: list) -> str:
+    """Submagic-style: show 4 words per group, active word has a yellow 'box'
+    effect simulated with a very thick yellow outline + black fill."""
+    WORDS_PER_GROUP = 4
+    events = []
+    for gi in range(0, len(words), WORDS_PER_GROUP):
+        group = words[gi:gi + WORDS_PER_GROUP]
+        if not group:
+            continue
+        for idx, current in enumerate(group):
+            seg_start = current["start"]
+            seg_end = group[idx + 1]["start"] if idx < len(group) - 1 else current["end"]
+            if seg_end <= seg_start:
+                continue
+            parts = []
+            for j, w in enumerate(group):
+                txt = _escape_ass_text(w["word"].upper())
+                if j == idx:
+                    # Active: black text inside a thick yellow "box" (simulated by large outline)
+                    parts.append(f"{{\\1c&H000000&\\3c&H00FFFF&\\bord12}}{txt}{{\\r}}")
+                else:
+                    parts.append(txt)
+            line = " ".join(parts)
+            events.append(
+                f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+                f"Default,,0,0,0,,{line}"
+            )
+    return "\n".join(events)
+
+
+def _generate_big_center(words: list) -> str:
+    """One giant word at the center of the screen. High impact for key moments."""
+    events = []
+    n = len(words)
+    for i, w in enumerate(words):
+        text = _escape_ass_text(w["word"].upper())
+        seg_start = w["start"]
+        seg_end = words[i + 1]["start"] if i + 1 < n else w["end"]
+        if seg_end <= seg_start:
+            continue
+        # Fade-in/out with subtle pop scale
+        animated = (
+            f"{{\\fad(50,50)\\fscx85\\fscy85"
+            f"\\t(0,100,\\fscx105\\fscy105)\\t(100,180,\\fscx100\\fscy100)}}{text}"
+        )
+        events.append(
+            f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+            f"Default,,0,0,0,,{animated}"
+        )
+    return "\n".join(events)
+
+
+def _generate_two_word(words: list) -> str:
+    """Two words at a time — fast-paced rhythm popular in beat-driven clips."""
+    events = []
+    for gi in range(0, len(words), 2):
+        pair = words[gi:gi + 2]
+        if not pair:
+            continue
+        seg_start = pair[0]["start"]
+        seg_end = pair[-1]["end"]
+        text = " ".join(_escape_ass_text(w["word"].upper()) for w in pair)
+        # Small fade for smoother transitions between pairs
+        animated = f"{{\\fad(40,20)}}{text}"
+        events.append(
+            f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+            f"Default,,0,0,0,,{animated}"
+        )
+    return "\n".join(events)
+
+
+def _generate_bounce(words: list) -> str:
+    """One word at a time with a strong bounce-in animation."""
+    events = []
+    n = len(words)
+    for i, w in enumerate(words):
+        text = _escape_ass_text(w["word"].upper())
+        seg_start = w["start"]
+        seg_end = words[i + 1]["start"] if i + 1 < n else w["end"]
+        if seg_end <= seg_start:
+            continue
+        # Strong bounce: start small, overshoot big, settle back
+        animated = (
+            f"{{\\fad(40,30)\\fscx40\\fscy40"
+            f"\\t(0,150,\\fscx125\\fscy125)"
+            f"\\t(150,250,\\fscx95\\fscy95)"
+            f"\\t(250,330,\\fscx100\\fscy100)}}{text}"
+        )
+        events.append(
+            f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+            f"Default,,0,0,0,,{animated}"
+        )
+    return "\n".join(events)
+
+
+def _generate_typewriter(words: list) -> str:
+    """Letters appear one at a time within each word, then the full word stays."""
+    events = []
+    n = len(words)
+    for i, w in enumerate(words):
+        text = _escape_ass_text(w["word"].upper())
+        seg_start = w["start"]
+        seg_end = words[i + 1]["start"] if i + 1 < n else w["end"]
+        if seg_end <= seg_start or not text:
+            continue
+        word_duration = seg_end - seg_start
+        # Spend ~40% of the word's duration revealing letters, then hold the full word
+        reveal_total = max(0.08, min(0.4, word_duration * 0.4))
+        per_letter = reveal_total / max(1, len(text))
+        # Build partial-text events as each letter is added
+        for letter_idx in range(1, len(text) + 1):
+            sub_start = seg_start + (letter_idx - 1) * per_letter
+            sub_end = seg_start + letter_idx * per_letter if letter_idx < len(text) else seg_end
+            if sub_end <= sub_start:
+                continue
+            partial = text[:letter_idx]
+            events.append(
+                f"Dialogue: 0,{_format_time(sub_start)},{_format_time(sub_end)},"
+                f"Default,,0,0,0,,{partial}"
+            )
+    return "\n".join(events)
+
+
 def generate_ass_for_clip(
     transcript: dict,
     clip_start: float,
@@ -232,6 +375,16 @@ def generate_ass_for_clip(
         body = _generate_karaoke(clip_words)
     elif style == "popup":
         body = _generate_popup(clip_words)
+    elif style == "highlight":
+        body = _generate_highlight_box(clip_words)
+    elif style == "big_center":
+        body = _generate_big_center(clip_words)
+    elif style == "twoword":
+        body = _generate_two_word(clip_words)
+    elif style == "bounce":
+        body = _generate_bounce(clip_words)
+    elif style == "typewriter":
+        body = _generate_typewriter(clip_words)
     else:  # clean (default)
         body = _generate_clean(clip_words)
 

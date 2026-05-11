@@ -1430,14 +1430,19 @@ function EditorStep({ projectId, clips, onExportDone }) {
           <div className="control-section">
             <h3>💬 Subtítulos automáticos</h3>
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -4, marginBottom: 8 }}>
-              Generados con Whisper. Solo se aplican al exportar (no al preview).
+              Generados con Whisper. Se aplican al preview y al export.
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {[
-                { val: "none",     label: "✕ Ninguno",  desc: "Sin subtítulos" },
-                { val: "clean",    label: "📝 Limpio",   desc: "Texto blanco con borde" },
-                { val: "karaoke",  label: "🎤 Karaoke",  desc: "Palabra resaltada en amarillo" },
-                { val: "popup",    label: "💥 Pop-up",   desc: "Una palabra a la vez" },
+                { val: "none",        label: "✕ Ninguno",      desc: "Sin subtítulos" },
+                { val: "clean",       label: "📝 Limpio",       desc: "Texto blanco con borde" },
+                { val: "karaoke",     label: "🎤 Karaoke",      desc: "Palabra resaltada amarillo" },
+                { val: "popup",       label: "💥 Pop-up",       desc: "Una palabra a la vez" },
+                { val: "highlight",   label: "📦 Highlight Box", desc: "Submagic · caja amarilla" },
+                { val: "big_center",  label: "🔠 Big Center",   desc: "Palabra gigante centro" },
+                { val: "twoword",     label: "2️⃣ Two-Word",     desc: "Dos palabras a la vez" },
+                { val: "bounce",      label: "🎢 Bounce",       desc: "Aparece con rebote grande" },
+                { val: "typewriter",  label: "⌨️ Typewriter",   desc: "Letra por letra" },
               ].map(({ val, label, desc }) => (
                 <button
                   key={val}
