@@ -118,7 +118,7 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     except Exception:
         font = _IF.load_default()
 
-    line_h = int(font_size * 1.25)
+    line_h = int(font_size * 1.40)  # taller line so emojis fit + more breathing room
     radius = int(line_h * 0.19)
     overlap = radius  # each box overlaps the next by radius px to close the gap
 
@@ -637,7 +637,7 @@ def generate_preview_frame(
     # Caption overlay — Y position relative to video portion in split mode
     if caption_text:
         lines = split_text_into_lines(caption_text, max_chars=30)
-        pad_x, pad_y = 12, 8
+        pad_x, pad_y = 12, 14
         line_gap = 5
         base_y = int(text_y * target_h)
 
@@ -792,7 +792,7 @@ def generate_preview_clip(
     # Caption overlay — Y relative to video portion in split mode
     if caption_text:
         lines = split_text_into_lines(caption_text, max_chars=30)
-        pad_x, pad_y = 12, 8
+        pad_x, pad_y = 12, 14
         line_gap = 5
         base_y = int(text_y * target_h)
 

@@ -84,7 +84,7 @@ def export_clip_with_style(
     # Caption overlay — Y relative to video portion in split mode
     if clip.viral_caption:
         lines = video_service.split_text_into_lines(clip.viral_caption, max_chars=30)
-        pad_x, pad_y = 12, 8
+        pad_x, pad_y = 12, 14
         line_gap = 5
         base_y = int(style.text_y * target_h)
 
