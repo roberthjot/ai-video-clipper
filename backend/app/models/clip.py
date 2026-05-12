@@ -57,6 +57,9 @@ class StyleConfig(BaseModel):
     # Subtitle style (burned into video on export): "none" | "clean" | "karaoke" | "popup"
     subtitle_style: str = "none"
 
+    # Subtitle text size multiplier (0.6 - 1.6, default 1.0)
+    subtitle_size_scale: float = 1.0
+
     # Cinematic visual filter: "none" | "cinematic" | "warm" | "vivid" | "moody" | "bw"
     visual_filter: str = "none"
 

@@ -41,8 +41,9 @@ def _clean_word(word: str) -> str:
     return cleaned
 
 
-def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920) -> str:
-    """Generate ASS header with the chosen visual style."""
+def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920, size_scale: float = 1.0) -> str:
+    """Generate ASS header with the chosen visual style.
+    size_scale multiplies the base font_size (0.6 - 1.6 reasonable range)."""
     if style == "popup":
         font_size = 110
         outline = 8
@@ -75,6 +76,11 @@ def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920) -> str:
         font_size = 75
         outline = 5
         marginV = int(video_h * 0.30)
+
+    # Apply size scale (clamped to a sensible range)
+    scale = max(0.6, min(1.6, float(size_scale or 1.0)))
+    font_size = max(20, int(font_size * scale))
+    outline = max(2, int(outline * scale))
 
     return f"""[Script Info]
 ScriptType: v4.00+
@@ -339,6 +345,7 @@ def generate_ass_for_clip(
     style: str,
     output_dir: str,
     time_offset: float = 0.0,
+    size_scale: float = 1.0,
 ) -> str:
     """
     Generate an ASS subtitle file for a single clip.
@@ -369,7 +376,7 @@ def generate_ass_for_clip(
             w["start"] += time_offset
             w["end"] += time_offset
 
-    header = _ass_header(style)
+    header = _ass_header(style, size_scale=size_scale)
 
     if style == "karaoke":
         body = _generate_karaoke(clip_words)

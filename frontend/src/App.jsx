@@ -890,6 +890,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     split_ratio: 0.5,
     caption_style: "box",
     subtitle_style: "none",
+    subtitle_size_scale: 1.0,
     visual_filter: "none",
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
@@ -1010,7 +1011,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter]);
+  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale]);
 
   // Poll progress
   useEffect(() => {
@@ -1455,6 +1456,31 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 </button>
               ))}
             </div>
+
+            {/* Subtitle size slider */}
+            {style.subtitle_style !== "none" && (
+              <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                  Tamaño:
+                </span>
+                <input
+                  type="range" min={0.6} max={1.6} step={0.05}
+                  value={style.subtitle_size_scale}
+                  onChange={(e) => setStyle((s) => ({ ...s, subtitle_size_scale: parseFloat(e.target.value) }))}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", minWidth: 50 }}>
+                  {Math.round(style.subtitle_size_scale * 100)}%
+                </span>
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: "4px 10px", fontSize: 11 }}
+                  onClick={() => setStyle((s) => ({ ...s, subtitle_size_scale: 1.0 }))}
+                >
+                  Reset
+                </button>
+              </div>
+            )}
           </div>
 
           {/* IG Video Size */}

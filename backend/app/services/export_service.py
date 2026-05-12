@@ -150,6 +150,7 @@ def export_clip_with_style(
                 style=sub_style,
                 output_dir=temp_dir,
                 time_offset=_buffer,
+                size_scale=getattr(style, 'subtitle_size_scale', 1.0),
             )
             if ass_subtitle_path:
                 # Workaround Windows path issues with FFmpeg subtitles filter:

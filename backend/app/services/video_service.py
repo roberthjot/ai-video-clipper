@@ -14,23 +14,24 @@ def get_visual_filter_chain(filter_name: str) -> str:
     """Return an FFmpeg filter string for a cinematic look. Empty string = no filter."""
     f = (filter_name or "none").lower()
     if f == "cinematic":
-        # Teal shadows + orange highlights, mild desaturation, increased contrast
-        return ("eq=saturation=0.88:contrast=1.12,"
-                "colorbalance=rs=-0.05:bs=0.12:rh=0.08:bh=-0.05")
+        # Aggressive teal shadows + orange highlights, strong contrast
+        return ("eq=saturation=0.80:contrast=1.25:gamma=0.95,"
+                "colorbalance=rs=-0.12:gs=-0.05:bs=0.25:rh=0.20:gh=0.05:bh=-0.15,"
+                "curves=master='0/0 0.3/0.22 0.7/0.78 1/1'")
     if f == "warm":
-        # Golden/yellow main-character look
-        return ("eq=saturation=1.10,"
-                "colorbalance=rm=0.08:gm=0.03:bm=-0.12")
+        # Strong golden/yellow with visible warm shift
+        return ("eq=saturation=1.18:contrast=1.08:gamma_r=0.92:gamma_b=1.08,"
+                "colorbalance=rm=0.18:gm=0.08:bm=-0.22:rh=0.10:bh=-0.10")
     if f == "vivid":
-        # Punchy saturation + contrast for stop-scroll effect
-        return "eq=saturation=1.40:contrast=1.15:brightness=0.02"
+        # Very punchy saturation + strong contrast — stop-scroll effect
+        return "eq=saturation=1.65:contrast=1.30:brightness=0.03:gamma=0.95"
     if f == "moody":
-        # Desaturated, darker, slight cool tint
-        return ("eq=saturation=0.75:contrast=1.10:brightness=-0.03,"
-                "colorbalance=bs=0.05")
+        # Heavily desaturated, dark, distinct cool tint
+        return ("eq=saturation=0.55:contrast=1.20:brightness=-0.08:gamma=0.92,"
+                "colorbalance=rs=-0.08:bs=0.15:rh=-0.05:bh=0.08")
     if f == "bw":
-        # Black & white
-        return "hue=s=0"
+        # Full black & white with extra contrast for impact
+        return "hue=s=0,eq=contrast=1.15:brightness=0.02"
     return ""
 
 
@@ -739,6 +740,7 @@ def generate_preview_clip(
     subtitle_style: str = "none",
     transcript: dict = None,
     visual_filter: str = "none",
+    subtitle_size_scale: float = 1.0,
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -836,6 +838,7 @@ def generate_preview_clip(
                 clip_end=start_time + clip_duration,
                 style=subtitle_style,
                 output_dir=temp_dir,
+                size_scale=subtitle_size_scale,
             )
             if ass_subtitle_path:
                 # FFmpeg subtitles filter is fragile with Windows paths.
