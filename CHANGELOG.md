@@ -2,6 +2,59 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## Latest session additions
+
+### Cinematic visual filters
+5 color-grading filters (selectable per project, applied in both preview and export):
+- **🎬 Cinematic** — teal shadows + orange highlights + S-curve contrast
+- **🌅 Warm** — golden / yellow "main character energy" shift
+- **⚡ Vivid** — strong saturation (1.65) + contrast (1.30) for stop-scroll
+- **🌑 Moody** — heavy desaturation (0.55) + darker + cool tint
+- **⚫ B&W** — full desaturation + contrast boost
+
+Filters were intensified after the first pass — original values were too
+subtle to notice on a TikTok feed.
+
+### 5 additional subtitle styles
+On top of the original Limpio / Karaoke / Pop-up, added:
+- **📦 Highlight Box** — Submagic-style, active word in black on yellow box
+- **🔠 Big Center** — single giant word at vertical center, high impact
+- **2️⃣ Two-Word** — two words per group, fast rhythm for beat-driven clips
+- **🎢 Bounce** — strong bounce-in animation, overshoot + settle
+- **⌨️ Typewriter** — letters appear progressively within each word
+
+### Subtitle size slider
+- Range 60% → 160% of base font size
+- Appears in the editor when a subtitle style is active
+- Reset button, auto-refreshes preview on change
+
+### Mini fill mode
+- New "Mini" video size option at 50% of canvas height
+- Smallest option, more blur background visible
+- Available in both TikTok and Instagram exports
+
+### Emoji rendering fixes
+- Caption box height bumped from 1.25× to 1.40× font size so emojis fit
+- TikTok caption style (transparent + outline) now renders color emojis
+  via Pilmoji on top of the outlined text (previously emojis were skipped
+  or smeared by the stroke loop)
+- `split_text_into_lines` now detects when the final line is only emojis
+  and pulls the previous line's last word down — emojis never appear
+  alone in their own tiny standalone box
+- Emoji vertical alignment in TikTok style fixed via Pilmoji's
+  `emoji_position_offset=(0, -font_size*0.80)` (Pilmoji anchors to the
+  baseline, which is why naive y-shifts didn't work; the empirical offset
+  needed is ~80% of font_size)
+- White-box caption uses a smaller `emoji_position_offset` since Pilmoji
+  draws text+emoji together there and handles most of the alignment
+
+### Backend: on-the-fly model switching
+- New `PUT /api/clips/{project_id}/model` endpoint
+- Selector with 3 buttons above the clip list (2.5 Flash / 2.5 Pro / 3 Flash)
+- Reanalyze (single + batch) uses the project's currently selected model
+- User can switch when one model hits its quota — no re-upload needed
+
+
 ## Caption rendering
 
 ### TikTok-style staircase boxes
