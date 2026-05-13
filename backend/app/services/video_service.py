@@ -187,9 +187,11 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
                                    line_gap: int = 8,
                                    stroke_width: int = 4) -> tuple:
     """Render TikTok-style text: white text with thick black outline, transparent background.
+    Emojis (if present) are rendered AFTER the outline pass using Pilmoji so they
+    keep their natural color instead of being smeared by the black stroke.
     Returns (png_path, box_w, box_h)."""
-    import time
     from PIL import ImageFont as _IF
+    import uuid as _uuid
 
     W_vid = 1080
     font_path = 'C:/Windows/Fonts/calibrib.ttf'
@@ -198,39 +200,78 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
     except Exception:
         font = _IF.load_default()
 
-    line_h = int(font_size * 1.25)
+    line_h = int(font_size * 1.40)  # taller line so emojis fit
 
-    try:
-        max_line_px = max(font.getlength(line) for line in lines) if lines else 0
-    except Exception:
-        max_line_px = max(len(line) for line in lines) * font_size * 0.55 if lines else 0
+    # Split each line into (text_part, emoji_part). Emojis are stripped for the
+    # outlined text pass; they are painted in color afterwards.
+    parsed = []
+    for line in lines:
+        emojis_in_line = "".join(_EMOJI_RE.findall(line))
+        text_only = _EMOJI_RE.sub("", line).rstrip()
+        parsed.append({"text": text_only, "emoji": emojis_in_line})
 
+    # Measure widths per line (text + emoji separately so emoji never gets stroked)
+    def _txt_w(s):
+        try:
+            return int(font.getlength(s))
+        except Exception:
+            return int(len(s) * font_size * 0.55)
+
+    line_widths = []
+    for p in parsed:
+        tw = _txt_w(p["text"])
+        ew = len(p["emoji"]) * int(font_size * 1.05)  # space allowance per emoji
+        spacer = int(font_size * 0.20) if p["emoji"] and p["text"] else 0
+        line_widths.append(tw + spacer + ew)
+
+    max_line_px = max(line_widths) if line_widths else 0
     box_w = min(W_vid - 40, int(max_line_px + pad_x * 2 + stroke_width * 2))
     box_h = line_h * len(lines) + line_gap * max(len(lines) - 1, 0) + pad_y * 2 + stroke_width * 2
 
     img = Image.new('RGBA', (box_w, box_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    for i, line in enumerate(lines):
-        y = pad_y + stroke_width + i * (line_h + line_gap)
+    has_any_emoji = any(p["emoji"] for p in parsed)
+    pilmoji_ctx = None
+    if has_any_emoji:
         try:
-            tw = int(font.getlength(line))
+            from pilmoji import Pilmoji
+            from pilmoji.source import AppleEmojiSource
+            pilmoji_ctx = Pilmoji(img, source=AppleEmojiSource)
+        except Exception as e:
+            print(f"[TikTok Caption] Pilmoji unavailable, emojis will not render: {e}")
+
+    for i, p in enumerate(parsed):
+        text_part, emoji_part = p["text"], p["emoji"]
+        y = pad_y + stroke_width + i * (line_h + line_gap)
+
+        tw = _txt_w(text_part)
+        ew = len(emoji_part) * int(font_size * 1.05)
+        spacer = int(font_size * 0.20) if emoji_part and text_part else 0
+        total_w = tw + spacer + ew
+        x = (box_w - total_w) // 2
+
+        # Outline + white text — ONLY for the text portion (no emojis here)
+        if text_part:
+            for dx in range(-stroke_width, stroke_width + 1):
+                for dy in range(-stroke_width, stroke_width + 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if abs(dx) ** 2 + abs(dy) ** 2 <= stroke_width ** 2 + stroke_width:
+                        draw.text((x + dx, y + dy), text_part, font=font, fill=(0, 0, 0, 255))
+            draw.text((x, y), text_part, font=font, fill=(255, 255, 255, 255))
+
+        # Emoji on top, rendered in color by Pilmoji, no stroke
+        if emoji_part and pilmoji_ctx:
+            emoji_x = x + tw + spacer
+            pilmoji_ctx.text((emoji_x, y), emoji_part, font=font, fill=(255, 255, 255, 255))
+
+    if pilmoji_ctx:
+        try:
+            pilmoji_ctx.close()
         except Exception:
-            tw = int(len(line) * font_size * 0.55)
-        x = (box_w - tw) // 2
+            pass
 
-        # Black outline: draw text at all surrounding offsets
-        for dx in range(-stroke_width, stroke_width + 1):
-            for dy in range(-stroke_width, stroke_width + 1):
-                if dx == 0 and dy == 0:
-                    continue
-                if abs(dx) ** 2 + abs(dy) ** 2 <= stroke_width ** 2 + stroke_width:
-                    draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0, 255))
-
-        # White text on top
-        draw.text((x, y), line, font=font, fill=(255, 255, 255, 255))
-
-    import uuid as _uuid
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
     png_path = os.path.join(temp_dir, f"caption_tiktok_{_uuid.uuid4().hex}.png")
