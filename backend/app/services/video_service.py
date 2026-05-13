@@ -165,7 +165,11 @@ def create_caption_overlay(lines: list, font_size: int = 72,
         text_y = y0 + (line_h - font_size) // 2
 
         if pilmoji_ctx and _count_emojis(line) > 0:
-            pilmoji_ctx.text((text_x, text_y), line, font=font, fill=(0, 0, 0, 255))
+            # Use Pilmoji's native offset to align emoji with text baseline
+            pilmoji_ctx.text(
+                (text_x, text_y), line, font=font, fill=(0, 0, 0, 255),
+                emoji_position_offset=(0, -int(font_size * 0.10)),
+            )
         else:
             draw.text((text_x, text_y), line, font=font, fill=(0, 0, 0, 255))
 
@@ -262,14 +266,15 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
             draw.text((x, y), text_part, font=font, fill=(255, 255, 255, 255))
 
         # Emoji on top, rendered in color by Pilmoji, no stroke.
-        # Pilmoji positions the emoji around the font baseline, which sits well
-        # below the visible cap-height center of bold uppercase text. Shift the
-        # emoji UP by ~28% of font_size so its visual center aligns with the
-        # text's visual center.
+        # Use Pilmoji's native emoji_position_offset (negative Y = up) — this is
+        # the documented way to fine-tune emoji alignment relative to the text.
         if emoji_part and pilmoji_ctx:
             emoji_x = x + tw + spacer
-            emoji_y = y - int(font_size * 0.28)
-            pilmoji_ctx.text((emoji_x, emoji_y), emoji_part, font=font, fill=(255, 255, 255, 255))
+            offset_y = -int(font_size * 0.15)  # shift up 15% of font_size
+            pilmoji_ctx.text(
+                (emoji_x, y), emoji_part, font=font, fill=(255, 255, 255, 255),
+                emoji_position_offset=(0, offset_y),
+            )
 
     if pilmoji_ctx:
         try:
