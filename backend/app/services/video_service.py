@@ -261,10 +261,14 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
                         draw.text((x + dx, y + dy), text_part, font=font, fill=(0, 0, 0, 255))
             draw.text((x, y), text_part, font=font, fill=(255, 255, 255, 255))
 
-        # Emoji on top, rendered in color by Pilmoji, no stroke
+        # Emoji on top, rendered in color by Pilmoji, no stroke.
+        # Shift up ~12% of font_size so the emoji's vertical center matches the
+        # text's cap-height center (emojis fill their full glyph box, letters
+        # only fill ~70% of it).
         if emoji_part and pilmoji_ctx:
             emoji_x = x + tw + spacer
-            pilmoji_ctx.text((emoji_x, y), emoji_part, font=font, fill=(255, 255, 255, 255))
+            emoji_y = y - int(font_size * 0.12)
+            pilmoji_ctx.text((emoji_x, emoji_y), emoji_part, font=font, fill=(255, 255, 255, 255))
 
     if pilmoji_ctx:
         try:
@@ -280,7 +284,10 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
 
 
 def split_text_into_lines(text: str, max_chars: int = 40) -> list:
-    """Split text into up to 4 lines, each capped at max_chars. Extra words are dropped."""
+    """Split text into up to 4 lines, each capped at max_chars. Extra words are dropped.
+    If the last line ends up containing only emojis (no text), the last word from the
+    previous line is pulled down so the emoji never appears alone in its own mini-box.
+    """
     words = text.split()
     lines = []
     current = []
@@ -300,6 +307,17 @@ def split_text_into_lines(text: str, max_chars: int = 40) -> list:
 
     if current and len(lines) < 4:
         lines.append(" ".join(current))
+
+    # If the final line is just emoji(s) with no text, pull the previous line's
+    # last word down so the emoji is anchored to a real word (cleaner look).
+    if len(lines) >= 2:
+        last_no_emoji = _EMOJI_RE.sub("", lines[-1]).strip()
+        if not last_no_emoji:
+            prev_words = lines[-2].split()
+            if len(prev_words) > 1:
+                pulled = prev_words[-1]
+                lines[-2] = " ".join(prev_words[:-1])
+                lines[-1] = pulled + " " + lines[-1]
 
     return lines
 
