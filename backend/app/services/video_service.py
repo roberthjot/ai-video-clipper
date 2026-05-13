@@ -262,12 +262,13 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
             draw.text((x, y), text_part, font=font, fill=(255, 255, 255, 255))
 
         # Emoji on top, rendered in color by Pilmoji, no stroke.
-        # Shift up ~12% of font_size so the emoji's vertical center matches the
-        # text's cap-height center (emojis fill their full glyph box, letters
-        # only fill ~70% of it).
+        # Pilmoji positions the emoji around the font baseline, which sits well
+        # below the visible cap-height center of bold uppercase text. Shift the
+        # emoji UP by ~28% of font_size so its visual center aligns with the
+        # text's visual center.
         if emoji_part and pilmoji_ctx:
             emoji_x = x + tw + spacer
-            emoji_y = y - int(font_size * 0.12)
+            emoji_y = y - int(font_size * 0.28)
             pilmoji_ctx.text((emoji_x, emoji_y), emoji_part, font=font, fill=(255, 255, 255, 255))
 
     if pilmoji_ctx:
