@@ -96,6 +96,55 @@ def extract_video_chunk(video_path: str, start: float, end: float, output_path: 
     return output_path
 
 
+# Common English stop-words we ignore when matching captions to transcripts
+_STOP_WORDS = set((
+    "is the a an and to in on for of with but or so he she it they his her its "
+    "their this that as at by are was were be been have has had do did does i "
+    "me my we us our you your am pm just very much really still even still also "
+    "no not get got go went going gonna wanna make made make want like said say "
+    "tell told all out up off down too only own any some more most"
+).split())
+
+
+def validate_caption_against_transcript(caption: str, clip_start: float, clip_end: float, transcript: dict) -> tuple:
+    """Compare a clip's caption against the Whisper transcript words within
+    the clip's time range. Returns (transcript_snippet, confidence) where
+    confidence is 'match' | 'mismatch' | 'no_audio'.
+
+    - 'match'    → ≥40% of caption keywords appear in the transcript
+    - 'mismatch' → caption has keywords but they're not in the transcript
+    - 'no_audio' → Whisper detected no words at all in this range
+    """
+    if not transcript or not transcript.get("words"):
+        return ("", "no_audio")
+
+    # Gather words within the clip's time range
+    range_words = []
+    for w in transcript["words"]:
+        if w.get("end", 0) < clip_start:
+            continue
+        if w.get("start", 0) > clip_end:
+            break
+        range_words.append(str(w.get("word", "")).strip())
+
+    transcript_snippet = " ".join(w for w in range_words if w).strip()
+    if not transcript_snippet:
+        return ("", "no_audio")
+
+    # Extract meaningful keywords from the caption
+    caption_words = re.findall(r"[A-Za-z']+", (caption or "").lower())
+    keywords = [w for w in caption_words if len(w) > 2 and w not in _STOP_WORDS]
+    if not keywords:
+        # Caption is all stop words / too short to validate — treat as match
+        return (transcript_snippet, "match")
+
+    transcript_lower = transcript_snippet.lower()
+    matches = sum(1 for k in keywords if k in transcript_lower)
+    ratio = matches / len(keywords)
+
+    return (transcript_snippet, "match" if ratio >= 0.4 else "mismatch")
+
+
 def filter_transcript_for_range(transcript: dict, start: float, end: float) -> dict:
     """Return a transcript dict containing only the words within [start..end],
     with timestamps shifted so the chunk starts at 0. Used when analyzing a chunk."""

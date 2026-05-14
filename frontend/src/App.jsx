@@ -438,6 +438,8 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
   const [filterMax, setFilterMax] = useState(300);
   // Sort
   const [sortBy, setSortBy] = useState("default"); // "default" | "score_desc" | "score_asc"
+  // Confidence filter
+  const [confidenceFilter, setConfidenceFilter] = useState("all"); // "all" | "match" | "mismatch" | "no_audio"
   // Drag and drop
   const [draggedId, setDraggedId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
@@ -450,8 +452,15 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
 
   const maxDuration = Math.max(...clips.map(c => Math.ceil(c.duration)), 60);
 
+  const confidenceCounts = {
+    match: clips.filter(c => c.match_confidence === "match").length,
+    mismatch: clips.filter(c => c.match_confidence === "mismatch").length,
+    no_audio: clips.filter(c => c.match_confidence === "no_audio").length,
+  };
+
   const filteredClips = clips
     .filter(c => c.duration >= filterMin && c.duration <= filterMax)
+    .filter(c => confidenceFilter === "all" || c.match_confidence === confidenceFilter)
     .sort((a, b) => {
       if (sortBy === "score_desc") return (b.viral_score || 5) - (a.viral_score || 5);
       if (sortBy === "score_asc") return (a.viral_score || 5) - (b.viral_score || 5);
@@ -613,6 +622,38 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
         )}
       </div>
 
+      {/* Confidence filter */}
+      {(confidenceCounts.match + confidenceCounts.mismatch + confidenceCounts.no_audio) > 0 && (
+        <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "12px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+            🎯 Confianza:
+          </span>
+          {[
+            { val: "all",      label: `Todos (${clips.length})`,           color: "#888" },
+            { val: "match",    label: `🟢 OK (${confidenceCounts.match})`,    color: "#22c55e" },
+            { val: "mismatch", label: `🔴 Mal (${confidenceCounts.mismatch})`, color: "#ef4444" },
+            { val: "no_audio", label: `🟡 Sin audio (${confidenceCounts.no_audio})`, color: "#eab308" },
+          ].map(({ val, label, color }) => (
+            <button
+              key={val}
+              onClick={() => setConfidenceFilter(val)}
+              style={{
+                padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                cursor: "pointer", transition: "all 0.2s",
+                background: confidenceFilter === val ? color : "#111",
+                color: confidenceFilter === val ? "#fff" : "#aaa",
+                border: confidenceFilter === val ? `1px solid ${color}` : "1px solid #333",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+          <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
+            🟢 caption coincide · 🔴 puede estar mal · 🟡 clip sin diálogo
+          </span>
+        </div>
+      )}
+
       {/* Model selector for re-analysis */}
       <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "12px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
@@ -710,10 +751,42 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
                 <div className="clip-number">{clip.id}</div>
               </div>
               <div className="clip-info">
-                <h4>{clip.description}</h4>
+                <h4>
+                  {clip.match_confidence === "match" && (
+                    <span title="Caption coincide con lo que se dice en el clip" style={{ marginRight: 6 }}>🟢</span>
+                  )}
+                  {clip.match_confidence === "mismatch" && (
+                    <span title="Las palabras del caption no aparecen en el audio del clip" style={{ marginRight: 6 }}>🔴</span>
+                  )}
+                  {clip.match_confidence === "no_audio" && (
+                    <span title="No se detectó audio/diálogo — revisión manual recomendada" style={{ marginRight: 6 }}>🟡</span>
+                  )}
+                  {clip.description}
+                </h4>
                 <p className="caption">
                   {isBeingAnalyzed ? "⏳ Re-analizando..." : `"${clip.viral_caption}"`}
                 </p>
+                {clip.transcript_snippet && (
+                  <p style={{
+                    fontSize: 11, color: "var(--text-muted)", margin: "4px 0 0",
+                    fontStyle: "italic", lineHeight: 1.4,
+                    borderLeft: `2px solid ${
+                      clip.match_confidence === "match" ? "#22c55e" :
+                      clip.match_confidence === "mismatch" ? "#ef4444" :
+                      "#666"
+                    }`,
+                    paddingLeft: 8,
+                  }}>
+                    🎙️ {clip.transcript_snippet.length > 140
+                      ? clip.transcript_snippet.slice(0, 140) + "..."
+                      : clip.transcript_snippet}
+                  </p>
+                )}
+                {clip.match_confidence === "no_audio" && (
+                  <p style={{ fontSize: 11, color: "#888", margin: "4px 0 0", fontStyle: "italic" }}>
+                    🔇 Sin diálogo detectado — revisar manualmente
+                  </p>
+                )}
               </div>
               <div className="clip-meta">
                 <span className="tag">⏱ {clip.duration.toFixed(0)}s</span>

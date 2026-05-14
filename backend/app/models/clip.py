@@ -14,6 +14,9 @@ class ClipData(BaseModel):
     viral_score_reason: str = ""  # Short reason for the score
     ig_description: str = ""   # Long Instagram post caption (3-4 paragraphs + hashtags)
     duration: float = 0.0
+    # Caption validation against Whisper transcript
+    transcript_snippet: str = ""           # what Whisper heard in this clip's range
+    match_confidence: str = "unverified"   # "match" | "mismatch" | "no_audio" | "unverified"
 
     def model_post_init(self, __context):
         if self.duration == 0.0:

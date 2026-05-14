@@ -98,6 +98,16 @@ async def analyze_video(req: AnalyzeRequest):
                 project.gemini_model,
             )
 
+        # Validate each clip's caption against the Whisper transcript so the
+        # editor can show a confidence indicator next to each one.
+        if transcript:
+            for c in clips:
+                snippet, conf = gemini_service.validate_caption_against_transcript(
+                    c.viral_caption, c.start_time, c.end_time, transcript
+                )
+                c.transcript_snippet = snippet
+                c.match_confidence = conf
+
         project.clips = clips
         project.status = "ready"
 
@@ -500,8 +510,15 @@ async def reanalyze_clip(project_id: str, clip_id: int):
         new_caption = _re.sub(r'\s+', ' ', new_caption).strip()
         new_caption = new_caption[:1].upper() + new_caption[1:].lower() if new_caption else new_caption
 
-        # Update the clip in memory
+        # Update the clip in memory + re-validate against transcript
         clip.viral_caption = new_caption
+        transcript = getattr(project, 'transcript', None)
+        if transcript:
+            snippet, conf = gemini_service.validate_caption_against_transcript(
+                new_caption, clip.start_time, clip.end_time, transcript
+            )
+            clip.transcript_snippet = snippet
+            clip.match_confidence = conf
         return {"status": "updated", "clip": clip.model_dump()}
 
     except HTTPException:
