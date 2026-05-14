@@ -440,6 +440,8 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
   const [sortBy, setSortBy] = useState("default"); // "default" | "score_desc" | "score_asc"
   // Confidence filter
   const [confidenceFilter, setConfidenceFilter] = useState("all"); // "all" | "match" | "mismatch" | "no_audio"
+  // Transcript modal — show the words spoken in a clip
+  const [scriptViewClip, setScriptViewClip] = useState(null);
   // Drag and drop
   const [draggedId, setDraggedId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
@@ -766,27 +768,6 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
                 <p className="caption">
                   {isBeingAnalyzed ? "⏳ Re-analizando..." : `"${clip.viral_caption}"`}
                 </p>
-                {clip.transcript_snippet && (
-                  <p style={{
-                    fontSize: 11, color: "var(--text-muted)", margin: "4px 0 0",
-                    fontStyle: "italic", lineHeight: 1.4,
-                    borderLeft: `2px solid ${
-                      clip.match_confidence === "match" ? "#22c55e" :
-                      clip.match_confidence === "mismatch" ? "#ef4444" :
-                      "#666"
-                    }`,
-                    paddingLeft: 8,
-                  }}>
-                    🎙️ {clip.transcript_snippet.length > 140
-                      ? clip.transcript_snippet.slice(0, 140) + "..."
-                      : clip.transcript_snippet}
-                  </p>
-                )}
-                {clip.match_confidence === "no_audio" && (
-                  <p style={{ fontSize: 11, color: "#888", margin: "4px 0 0", fontStyle: "italic" }}>
-                    🔇 Sin diálogo detectado — revisar manualmente
-                  </p>
-                )}
               </div>
               <div className="clip-meta">
                 <span className="tag">⏱ {clip.duration.toFixed(0)}s</span>
@@ -807,6 +788,16 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
               <div className="clip-actions" onClick={e => e.stopPropagation()}>
                 <button onClick={() => handleImagePreview(clip)} title="Preview rápido (imagen)">🖼 Preview</button>
                 <button onClick={() => handlePlayClip(clip)}>▶ Play</button>
+                <button
+                  onClick={() => setScriptViewClip(clip)}
+                  disabled={!clip.transcript_snippet}
+                  title={clip.transcript_snippet
+                    ? "Ver lo que se dice en este clip (Whisper)"
+                    : "Sin diálogo detectado"}
+                  style={{ opacity: clip.transcript_snippet ? 1 : 0.4 }}
+                >
+                  📄 Guión
+                </button>
                 <button
                   onClick={() => {
                     setEditingClip(clip);
@@ -861,6 +852,75 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
             <div className="btn-group" style={{ marginTop: 12 }}>
               <button className="btn btn-secondary" onClick={() => { setImagePreviewClip(null); setImagePreviewUrl(null); }}>
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transcript / Script Modal */}
+      {scriptViewClip && (
+        <div className="modal-overlay" onClick={() => setScriptViewClip(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <h3>📄 Guión · Clip {scriptViewClip.id}</h3>
+            <p style={{ color: "var(--text-secondary)", marginBottom: 14, fontSize: 13 }}>
+              {formatTime(scriptViewClip.start_time)} — {formatTime(scriptViewClip.end_time)}
+              {" · "}
+              <span style={{ color: "#aaa" }}>{scriptViewClip.description}</span>
+            </p>
+
+            <div style={{
+              background: "#111",
+              border: `2px solid ${
+                scriptViewClip.match_confidence === "match" ? "#22c55e" :
+                scriptViewClip.match_confidence === "mismatch" ? "#ef4444" : "#444"
+              }`,
+              borderRadius: 10, padding: "14px 16px", marginBottom: 14,
+            }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
+                Caption actual
+              </div>
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#fff", lineHeight: 1.4 }}>
+                "{scriptViewClip.viral_caption}"
+              </p>
+            </div>
+
+            <div style={{
+              background: "#0a0a0a", border: "1px solid #2a2a2a",
+              borderRadius: 10, padding: "14px 16px", marginBottom: 14,
+            }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
+                🎙️ Lo que se dice en el clip (Whisper)
+              </div>
+              <p style={{ margin: 0, fontSize: 14, color: "#ddd", lineHeight: 1.6, fontStyle: "italic" }}>
+                {scriptViewClip.transcript_snippet || "(sin diálogo detectado)"}
+              </p>
+            </div>
+
+            <div className="btn-group">
+              <button className="btn btn-secondary" onClick={() => setScriptViewClip(null)}>
+                Cerrar
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setEditingClip(scriptViewClip);
+                  setEditText(scriptViewClip.viral_caption);
+                  setScriptViewClip(null);
+                }}
+              >
+                ✏️ Editar caption
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  const clip = scriptViewClip;
+                  setScriptViewClip(null);
+                  handleReanalyze(clip);
+                }}
+                disabled={reanalyzingClip === scriptViewClip.id || reanalyzingBatch}
+              >
+                🔄 Reanalizar
               </button>
             </div>
           </div>
