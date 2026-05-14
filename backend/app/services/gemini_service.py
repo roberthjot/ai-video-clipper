@@ -96,6 +96,34 @@ def extract_video_chunk(video_path: str, start: float, end: float, output_path: 
     return output_path
 
 
+# Whitelist of safe emojis — must match Apple emoji set, verified to render
+# correctly with Pilmoji. Captions are filtered against this list; anything
+# outside it gets stripped.
+SAFE_EMOJIS = {
+    "💀", "😂", "🥺", "✨", "🔥", "❤️", "💪", "👀", "🤔",
+    "❤️‍🩹", "😱", "😭", "💔", "🤯",
+}
+
+
+def filter_emojis_to_whitelist(text: str) -> str:
+    """Strip any emoji not in SAFE_EMOJIS. Keeps whitespace and text intact."""
+    if not text:
+        return text
+    # Match characters in emoji unicode ranges
+    emoji_pattern = re.compile(
+        r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F000-\U0001F9FF]+"
+        r"(?:‍[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F000-\U0001F9FF️]+)*"
+        r"️?"
+    )
+    def _check(m):
+        candidate = m.group(0)
+        return candidate if candidate in SAFE_EMOJIS else ""
+    cleaned = emoji_pattern.sub(_check, text)
+    # Collapse double spaces left by stripped emojis
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return cleaned
+
+
 # Common English stop-words we ignore when matching captions to transcripts
 _STOP_WORDS = set((
     "is the a an and to in on for of with but or so he she it they his her its "
@@ -261,14 +289,18 @@ def analyze_video(
     - NO punctuation of any kind: no periods, no commas, no exclamation marks, no question marks
     - Apostrophes in contractions ARE allowed: he's, she's, don't, can't, won't, it's, that's, they're — use them naturally
     - All lowercase EXCEPT the very first letter of the caption
-    - END with EXACTLY ONE emoji that matches the emotion of the moment (TikTok style):
-        * Drama/shock → 😱 💀 👀
-        * Funny → 😂 🤣 💀
-        * Motivational → 💪 🔥 ⚡
-        * Sad → 💔 😭 🥺
-        * Confession → 🤐 👀 😳
-        * Wholesome → 🥰 ❤️
+    - END with EXACTLY ONE emoji that matches the emotion of the moment (TikTok style).
+      You MUST pick the emoji from THIS EXACT LIST — no other emojis are allowed:
+        💀 😂 🥺 ✨ 🔥 ❤️ 💪 👀 🤔 ❤️‍🩹 😱 😭 💔 🤯
+      Match the emoji to the moment's emotion:
+        * Drama / shock / mind-blown → 😱 🤯 💀 👀
+        * Funny / "I'm dead" → 😂 💀
+        * Motivational / "fire" / strong → 🔥 💪 ✨
+        * Sad / crying / heartbreak → 😭 💔 🥺 ❤️‍🩹
+        * Love / wholesome → ❤️ ✨
+        * Suspicious / thinking / watching → 👀 🤔
       Place the emoji at the very end after a space. ONLY ONE emoji per caption.
+      DO NOT use any emoji that is not in the list above.
 
     Output Format:
     Return ONLY a raw JSON list. No markdown, no ```json, no explanation — just the JSON array.
@@ -430,6 +462,8 @@ def analyze_video(
             ).strip()
             # Remove extra spaces
             caption = re.sub(r'\s+', ' ', caption).strip()
+            # Strip any emoji NOT on the whitelist — keeps only the safe set
+            caption = filter_emojis_to_whitelist(caption)
             # All lowercase except first letter (only on the text portion, not emojis)
             if caption:
                 # Split off trailing emoji so case-conversion doesn't break it

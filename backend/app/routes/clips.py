@@ -498,6 +498,8 @@ async def reanalyze_clip(project_id: str, clip_id: int):
                     "Write a new viral caption that accurately describes what is ACTUALLY happening in this clip. "
                     "Rules: English only. Maximum 10 words. Third person only (no I/me/my). "
                     "No punctuation except apostrophes. All lowercase except first letter. "
+                    "End with EXACTLY ONE emoji from this list (and no other): "
+                    "💀 😂 🥺 ✨ 🔥 ❤️ 💪 👀 🤔 ❤️‍🩹 😱 😭 💔 🤯. "
                     "Return ONLY the caption text — nothing else."
                 )),
             ])],
@@ -506,9 +508,21 @@ async def reanalyze_clip(project_id: str, clip_id: int):
 
         import re as _re
         new_caption = response.text.strip().rstrip(".")
-        new_caption = _re.sub(r"[^\w\s']", '', new_caption).strip()
+        # Preserve emoji unicode while stripping other punctuation
+        new_caption = _re.sub(
+            r"[^\w\s'\U0001F300-\U0001FAFF\U00002600-\U000027BF✀-➿☀-⛿]",
+            '', new_caption
+        ).strip()
         new_caption = _re.sub(r'\s+', ' ', new_caption).strip()
-        new_caption = new_caption[:1].upper() + new_caption[1:].lower() if new_caption else new_caption
+        # Enforce emoji whitelist (strip any emoji not on our list)
+        new_caption = gemini_service.filter_emojis_to_whitelist(new_caption)
+        # Case-correct text portion without touching the trailing emoji
+        if new_caption:
+            m = _re.match(r"^(.*?)(\s*[\U0001F300-\U0001FAFF\U00002600-\U000027BF]+)?\s*$", new_caption)
+            if m:
+                text_part, emoji_part = m.group(1) or "", m.group(2) or ""
+                text_part = text_part[:1].upper() + text_part[1:].lower()
+                new_caption = (text_part + emoji_part).strip()
 
         # Update the clip in memory + re-validate against transcript
         clip.viral_caption = new_caption
