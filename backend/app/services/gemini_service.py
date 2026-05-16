@@ -105,6 +105,21 @@ SAFE_EMOJIS = {
 }
 
 
+def restore_name_casing(text: str, creator_name: str) -> str:
+    """After the lowercase rule, restore each creator name to its proper
+    capitalization wherever it appears in the caption (case-insensitive match)."""
+    if not text or not creator_name:
+        return text
+    names = [n.strip() for n in creator_name.split(",") if n.strip()]
+    for name in names:
+        # Replace any case-insensitive occurrence of the full name with the
+        # properly-cased version. Word-boundary anchored so we don't touch
+        # substrings inside other words.
+        pattern = re.compile(re.escape(name), re.IGNORECASE)
+        text = pattern.sub(name, text)
+    return text
+
+
 def filter_emojis_to_whitelist(text: str) -> str:
     """Strip any emoji not in SAFE_EMOJIS. Keeps whitespace and text intact."""
     if not text:
@@ -223,6 +238,7 @@ def analyze_video(
     start_time_offset: float = 0,
     transcript: dict = None,
     model: str = None,
+    creator_name: str = "",
 ) -> list[ClipData]:
     """
     Use Gemini to analyze a video and identify viral clip candidates.
@@ -250,6 +266,28 @@ def analyze_video(
             "Skip boring transitions, slow dialogue, or anything that wouldn't hook someone in the first 2 seconds. "
             "Each clip must start at the PEAK of the moment — not before it builds up."
         )
+
+    # Build the creator-name guidance block (only if a name was provided)
+    if creator_name and creator_name.strip():
+        names = [n.strip() for n in creator_name.split(",") if n.strip()]
+        names_list = ", ".join(names)
+        creator_section = f"""
+    CREATOR NAME RULES (IMPORTANT):
+    The person(s) featured in this video: {names_list}.
+    - Weave the name into the caption where it flows MOST naturally — it can be
+      at the start, middle, or end, whatever sounds best. Do NOT force it the
+      same way every time.
+    - If MULTIPLE names are listed, identify who appears in THIS specific clip
+      using on-screen text, spoken names, usernames, or context. Use the name
+      of the person actually featured in that clip. If you genuinely cannot tell
+      who it is, use the most prominent / first-listed name.
+    - Use the name in roughly 60-70% of captions, not every single one — variety
+      keeps it from looking auto-generated.
+    - ALWAYS use the name naturally in the "description" field too.
+    - Keep the name's exact capitalization as given (e.g. "Sophie Rain").
+    """
+    else:
+        creator_section = ""
 
     system_prompt = f"""
     You are the #1 viral video editor on TikTok with 10 years of experience creating content that gets hundreds of millions of views.
@@ -280,7 +318,7 @@ def analyze_video(
     - Dead air, silence, or transitions
 
     INSTRUCTION: {instruction}
-
+    {creator_section}
     CAPTION RULES (CRITICAL):
     - Write in THIRD PERSON only (e.g. "She finally told the truth" not "I told the truth")
     - NO first person: no "I", "me", "my", "we"
@@ -472,6 +510,8 @@ def analyze_video(
                 if m:
                     text_part, emoji_part = m.group(1) or "", m.group(2) or ""
                     text_part = text_part[:1].upper() + text_part[1:].lower()
+                    # Restore creator-name capitalization (lost by .lower())
+                    text_part = restore_name_casing(text_part, creator_name)
                     caption = (text_part + emoji_part).strip()
 
             clips.append(ClipData(

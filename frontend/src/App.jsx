@@ -12,6 +12,7 @@ function UploadStep({ onComplete }) {
   const [customPrompt, setCustomPrompt] = useState("");
   const [contentType, setContentType] = useState("drama"); // "drama" | "motivational"
   const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash"); // which API model
+  const [creatorName, setCreatorName] = useState(""); // creator name(s) for captions
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState(""); // upload, analyzing
   const [statusMsg, setStatusMsg] = useState("");
@@ -56,7 +57,8 @@ function UploadStep({ onComplete }) {
           setPercent(pct);
           setStatusMsg(`Uploading video to server... ${pct}%`);
         },
-        geminiModel
+        geminiModel,
+        creatorName
       );
 
       setProjectIdRef(uploadRes.project_id);
@@ -376,6 +378,26 @@ function UploadStep({ onComplete }) {
               💪 Motivacional
             </button>
           </div>
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+            🏷️ Nombre del creador / persona (opcional)
+          </label>
+          <input
+            type="text"
+            value={creatorName}
+            onChange={(e) => setCreatorName(e.target.value)}
+            placeholder="e.g. Sophie Rain   ·   varios: Sophie, Piper, Julia, Aishah"
+            style={{
+              width: "100%", background: "#111", border: "1px solid #333",
+              borderRadius: 8, padding: "10px 12px", color: "#e5e5e5", fontSize: 13,
+              boxSizing: "border-box",
+            }}
+          />
+          <p style={{ fontSize: 11, color: "#555", margin: "6px 0 0" }}>
+            Gemini incluye el nombre en captions y títulos donde fluya natural.
+            Varios nombres separados por coma — intenta identificar quién sale en cada clip.
+          </p>
         </div>
         <div>
           <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>

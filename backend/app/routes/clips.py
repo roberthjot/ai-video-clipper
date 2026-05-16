@@ -96,6 +96,7 @@ async def analyze_video(req: AnalyzeRequest):
                 0,
                 transcript,
                 project.gemini_model,
+                getattr(project, 'creator_name', ''),
             )
 
         # Validate each clip's caption against the Whisper transcript so the
@@ -173,6 +174,7 @@ async def _analyze_in_chunks(project, duration: float, transcript: dict) -> list
                 0,
                 chunk_transcript,
                 project.gemini_model,
+                getattr(project, 'creator_name', ''),
             )
 
             # Shift chunk-local timestamps to global video time

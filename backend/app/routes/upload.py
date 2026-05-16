@@ -20,6 +20,7 @@ async def upload_video(
     min_duration: int = Form(15),
     custom_prompt: str = Form(""),
     gemini_model: str = Form("gemini-2.5-flash"),
+    creator_name: str = Form(""),
 ):
     """Upload a video and create a new project."""
     # Generate project ID
@@ -50,6 +51,7 @@ async def upload_video(
         video_duration=duration,
         output_dir=os.path.join(settings.PROJECTS_DIR, project_id),
         gemini_model=gemini_model,
+        creator_name=creator_name.strip(),
     )
 
     projects[project_id] = project

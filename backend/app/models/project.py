@@ -12,6 +12,7 @@ class Project(BaseModel):
     clip_count: int
     min_duration: int
     custom_prompt: str = ""
+    creator_name: str = ""  # comma-separated names to weave into captions/titles
     status: str = "created"  # created, uploading, analyzing, ready, exporting, done
     clips: list[ClipData] = []
     style: StyleConfig = StyleConfig()
