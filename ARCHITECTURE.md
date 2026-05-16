@@ -1,3 +1,9 @@
+> ⚠️ **STALE — do not trust the details below.** This describes the old v2.0
+> structure (e.g. it references `analysis.json` which the app no longer uses,
+> and predates chunking, subtitles, emojis, filters, model selector, etc.).
+> **Read `AGENTS.md` instead** — that is the current, authoritative guide for
+> the codebase. This file is kept only for historical context.
+
 # 🏗️ Architecture: AI Video Clipper v2.0
 
 ## Directory Structure
