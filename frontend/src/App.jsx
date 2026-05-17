@@ -3399,7 +3399,10 @@ function AnalyzerStep() {
   const [moments, setMoments] = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
   const [copied, setCopied] = useState(null);
+  const [copiedAll, setCopiedAll] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [analyzerModel, setAnalyzerModel] = useState("gemini-2.5-flash");
+  const [sortByScore, setSortByScore] = useState(false);
 
   const formatTime = (sec) => {
     const m = Math.floor(sec / 60);
@@ -3426,8 +3429,10 @@ function AnalyzerStep() {
     setErrorMsg("");
 
     try {
-      // Upload video
-      const uploadResult = await api.uploadVideo(file, clipCount, 15, "", (pct) => setUploadPct(pct));
+      // Upload video (pass selected model so user controls quota usage)
+      const uploadResult = await api.uploadVideo(
+        file, clipCount, 15, "", (pct) => setUploadPct(pct), analyzerModel
+      );
       const projectId = uploadResult.project_id;
 
       // Analyze
@@ -3442,10 +3447,29 @@ function AnalyzerStep() {
   };
 
   const handleCopy = (moment) => {
-    const text = `${formatTime(moment.start_time)} — ${formatTime(moment.end_time)}\n${moment.description}\n"${moment.viral_caption}"\n${moment.viral_reason}`;
+    const text =
+      `${formatTime(moment.start_time)} — ${formatTime(moment.end_time)} (${(moment.end_time - moment.start_time).toFixed(0)}s)\n` +
+      `${moment.description}\n` +
+      `"${moment.viral_caption}"\n` +
+      `Why viral: ${moment.viral_reason}` +
+      (moment.transcript_snippet ? `\nScript: ${moment.transcript_snippet}` : "");
     navigator.clipboard.writeText(text);
     setCopied(moment.id);
     setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleCopyAll = () => {
+    const list = (sortByScore
+      ? [...moments].sort((a, b) => (b.viral_score || 5) - (a.viral_score || 5))
+      : moments
+    ).map((m, i) =>
+      `${i + 1}. ${formatTime(m.start_time)} — ${formatTime(m.end_time)} (${(m.end_time - m.start_time).toFixed(0)}s) · score ${m.viral_score || "-"}/10\n` +
+      `   ${m.description}\n` +
+      `   "${m.viral_caption}"`
+    ).join("\n\n");
+    navigator.clipboard.writeText(list);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
   };
 
   const handleReset = () => {
@@ -3495,6 +3519,36 @@ function AnalyzerStep() {
                 <div style={{ fontSize: 13, color: "var(--text-muted)" }}>o haz click para seleccionar</div>
               </>
             )}
+          </div>
+
+          {/* Model selector */}
+          <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "16px 20px" }}>
+            <label style={{ fontSize: 14, fontWeight: 600, display: "block", marginBottom: 10 }}>
+              Modelo de IA
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {[
+                { val: "gemini-2.5-flash",       label: "⚡ 2.5 Flash", sub: "1500/día" },
+                { val: "gemini-2.5-pro",         label: "🥇 2.5 Pro",   sub: "50/día" },
+                { val: "gemini-3-flash-preview", label: "🆕 3 Flash",   sub: "20/día" },
+              ].map(({ val, label, sub }) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setAnalyzerModel(val)}
+                  style={{
+                    padding: "9px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                    cursor: "pointer", transition: "all 0.2s",
+                    background: analyzerModel === val ? "linear-gradient(135deg,#0891b2,#06b6d4)" : "#111",
+                    border: analyzerModel === val ? "1px solid #06b6d4" : "1px solid #333",
+                    color: analyzerModel === val ? "#fff" : "#888",
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>{label}</div>
+                  <div style={{ fontSize: 10, opacity: 0.7, marginTop: 1 }}>{sub}</div>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Clip count */}
@@ -3551,23 +3605,45 @@ function AnalyzerStep() {
 
       {phase === "done" && (
         <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
             <h3 style={{ margin: 0, fontSize: 18 }}>✅ {moments.length} momentos encontrados</h3>
-            <button className="btn btn-secondary" onClick={handleReset} style={{ fontSize: 13, padding: "6px 14px" }}>
-              🔄 Nuevo video
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={() => setSortByScore(s => !s)}
+                style={{
+                  background: sortByScore ? "var(--accent)" : "#2a2a2a", color: "#fff",
+                  border: "none", borderRadius: 10, padding: "6px 14px", fontSize: 13,
+                  cursor: "pointer", fontWeight: 600,
+                }}
+              >
+                {sortByScore ? "🔥 Por score" : "↕ Orden original"}
+              </button>
+              <button
+                onClick={handleCopyAll}
+                style={{
+                  background: copiedAll ? "#4ade80" : "#2a2a2a", color: copiedAll ? "#000" : "#fff",
+                  border: "none", borderRadius: 10, padding: "6px 14px", fontSize: 13,
+                  cursor: "pointer", fontWeight: 600,
+                }}
+              >
+                {copiedAll ? "✅ Copiado" : "📋 Copiar todo"}
+              </button>
+              <button className="btn btn-secondary" onClick={handleReset} style={{ fontSize: 13, padding: "6px 14px" }}>
+                🔄 Nuevo video
+              </button>
+            </div>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {moments.map((m) => (
+            {(sortByScore ? [...moments].sort((a,b)=>(b.viral_score||5)-(a.viral_score||5)) : moments).map((m) => (
               <div key={m.id} style={{
                 background: "var(--bg-secondary)", borderRadius: 14, padding: "16px 20px",
                 border: "1px solid #2a2a2a",
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                   <div style={{ flex: 1 }}>
-                    {/* Timestamp */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    {/* Timestamp + score */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                       <span style={{
                         background: "var(--accent)", color: "#fff", borderRadius: 8,
                         padding: "3px 10px", fontSize: 13, fontWeight: 700, fontFamily: "monospace"
@@ -3577,6 +3653,16 @@ function AnalyzerStep() {
                       <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
                         {(m.end_time - m.start_time).toFixed(0)}s
                       </span>
+                      {m.viral_score != null && (
+                        <span style={{
+                          background: m.viral_score >= 8 ? "#dc2626" : m.viral_score >= 6 ? "#d97706" : "#374151",
+                          color: "#fff", borderRadius: 8, padding: "3px 10px",
+                          fontSize: 12, fontWeight: 700,
+                        }}>
+                          {m.viral_score >= 8 ? "🔥" : m.viral_score >= 6 ? "⚡" : "·"} {m.viral_score}/10
+                          {m.viral_score_reason ? ` · ${m.viral_score_reason}` : ""}
+                        </span>
+                      )}
                     </div>
 
                     {/* Description */}
@@ -3595,6 +3681,24 @@ function AnalyzerStep() {
                     }}>
                       "{m.viral_caption}"
                     </div>
+
+                    {/* Script (Whisper transcript) — read this to validate fast */}
+                    {m.transcript_snippet ? (
+                      <div style={{
+                        background: "#0a0a0a", borderRadius: 8, padding: "8px 12px", marginTop: 8,
+                        fontSize: 13, color: "#bbb", fontStyle: "italic", lineHeight: 1.5,
+                        borderLeft: `3px solid ${
+                          m.match_confidence === "match" ? "#22c55e" :
+                          m.match_confidence === "mismatch" ? "#ef4444" : "#666"
+                        }`,
+                      }}>
+                        🎙️ {m.transcript_snippet}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: "#666", marginTop: 8, fontStyle: "italic" }}>
+                        🔇 Sin diálogo detectado en este momento
+                      </div>
+                    )}
                   </div>
 
                   {/* Copy button */}
