@@ -1125,6 +1125,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     visual_filter: "none",
     background_style: "blur",
     no_text: false,
+    no_emojis: false,
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [exportMode, setExportMode] = useState("tiktok"); // "tiktok" | "instagram"
@@ -1244,7 +1245,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.background_style, style.no_text, style.caption_font]);
+  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.background_style, style.no_text, style.caption_font, style.no_emojis]);
 
   // Poll progress
   useEffect(() => {
@@ -1632,21 +1633,38 @@ function EditorStep({ projectId, clips, onExportDone }) {
             </div>
           </div>
 
-          {/* No text master toggle */}
+          {/* Text toggles: sin textos + sin emojis */}
           <div className="control-section">
-            <h3>🚫 Sin textos</h3>
+            <h3>🚫 Opciones de texto</h3>
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -4, marginBottom: 8 }}>
-              Oculta caption y subtítulos. Útil para video limpio sin nada de texto.
+              Toggles para limpiar el caption sin re-analizar el video.
             </p>
-            <button
-              className={`btn ${style.no_text ? "btn-primary" : "btn-secondary"}`}
-              onClick={() => setStyle((s) => ({ ...s, no_text: !s.no_text }))}
-              style={{ width: "100%", padding: "10px 14px", textAlign: "center" }}
-            >
-              {style.no_text
-                ? "✅ Sin textos activado — video limpio"
-                : "📝 Mostrar caption y subtítulos (default)"}
-            </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button
+                className={`btn ${style.no_text ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle((s) => ({ ...s, no_text: !s.no_text }))}
+                style={{ width: "100%", padding: "10px 14px", textAlign: "center" }}
+              >
+                {style.no_text
+                  ? "✅ Sin textos activado — video totalmente limpio"
+                  : "📝 Mostrar caption + subtítulos (default)"}
+              </button>
+              <button
+                className={`btn ${style.no_emojis ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setStyle((s) => ({ ...s, no_emojis: !s.no_emojis }))}
+                disabled={style.no_text}
+                style={{
+                  width: "100%", padding: "10px 14px", textAlign: "center",
+                  opacity: style.no_text ? 0.4 : 1,
+                  cursor: style.no_text ? "not-allowed" : "pointer",
+                }}
+                title={style.no_text ? "Ya estás ocultando todo el texto" : ""}
+              >
+                {style.no_emojis
+                  ? "✅ Sin emojis — caption sin 🔥 💀 etc"
+                  : "😀 Mostrar emojis en caption (default)"}
+              </button>
+            </div>
           </div>
 
           {/* Caption Style */}

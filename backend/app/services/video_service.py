@@ -693,6 +693,7 @@ def generate_preview_frame(
     background_style: str = "blur",
     no_text: bool = False,
     caption_font: str = "calibri",
+    no_emojis: bool = False,
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
@@ -757,7 +758,11 @@ def generate_preview_frame(
 
     # Caption overlay — Y position relative to video portion in split mode
     if caption_text and not no_text:
-        lines = split_text_into_lines(caption_text, max_chars=30)
+        _caption = caption_text
+        if no_emojis:
+            _caption = _EMOJI_RE.sub("", _caption)
+            _caption = re.sub(r"\s+", " ", _caption).strip()
+        lines = split_text_into_lines(_caption, max_chars=30)
         pad_x, pad_y = 12, 14
         line_gap = 5
         base_y = int(text_y * target_h)
@@ -866,6 +871,7 @@ def generate_preview_clip(
     background_style: str = "blur",
     no_text: bool = False,
     caption_font: str = "calibri",
+    no_emojis: bool = False,
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -922,7 +928,11 @@ def generate_preview_clip(
 
     # Caption overlay — Y relative to video portion in split mode
     if caption_text and not no_text:
-        lines = split_text_into_lines(caption_text, max_chars=30)
+        _caption = caption_text
+        if no_emojis:
+            _caption = _EMOJI_RE.sub("", _caption)
+            _caption = re.sub(r"\s+", " ", _caption).strip()
+        lines = split_text_into_lines(_caption, max_chars=30)
         pad_x, pad_y = 12, 14
         line_gap = 5
         base_y = int(text_y * target_h)

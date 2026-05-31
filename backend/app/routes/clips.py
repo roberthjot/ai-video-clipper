@@ -344,6 +344,7 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             background_style=getattr(style, 'background_style', 'blur'),
             no_text=getattr(style, 'no_text', False),
             caption_font=getattr(style, 'caption_font', 'calibri'),
+            no_emojis=getattr(style, 'no_emojis', False),
         )
     except Exception as e:
         import traceback
@@ -411,6 +412,7 @@ async def preview_clip_video(project_id: str, clip_id: int):
             background_style=getattr(style, 'background_style', 'blur'),
             no_text=getattr(style, 'no_text', False),
             caption_font=getattr(style, 'caption_font', 'calibri'),
+            no_emojis=getattr(style, 'no_emojis', False),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Video preview failed: {str(e)}")

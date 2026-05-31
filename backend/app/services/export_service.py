@@ -94,10 +94,16 @@ def export_clip_with_style(
 
     # Master toggle: skip ALL on-screen text when no_text is set
     no_text = getattr(style, 'no_text', False)
+    no_emojis = getattr(style, 'no_emojis', False)
 
     # Caption overlay — Y relative to video portion in split mode
     if clip.viral_caption and not no_text:
-        lines = video_service.split_text_into_lines(clip.viral_caption, max_chars=30)
+        import re as _re
+        _caption = clip.viral_caption
+        if no_emojis:
+            _caption = video_service._EMOJI_RE.sub("", _caption)
+            _caption = _re.sub(r"\s+", " ", _caption).strip()
+        lines = video_service.split_text_into_lines(_caption, max_chars=30)
         pad_x, pad_y = 12, 14
         line_gap = 5
         base_y = int(style.text_y * target_h)

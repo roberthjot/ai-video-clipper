@@ -72,6 +72,10 @@ class StyleConfig(BaseModel):
     # Master toggle: skip caption + burned-in subtitles entirely (clean video)
     no_text: bool = False
 
+    # Strip emojis from captions at render time (caption data is preserved,
+    # only the displayed text loses the emoji). Independent of no_text.
+    no_emojis: bool = False
+
     # Caption font choice (key in video_service.FONT_MAP). Default keeps Calibri.
     caption_font: str = "calibri"
 
