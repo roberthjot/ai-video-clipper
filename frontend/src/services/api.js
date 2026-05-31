@@ -72,6 +72,19 @@ export async function updateProjectModel(projectId, geminiModel) {
     return res.json();
 }
 
+export async function checkModelHealth(models) {
+    const res = await fetch(`${API_BASE}/clips/model-health`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ models }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to check models");
+    }
+    return res.json();
+}
+
 
 export async function editCaption(projectId, clipId, newCaption) {
     const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}`, {

@@ -190,11 +190,23 @@ Inputs order: `[0]=video [1]=split image? [2]=caption png [3]=watermark`.
   is **manual**: user renames the file. There is no auto-sanitization in the
   repo (a fix was written and reverted at the user's request — do not
   re-add without asking).
-- **Gemini free tier (May 2026)**: `gemini-2.5-flash` = 1500/day (default,
-  recommended), `gemini-2.5-pro` = 50/day, `gemini-3-flash-preview` =
-  20/day. All return 503 during peak hours (Google capacity, not a bug).
+- **Gemini models** (whitelisted in `gemini_service.VIDEO_ANALYSIS_MODELS`):
+    - `gemini-2.5-flash` — free 1500/day (default, recommended)
+    - `gemini-2.5-flash-lite` — free ~1000/day
+    - `gemini-3.1-flash-lite-preview` — free, preview
+    - `gemini-3-flash-preview` — free 20/day
+    - `gemini-2.5-pro` — free 50/day
+    - `gemini-3.5-flash` — **paid only** ($1.50/$9 per 1M tok, released May 2026)
+    - `gemini-3.1-pro-preview` — **paid only**
+  Free tier returns 503 during peak hours (Google capacity, not a bug).
   429 = quota exhausted → switch model. No automatic retry/backoff is
   implemented yet.
+- **Model health check**: `POST /api/clips/model-health` sends a tiny "ok"
+  prompt to each requested model and classifies the response as
+  `ok | quota | unavailable | error | invalid`. The frontend `ModelSelector`
+  component shows this status as a colored badge on each model button. This
+  is a **light** signal — a model that passes the ping can still fail later
+  on a big video request due to token-level capacity pressure.
 - **Intel QSV**: `video_service.get_video_codec_args()` tries `h264_qsv`,
   falls back to `libx264` automatically if the bundled FFmpeg lacks QSV or
   it fails at runtime. Don't assume QSV is present.

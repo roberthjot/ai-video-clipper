@@ -35,8 +35,7 @@ async def upload_video(
     duration = video_service.get_video_duration(upload_path)
 
     # Validate model — only allow known good ones
-    allowed_models = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-flash-preview"}
-    if gemini_model not in allowed_models:
+    if gemini_model not in gemini_service.VIDEO_ANALYSIS_MODELS:
         gemini_model = "gemini-2.5-flash"
 
     # Create project

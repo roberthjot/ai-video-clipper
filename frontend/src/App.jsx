@@ -2,6 +2,80 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import "./App.css";
 import * as api from "./services/api";
 
+const GEMINI_VIDEO_MODELS = [
+  { val: "gemini-2.5-flash",              label: "⚡ 2.5 Flash",       sub: "1500/día · recomendado" },
+  { val: "gemini-2.5-flash-lite",         label: "💡 2.5 Flash Lite",  sub: "1000/día · liviano" },
+  { val: "gemini-3.1-flash-lite-preview", label: "🆕 3.1 Flash Lite",  sub: "preview · free" },
+  { val: "gemini-3.5-flash",              label: "🚀 3.5 Flash",       sub: "💰 pago · nuevo I/O 26" },
+  { val: "gemini-3-flash-preview",        label: "🧪 3 Flash",         sub: "20/día · preview" },
+  { val: "gemini-2.5-pro",                label: "🥇 2.5 Pro",         sub: "50/día · mejor calidad" },
+  { val: "gemini-3.1-pro-preview",        label: "💎 3.1 Pro",         sub: "💰 pago · top calidad" },
+];
+
+function healthColor(status) {
+  if (status === "ok") return "#22c55e";
+  if (status === "quota") return "#f59e0b";
+  if (status === "unavailable") return "#ef4444";
+  if (status === "error") return "#a855f7";
+  return "#666";
+}
+
+function healthLabel(status) {
+  if (status === "ok") return "OK";
+  if (status === "quota") return "Sin cuota";
+  if (status === "unavailable") return "Saturado";
+  if (status === "error") return "Error";
+  return "Sin check";
+}
+
+function ModelSelector({ value, onChange, health = {}, checking = false, onCheck, disabled = false }) {
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))", gap: 8 }}>
+        {GEMINI_VIDEO_MODELS.map(({ val, label, sub }) => {
+          const status = health[val]?.status;
+          const color = healthColor(status);
+          return (
+            <button
+              key={val}
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange(val)}
+              title={health[val]?.message || val}
+              style={{
+                padding: "9px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                cursor: disabled ? "wait" : "pointer", transition: "all 0.2s",
+                background: value === val ? "linear-gradient(135deg, #10b981, #14b8a6)" : "#111",
+                border: value === val ? "1px solid #14b8a6" : `1px solid ${status ? color : "#333"}`,
+                color: value === val ? "#fff" : "#aaa",
+                opacity: disabled ? 0.6 : 1,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 700 }}>{label}</div>
+              <div style={{ fontSize: 10, opacity: 0.75, marginTop: 1 }}>{sub}</div>
+              <div style={{ fontSize: 10, color: status ? color : "#666", marginTop: 3 }}>
+                {healthLabel(status)}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      {onCheck && (
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={checking}
+          onClick={onCheck}
+          style={{ marginTop: 8, padding: "6px 12px", fontSize: 12 }}
+        >
+          {checking ? "Chequeando..." : "Check modelos"}
+        </button>
+      )}
+    </>
+  );
+}
+
 // ================================================
 // STEP 1: Upload & Config
 // ================================================
@@ -18,6 +92,22 @@ function UploadStep({ onComplete }) {
   const [statusMsg, setStatusMsg] = useState("");
   const [percent, setPercent] = useState(0);
   const [dragover, setDragover] = useState(false);
+  const [modelHealth, setModelHealth] = useState({});
+  const [checkingModels, setCheckingModels] = useState(false);
+
+  const handleCheckModels = async () => {
+    setCheckingModels(true);
+    try {
+      const result = await api.checkModelHealth(GEMINI_VIDEO_MODELS.map((m) => m.val));
+      const next = {};
+      for (const item of result.models || []) next[item.model] = item;
+      setModelHealth(next);
+    } catch (e) {
+      alert(`No se pudo chequear modelos: ${e.message}`);
+    } finally {
+      setCheckingModels(false);
+    }
+  };
   const [projectIdRef, setProjectIdRef] = useState(null);
   const inputRef = useRef();
   const pollingRef = useRef(null);
@@ -307,33 +397,16 @@ function UploadStep({ onComplete }) {
           <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 8 }}>
             Modelo de IA
           </label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            {[
-              { val: "gemini-2.5-flash",       label: "⚡ 2.5 Flash",   desc: "1500/día · recomendado" },
-              { val: "gemini-2.5-pro",         label: "🥇 2.5 Pro",     desc: "50/día · mejor calidad" },
-              { val: "gemini-3-flash-preview", label: "🆕 3 Flash",     desc: "20/día · más nuevo" },
-            ].map(({ val, label, desc }) => (
-              <button
-                key={val}
-                type="button"
-                onClick={() => setGeminiModel(val)}
-                style={{
-                  padding: "10px 8px", borderRadius: 10, fontSize: 12, fontWeight: 700,
-                  cursor: "pointer", transition: "all 0.2s",
-                  background: geminiModel === val ? "linear-gradient(135deg, #10b981, #14b8a6)" : "#111",
-                  border: geminiModel === val ? "1px solid #14b8a6" : "1px solid #333",
-                  color: geminiModel === val ? "#fff" : "#888",
-                  boxShadow: geminiModel === val ? "0 4px 14px rgba(20,184,166,0.3)" : "none",
-                  textAlign: "center",
-                }}
-              >
-                <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
-                <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{desc}</div>
-              </button>
-            ))}
-          </div>
+          <ModelSelector
+            value={geminiModel}
+            onChange={setGeminiModel}
+            health={modelHealth}
+            checking={checkingModels}
+            onCheck={handleCheckModels}
+          />
           <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, marginBottom: 0 }}>
-            Si un modelo da error 429 (cuota agotada), cambia a otro.
+            Si un modelo da 429 (cuota) o 503 (saturado), cambia a otro. El botón
+            <b> Check modelos</b> hace un ping rápido a cada uno y pinta su estado.
           </p>
         </div>
         <div style={{ marginBottom: 16 }}>
@@ -451,6 +524,8 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentId: null });
   const [reanalyzeModel, setReanalyzeModel] = useState("gemini-2.5-flash");
   const [switchingModel, setSwitchingModel] = useState(false);
+  const [modelHealth, setModelHealth] = useState({});
+  const [checkingModels, setCheckingModels] = useState(false);
   // Image preview
   const [imagePreviewClip, setImagePreviewClip] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
@@ -490,6 +565,20 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
       if (sortBy === "score_asc") return (a.viral_score || 5) - (b.viral_score || 5);
       return 0; // default: keep original order
     });
+
+  const handleCheckModels = async () => {
+    setCheckingModels(true);
+    try {
+      const result = await api.checkModelHealth(GEMINI_VIDEO_MODELS.map((m) => m.val));
+      const next = {};
+      for (const item of result.models || []) next[item.model] = item;
+      setModelHealth(next);
+    } catch (e) {
+      alert(`No se pudo chequear modelos: ${e.message}`);
+    } finally {
+      setCheckingModels(false);
+    }
+  };
 
   const handleSaveEdit = async () => {
     if (!editingClip) return;
@@ -678,43 +767,29 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
         </div>
       )}
 
-      {/* Model selector for re-analysis */}
-      <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "12px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
-          🧠 Modelo para reanalizar:
-        </span>
-        {[
-          { val: "gemini-2.5-flash",       label: "⚡ 2.5 Flash",   sub: "1500/día" },
-          { val: "gemini-2.5-pro",         label: "🥇 2.5 Pro",     sub: "50/día" },
-          { val: "gemini-3-flash-preview", label: "🆕 3 Flash",     sub: "20/día" },
-        ].map(({ val, label, sub }) => (
-          <button
-            key={val}
-            disabled={switchingModel}
-            onClick={async () => {
-              setSwitchingModel(true);
-              try {
-                await api.updateProjectModel(projectId, val);
-                setReanalyzeModel(val);
-              } catch (e) {
-                alert(`No se pudo cambiar el modelo: ${e.message}`);
-              } finally {
-                setSwitchingModel(false);
-              }
-            }}
-            style={{
-              padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700,
-              cursor: switchingModel ? "wait" : "pointer", transition: "all 0.2s",
-              background: reanalyzeModel === val ? "linear-gradient(135deg, #10b981, #14b8a6)" : "#111",
-              border: reanalyzeModel === val ? "1px solid #14b8a6" : "1px solid #333",
-              color: reanalyzeModel === val ? "#fff" : "#aaa",
-              opacity: switchingModel ? 0.6 : 1,
-            }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 700 }}>{label}</div>
-            <div style={{ fontSize: 10, opacity: 0.75, marginTop: 1 }}>{sub}</div>
-          </button>
-        ))}
+      {/* Model selector for re-analysis (also persists choice to backend) */}
+      <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "12px 18px", marginBottom: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
+          🧠 Modelo para reanalizar
+        </div>
+        <ModelSelector
+          value={reanalyzeModel}
+          disabled={switchingModel}
+          onChange={async (val) => {
+            setSwitchingModel(true);
+            try {
+              await api.updateProjectModel(projectId, val);
+              setReanalyzeModel(val);
+            } catch (e) {
+              alert(`No se pudo cambiar el modelo: ${e.message}`);
+            } finally {
+              setSwitchingModel(false);
+            }
+          }}
+          health={modelHealth}
+          checking={checkingModels}
+          onCheck={handleCheckModels}
+        />
       </div>
 
       {/* Batch re-analyze bar */}
@@ -3403,6 +3478,22 @@ function AnalyzerStep() {
   const [dragging, setDragging] = useState(false);
   const [analyzerModel, setAnalyzerModel] = useState("gemini-2.5-flash");
   const [sortByScore, setSortByScore] = useState(false);
+  const [modelHealth, setModelHealth] = useState({});
+  const [checkingModels, setCheckingModels] = useState(false);
+
+  const handleCheckModels = async () => {
+    setCheckingModels(true);
+    try {
+      const result = await api.checkModelHealth(GEMINI_VIDEO_MODELS.map((m) => m.val));
+      const next = {};
+      for (const item of result.models || []) next[item.model] = item;
+      setModelHealth(next);
+    } catch (e) {
+      alert(`No se pudo chequear modelos: ${e.message}`);
+    } finally {
+      setCheckingModels(false);
+    }
+  };
 
   const formatTime = (sec) => {
     const m = Math.floor(sec / 60);
@@ -3526,29 +3617,13 @@ function AnalyzerStep() {
             <label style={{ fontSize: 14, fontWeight: 600, display: "block", marginBottom: 10 }}>
               Modelo de IA
             </label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-              {[
-                { val: "gemini-2.5-flash",       label: "⚡ 2.5 Flash", sub: "1500/día" },
-                { val: "gemini-2.5-pro",         label: "🥇 2.5 Pro",   sub: "50/día" },
-                { val: "gemini-3-flash-preview", label: "🆕 3 Flash",   sub: "20/día" },
-              ].map(({ val, label, sub }) => (
-                <button
-                  key={val}
-                  type="button"
-                  onClick={() => setAnalyzerModel(val)}
-                  style={{
-                    padding: "9px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700,
-                    cursor: "pointer", transition: "all 0.2s",
-                    background: analyzerModel === val ? "linear-gradient(135deg,#0891b2,#06b6d4)" : "#111",
-                    border: analyzerModel === val ? "1px solid #06b6d4" : "1px solid #333",
-                    color: analyzerModel === val ? "#fff" : "#888",
-                  }}
-                >
-                  <div style={{ fontSize: 12, fontWeight: 700 }}>{label}</div>
-                  <div style={{ fontSize: 10, opacity: 0.7, marginTop: 1 }}>{sub}</div>
-                </button>
-              ))}
-            </div>
+            <ModelSelector
+              value={analyzerModel}
+              onChange={setAnalyzerModel}
+              health={modelHealth}
+              checking={checkingModels}
+              onCheck={handleCheckModels}
+            />
           </div>
 
           {/* Clip count */}

@@ -24,6 +24,10 @@ class UpdateModelRequest(BaseModel):
     gemini_model: str
 
 
+class ModelHealthRequest(BaseModel):
+    models: list[str] | None = None
+
+
 @router.post("/analyze")
 async def analyze_video(req: AnalyzeRequest):
     """Start AI analysis on a project's video."""
@@ -247,11 +251,30 @@ async def update_project_model(project_id: str, req: UpdateModelRequest):
     projects = get_project_store()
     if project_id not in projects:
         raise HTTPException(status_code=404, detail="Project not found")
-    allowed = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-flash-preview"}
+    allowed = gemini_service.VIDEO_ANALYSIS_MODELS
     if req.gemini_model not in allowed:
-        raise HTTPException(status_code=400, detail=f"Model must be one of {allowed}")
+        raise HTTPException(status_code=400, detail=f"Model must be one of {sorted(allowed)}")
     projects[project_id].gemini_model = req.gemini_model
     return {"status": "updated", "gemini_model": req.gemini_model}
+
+
+@router.post("/model-health")
+async def check_model_health(req: ModelHealthRequest):
+    """Lightweight availability check for Gemini models.
+
+    Sends a tiny text prompt ("ok"). This helps catch obvious 429/503 failures
+    before uploading/analyzing a video, but video requests can still fail later.
+    """
+    requested = req.models or sorted(gemini_service.VIDEO_ANALYSIS_MODELS)
+    models = [m for m in requested if m in gemini_service.VIDEO_ANALYSIS_MODELS]
+    if not models:
+        raise HTTPException(status_code=400, detail="No valid models provided")
+
+    results = []
+    for model in models:
+        result = await asyncio.to_thread(gemini_service.check_model_health, model)
+        results.append(result)
+    return {"models": results}
 
 
 @router.put("/{project_id}/{clip_id}")

@@ -15,6 +15,16 @@ from ..models.clip import ClipData
 CHUNK_THRESHOLD_SECONDS = 10 * 60   # 10 min
 CHUNK_DURATION_SECONDS = 10 * 60    # ~10 min per chunk
 
+VIDEO_ANALYSIS_MODELS = {
+    "gemini-3.5-flash",                  # paid only
+    "gemini-3-flash-preview",            # free 20/day
+    "gemini-3.1-pro-preview",            # paid only
+    "gemini-3.1-flash-lite-preview",     # free
+    "gemini-2.5-flash",                  # free 1500/day (recommended)
+    "gemini-2.5-flash-lite",             # free 1000/day
+    "gemini-2.5-pro",                    # free 50/day
+}
+
 
 # Initialize Gemini client
 client = genai.Client(api_key=settings.GOOGLE_API_KEY)
@@ -44,6 +54,49 @@ def delete_file(file_obj) -> None:
         print(f"[Gemini] Deleted file: {file_obj.name}")
     except Exception as e:
         print(f"[Gemini] Failed to delete file {file_obj.name} (ignoring): {e}")
+
+
+def check_model_health(model: str) -> dict:
+    """Run a tiny text request to see whether a Gemini model is reachable.
+    This is only a light signal: video requests can still fail later due to
+    higher token/capacity pressure.
+    """
+    if model not in VIDEO_ANALYSIS_MODELS:
+        return {
+            "model": model,
+            "status": "invalid",
+            "message": "Model is not in the app's allowed video model list.",
+        }
+
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents="Respond with exactly: ok",
+        )
+        text = (getattr(response, "text", "") or "").strip()
+        return {
+            "model": model,
+            "status": "ok",
+            "message": text[:80] or "ok",
+        }
+    except Exception as e:
+        status_code = getattr(e, "status_code", None)
+        raw = str(e)
+        lowered = raw.lower()
+        if status_code == 429 or "resource_exhausted" in lowered or "quota" in lowered:
+            status = "quota"
+            message = "Quota exhausted or rate limited."
+        elif status_code == 503 or "unavailable" in lowered or "high demand" in lowered:
+            status = "unavailable"
+            message = "Model is overloaded or temporarily unavailable."
+        else:
+            status = "error"
+            message = raw[:240]
+        return {
+            "model": model,
+            "status": status,
+            "message": message,
+        }
 
 
 def build_chunk_ranges(video_duration: float, max_chunk_seconds: float = CHUNK_DURATION_SECONDS) -> list:
