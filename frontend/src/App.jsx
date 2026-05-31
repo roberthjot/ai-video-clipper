@@ -1122,6 +1122,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     subtitle_style: "none",
     subtitle_size_scale: 1.0,
     visual_filter: "none",
+    background_style: "blur",
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [exportMode, setExportMode] = useState("tiktok"); // "tiktok" | "instagram"
@@ -1241,7 +1242,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale]);
+  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.background_style]);
 
   // Poll progress
   useEffect(() => {
@@ -1606,6 +1607,27 @@ function EditorStep({ projectId, clips, onExportDone }) {
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
               Fit = full · Medium = un poco más chico · Mini = el más pequeño · Zoom = grande · Fill = frame completo · Small = reducido
             </p>
+          </div>
+
+          {/* Background */}
+          <div className="control-section">
+            <h3>🎨 Fondo</h3>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[
+                { val: "blur",  label: "🌫️ Blur",  desc: "Difuminado del video" },
+                { val: "black", label: "⬛ Negro", desc: "Negro sólido · TikTok style" },
+              ].map(({ val, label, desc }) => (
+                <button
+                  key={val}
+                  className={`btn ${style.background_style === val ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => setStyle((s) => ({ ...s, background_style: val }))}
+                  style={{ flex: 1, textAlign: "left", padding: "10px 14px" }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div>
+                  <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{desc}</div>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Caption Style */}

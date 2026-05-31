@@ -405,6 +405,7 @@ async def preview_clip_video(project_id: str, clip_id: int):
             transcript=getattr(project, 'transcript', None),
             visual_filter=getattr(style, 'visual_filter', 'none'),
             subtitle_size_scale=getattr(style, 'subtitle_size_scale', 1.0),
+            background_style=getattr(style, 'background_style', 'blur'),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Video preview failed: {str(e)}")

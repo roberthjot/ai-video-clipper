@@ -809,6 +809,7 @@ def generate_preview_clip(
     transcript: dict = None,
     visual_filter: str = "none",
     subtitle_size_scale: float = 1.0,
+    background_style: str = "blur",
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -842,9 +843,14 @@ def generate_preview_clip(
     # Build filter
     input_index = 1
 
+    def _bg_chain(target_height: int) -> str:
+        if background_style == "black":
+            return f"color=c=black:s={W}x{target_height}"
+        return f"[0:v]scale={W}:{target_height}:force_original_aspect_ratio=increase,crop={W}:{target_height},boxblur=12:2"
+
     if use_split:
         filter_complex = (
-            f"[0:v]scale={W}:{video_h}:force_original_aspect_ratio=increase,crop={W}:{video_h},boxblur=12:2[bg];"
+            f"{_bg_chain(video_h)}[bg];"
             f"[0:v]{fg_filter}[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part];"
             f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
@@ -852,7 +858,7 @@ def generate_preview_clip(
         )
         input_index = 2
     else:
-        filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+        filter_complex = f"{_bg_chain(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
 
     last_label = "v"
     rounded_box_path = None

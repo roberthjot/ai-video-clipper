@@ -66,6 +66,9 @@ class StyleConfig(BaseModel):
     # Cinematic visual filter: "none" | "cinematic" | "warm" | "vivid" | "moody" | "bw"
     visual_filter: str = "none"
 
+    # Background style behind the video: "blur" (current default) or "black" (solid)
+    background_style: str = "blur"
+
     # Anti-detect / uniquify (export only, not applied to preview)
     strip_metadata: bool = False
     flip_horizontal: bool = False
