@@ -490,7 +490,44 @@ def analyze_video(
     # Fix leading zeros in numbers
     raw_text = re.sub(r"\b0+(\d)", r"\1", raw_text)
 
-    clips_raw = json.loads(raw_text)
+    # Gemini occasionally emits JSON with unescaped quotes inside strings or
+    # smart-quote characters. Try strict parse first; on failure, sanitize and
+    # retry before giving up.
+    try:
+        clips_raw = json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        print(f"[Gemini] Initial JSON parse failed at char {e.pos}: {e.msg}")
+        print(f"[Gemini] Context around error: ...{raw_text[max(0,e.pos-60):e.pos+60]!r}...")
+        sanitized = raw_text
+        # Normalize smart/curly quotes to straight ones
+        sanitized = (sanitized
+                     .replace('“', '"').replace('”', '"')
+                     .replace('‘', "'").replace('’', "'"))
+        # Replace literal newlines inside strings with escaped \n
+        # (heuristic: any raw newline inside a JSON string value)
+        sanitized = re.sub(r'(?<!\\)\n(?=[^"]*"\s*[,}\]])', r'\\n', sanitized)
+        # Strip trailing commas before } or ]
+        sanitized = re.sub(r',(\s*[}\]])', r'\1', sanitized)
+        try:
+            clips_raw = json.loads(sanitized)
+            print("[Gemini] Recovered after sanitization")
+        except json.JSONDecodeError as e2:
+            # Last resort: try to salvage what we can by truncating at the last
+            # complete object before the error position.
+            try:
+                # Find the last `},` before the error position and cut+close array
+                cutoff = raw_text.rfind('},', 0, e.pos)
+                if cutoff > 0:
+                    salvaged = raw_text[:cutoff + 1] + ']'
+                    clips_raw = json.loads(salvaged)
+                    print(f"[Gemini] Recovered {len(clips_raw)} clips by truncating at malformed entry")
+                else:
+                    raise e2
+            except Exception:
+                raise RuntimeError(
+                    f"Gemini returned malformed JSON that couldn't be salvaged: {e.msg} "
+                    f"at line {e.lineno} col {e.colno}. Try analyzing again."
+                )
 
     print(f"[Gemini] min_duration={min_duration}, clips from Gemini: {len(clips_raw)}")
 
