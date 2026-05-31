@@ -1,6 +1,6 @@
 const API_BASE = "http://localhost:8000/api";
 
-export function uploadVideo(file, clipCount, minDuration, customPrompt, onProgress, geminiModel = "gemini-2.5-flash", creatorName = "") {
+export function uploadVideo(file, clipCount, minDuration, customPrompt, onProgress, geminiModel = "gemini-2.5-flash", creatorName = "", analyzeStart = 0, analyzeDuration = 0) {
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append("video", file);
@@ -9,6 +9,8 @@ export function uploadVideo(file, clipCount, minDuration, customPrompt, onProgre
         formData.append("custom_prompt", customPrompt);
         formData.append("gemini_model", geminiModel);
         formData.append("creator_name", creatorName);
+        formData.append("analyze_start", analyzeStart);
+        formData.append("analyze_duration", analyzeDuration);
 
         const xhr = new XMLHttpRequest();
         xhr.open("POST", `${API_BASE}/upload`);

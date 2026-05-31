@@ -38,17 +38,45 @@ async def analyze_video(req: AnalyzeRequest):
     project = projects[req.project_id]
 
     active_file = None
+    extracted_range_path = None  # if user asked to analyze only a sub-range
     try:
+        # If user specified an analyze range, extract just those seconds into a
+        # temp file. Both Whisper and Gemini will work on this smaller file;
+        # we'll shift timestamps back to the original video timeline at the end.
+        analyze_start = float(getattr(project, 'analyze_start', 0.0) or 0.0)
+        analyze_duration = float(getattr(project, 'analyze_duration', 0.0) or 0.0)
+        needs_extraction = analyze_start > 0 or (
+            analyze_duration > 0 and analyze_duration < project.video_duration
+        )
+
+        if needs_extraction:
+            range_end = analyze_start + (analyze_duration or (project.video_duration - analyze_start))
+            temp_dir = os.path.join(os.path.dirname(__file__), "..", "services", "temp")
+            os.makedirs(temp_dir, exist_ok=True)
+            extracted_range_path = os.path.join(temp_dir, f"analyze_range_{project.id}_{uuid.uuid4().hex[:8]}.mp4")
+            print(f"[Analyze] Extracting range {analyze_start:.0f}s — {range_end:.0f}s "
+                  f"({(range_end - analyze_start)/60:.1f} min) before analysis")
+            await asyncio.to_thread(
+                gemini_service.extract_video_chunk,
+                project.video_path, analyze_start, range_end, extracted_range_path,
+            )
+            video_for_analysis = extracted_range_path
+            effective_duration = range_end - analyze_start
+        else:
+            video_for_analysis = project.video_path
+            effective_duration = project.video_duration
+            analyze_start = 0.0  # no shift needed
+
         # Start Whisper transcription IN PARALLEL with Gemini upload + processing.
         # Whisper runs on local CPU; Gemini runs on Google's servers — they don't
         # compete for resources. By the time Gemini is ready, Whisper is often done.
         print("[Whisper] Starting transcription in parallel with Gemini upload...")
         whisper_task = asyncio.create_task(
-            asyncio.to_thread(whisper_service.transcribe, project.video_path)
+            asyncio.to_thread(whisper_service.transcribe, video_for_analysis)
         )
 
         project.status = "uploading"
-        file_obj = await asyncio.to_thread(gemini_service.upload_video, project.video_path)
+        file_obj = await asyncio.to_thread(gemini_service.upload_video, video_for_analysis)
 
         project.status = "processing"
         active_file = await asyncio.to_thread(gemini_service.wait_for_processing, file_obj)
@@ -69,26 +97,28 @@ async def analyze_video(req: AnalyzeRequest):
                 detail=f"Video too large for AI: {token_count:,} tokens (max {MAX_TOKENS:,}). "
                        f"Your video is {mins} min. Please use a video under 45 minutes."
             )
-        duration = req.duration_override or project.video_duration
+        duration = req.duration_override or effective_duration
 
-        # Wait for Whisper to finish (usually done by now since it ran in parallel)
+        # Wait for Whisper to finish (usually done by now since it ran in parallel).
+        # IMPORTANT: keep the transcript in EXTRACT-LOCAL timeline (0..duration)
+        # while Gemini is analyzing — both Gemini and the transcript see the
+        # same time window. We shift both to the ORIGINAL video timeline only
+        # AFTER all analysis is done.
         transcript = None
         try:
             transcript = await whisper_task
-            project.transcript = transcript  # Save for subtitle generation later
             print(f"[Whisper] Transcription ready ({len(transcript.get('words', []))} words)")
         except Exception as e:
             print(f"[Whisper] Transcription failed (continuing without it): {e}")
 
-        # If the video is long enough, switch to chunked analysis (much more
-        # accurate timestamps because Gemini focuses on a smaller time window).
+        # If the (effective) video is long enough, switch to chunked analysis.
+        # Note: we work on the EXTRACTED file, so chunking divides that, not
+        # the original. _analyze_in_chunks receives video_for_analysis explicitly.
         if duration > gemini_service.CHUNK_THRESHOLD_SECONDS:
-            print(f"[Analyze] Video is {duration/60:.1f} min — using chunked analysis")
-            # We don't need the full-video upload for the chunked path; delete it
-            # before processing chunks so we don't hit storage quota.
+            print(f"[Analyze] Effective video is {duration/60:.1f} min — using chunked analysis")
             await asyncio.to_thread(gemini_service.delete_file, active_file)
             active_file = None
-            clips = await _analyze_in_chunks(project, duration, transcript)
+            clips = await _analyze_in_chunks(project, duration, transcript, video_for_analysis)
         else:
             clips = await asyncio.to_thread(
                 gemini_service.analyze_video,
@@ -102,6 +132,24 @@ async def analyze_video(req: AnalyzeRequest):
                 project.gemini_model,
                 getattr(project, 'creator_name', ''),
             )
+
+        # Shift BOTH clips and transcript to the ORIGINAL video timeline if we
+        # analyzed a sub-range. After this, all timestamps refer to the original
+        # video file, so preview/export/validation all work without any other
+        # changes.
+        if analyze_start > 0:
+            for c in clips:
+                c.start_time = round(c.start_time + analyze_start, 2)
+                c.end_time = round(c.end_time + analyze_start, 2)
+            if transcript:
+                for w in transcript.get("words", []):
+                    w["start"] = round(w.get("start", 0) + analyze_start, 3)
+                    w["end"] = round(w.get("end", 0) + analyze_start, 3)
+            print(f"[Analyze] Shifted {len(clips)} clips + transcript by +{analyze_start:.0f}s")
+
+        # Save transcript (now in original-video timeline) for subtitle generation later
+        if transcript:
+            project.transcript = transcript
 
         # Validate each clip's caption against the Whisper transcript so the
         # editor can show a confidence indicator next to each one.
@@ -134,14 +182,26 @@ async def analyze_video(req: AnalyzeRequest):
         # Always clean up the Gemini file to free storage quota
         if active_file is not None:
             await asyncio.to_thread(gemini_service.delete_file, active_file)
+        # Clean up the extracted range temp file (if any)
+        if extracted_range_path and os.path.exists(extracted_range_path):
+            try:
+                os.remove(extracted_range_path)
+                print(f"[Analyze] Cleaned up extracted range file")
+            except Exception:
+                pass
 
 
-async def _analyze_in_chunks(project, duration: float, transcript: dict) -> list:
+async def _analyze_in_chunks(project, duration: float, transcript: dict, video_path: str = None) -> list:
     """Split a long video into chunks of ~10 min, analyze each separately, then
     merge the results. Each chunk gives Gemini a much smaller time window so its
     timestamps stay precise. Chunk-local timestamps are shifted back to the
-    original video's global timeline before merging.
+    extracted-file global timeline before merging. (An additional shift by
+    analyze_start happens at the caller for original-video timeline.)
+
+    `video_path` overrides project.video_path — used when analyzing a
+    pre-extracted sub-range so chunking operates on the extracted file.
     """
+    source_video = video_path or project.video_path
     ranges = gemini_service.build_chunk_ranges(duration, gemini_service.CHUNK_DURATION_SECONDS)
     n_chunks = len(ranges)
     clips_per_chunk = max(1, math.ceil(project.clip_count / n_chunks))
@@ -159,7 +219,7 @@ async def _analyze_in_chunks(project, duration: float, transcript: dict) -> list
             print(f"[Chunked] Extracting chunk {idx+1}/{n_chunks}: {chunk_start:.0f}s-{chunk_end:.0f}s")
             await asyncio.to_thread(
                 gemini_service.extract_video_chunk,
-                project.video_path, chunk_start, chunk_end, chunk_path,
+                source_video, chunk_start, chunk_end, chunk_path,
             )
             chunk_file = await asyncio.to_thread(gemini_service.upload_video, chunk_path)
             chunk_file = await asyncio.to_thread(gemini_service.wait_for_processing, chunk_file)

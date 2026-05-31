@@ -21,6 +21,8 @@ async def upload_video(
     custom_prompt: str = Form(""),
     gemini_model: str = Form("gemini-2.5-flash"),
     creator_name: str = Form(""),
+    analyze_start: float = Form(0.0),
+    analyze_duration: float = Form(0.0),
 ):
     """Upload a video and create a new project."""
     # Generate project ID
@@ -38,6 +40,15 @@ async def upload_video(
     if gemini_model not in gemini_service.VIDEO_ANALYSIS_MODELS:
         gemini_model = "gemini-2.5-flash"
 
+    # Validate analyze range against the actual video duration
+    analyze_start = max(0.0, float(analyze_start or 0.0))
+    analyze_duration = max(0.0, float(analyze_duration or 0.0))
+    if analyze_start >= duration:
+        analyze_start = 0.0  # invalid → fall back to analyzing from beginning
+    # Clamp duration so start + duration never exceeds video length
+    if analyze_duration > 0 and analyze_start + analyze_duration > duration:
+        analyze_duration = duration - analyze_start
+
     # Create project
     project = Project(
         id=project_id,
@@ -51,6 +62,8 @@ async def upload_video(
         output_dir=os.path.join(settings.PROJECTS_DIR, project_id),
         gemini_model=gemini_model,
         creator_name=creator_name.strip(),
+        analyze_start=analyze_start,
+        analyze_duration=analyze_duration,
     )
 
     projects[project_id] = project

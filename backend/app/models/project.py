@@ -22,6 +22,8 @@ class Project(BaseModel):
     token_count: int = 0
     transcript: Optional[dict] = None  # Whisper transcript with word-level timestamps
     gemini_model: str = "gemini-2.5-flash"  # which Gemini model to use for analysis
+    analyze_start: float = 0.0  # seconds — start of analysis window (0 = from beginning)
+    analyze_duration: float = 0.0  # seconds — length of window (0 = analyze to end)
 
     def model_post_init(self, __context):
         if self.created_at == 0.0:

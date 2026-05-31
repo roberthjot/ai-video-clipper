@@ -87,6 +87,9 @@ function UploadStep({ onComplete }) {
   const [contentType, setContentType] = useState("drama"); // "drama" | "motivational"
   const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash"); // which API model
   const [creatorName, setCreatorName] = useState(""); // creator name(s) for captions
+  // Analyze a sub-range only (mm:ss format, blank = whole video)
+  const [analyzeStartStr, setAnalyzeStartStr] = useState("");
+  const [analyzeEndStr, setAnalyzeEndStr] = useState("");
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState(""); // upload, analyzing
   const [statusMsg, setStatusMsg] = useState("");
@@ -141,6 +144,18 @@ function UploadStep({ onComplete }) {
       setStatusMsg("Uploading video to server...");
       setPercent(0);
 
+      // Parse mm:ss strings into seconds. Blank = 0 (use full video).
+      const parseTime = (s) => {
+        if (!s || !s.trim()) return 0;
+        const parts = s.trim().split(":").map((p) => parseInt(p, 10) || 0);
+        if (parts.length === 1) return parts[0] * 60;       // "10" → 10 min
+        if (parts.length === 2) return parts[0] * 60 + parts[1]; // "10:30"
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];  // "1:00:00"
+      };
+      const startSec = parseTime(analyzeStartStr);
+      const endSec = parseTime(analyzeEndStr);
+      const analyzeDuration = endSec > startSec ? endSec - startSec : 0;
+
       const uploadRes = await api.uploadVideo(
         file, clipCount, minDuration, customPrompt,
         (pct) => {
@@ -148,7 +163,9 @@ function UploadStep({ onComplete }) {
           setStatusMsg(`Uploading video to server... ${pct}%`);
         },
         geminiModel,
-        creatorName
+        creatorName,
+        startSec,
+        analyzeDuration
       );
 
       setProjectIdRef(uploadRes.project_id);
@@ -470,6 +487,39 @@ function UploadStep({ onComplete }) {
           <p style={{ fontSize: 11, color: "#555", margin: "6px 0 0" }}>
             Gemini incluye el nombre en captions y títulos donde fluya natural.
             Varios nombres separados por coma — intenta identificar quién sale en cada clip.
+          </p>
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+            ✂️ Analizar solo un rango (opcional)
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <input
+              type="text"
+              value={analyzeStartStr}
+              onChange={(e) => setAnalyzeStartStr(e.target.value)}
+              placeholder="Desde (ej. 5:00)"
+              style={{
+                background: "#111", border: "1px solid #333", borderRadius: 8,
+                padding: "10px 12px", color: "#e5e5e5", fontSize: 13,
+                boxSizing: "border-box", fontFamily: "monospace",
+              }}
+            />
+            <input
+              type="text"
+              value={analyzeEndStr}
+              onChange={(e) => setAnalyzeEndStr(e.target.value)}
+              placeholder="Hasta (ej. 15:00)"
+              style={{
+                background: "#111", border: "1px solid #333", borderRadius: 8,
+                padding: "10px 12px", color: "#e5e5e5", fontSize: 13,
+                boxSizing: "border-box", fontFamily: "monospace",
+              }}
+            />
+          </div>
+          <p style={{ fontSize: 11, color: "#555", margin: "6px 0 0" }}>
+            Formato mm:ss (ej. 10:30) o solo minutos (ej. 10). Vacío = analizar todo el video.
+            Recomendado: rangos de 10-15 min para mejor precisión de Gemini.
           </p>
         </div>
         <div>
