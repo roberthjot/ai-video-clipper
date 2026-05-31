@@ -143,7 +143,7 @@ def extract_video_chunk(video_path: str, start: float, end: float, output_path: 
             "-loglevel", "error",
             output_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         if result.returncode == 0 and os.path.exists(output_path):
             return output_path
         # Fall through to stream copy if accurate re-encode fails for any reason
@@ -159,7 +159,7 @@ def extract_video_chunk(video_path: str, start: float, end: float, output_path: 
         "-loglevel", "error",
         output_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
     if result.returncode != 0 or not os.path.exists(output_path):
         # Last-resort fallback: re-encode with -ss before -i (still snap, but works on weird containers)
         cmd = [
@@ -172,7 +172,7 @@ def extract_video_chunk(video_path: str, start: float, end: float, output_path: 
             "-loglevel", "error",
             output_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         if result.returncode != 0:
             raise RuntimeError(f"Chunk extraction failed: {result.stderr[:300]}")
     return output_path

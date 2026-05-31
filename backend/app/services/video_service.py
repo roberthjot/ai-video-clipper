@@ -80,7 +80,7 @@ def _qsv_supported() -> bool:
     try:
         result = subprocess.run(
             [FFMPEG_EXE, "-hide_banner", "-encoders"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
         )
         _QSV_AVAILABLE = "h264_qsv" in (result.stdout or "")
         print(f"[FFmpeg] Intel QSV available: {_QSV_AVAILABLE}")
@@ -106,12 +106,12 @@ def run_ffmpeg_with_fallback(cmd_builder, label: str = "FFmpeg") -> subprocess.C
     Tries QSV first; on failure, falls back to libx264 and reruns."""
     if _qsv_supported():
         cmd = cmd_builder(True)
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         if result.returncode == 0:
             return result
         print(f"[{label}] QSV encode failed, falling back to libx264. stderr tail: {result.stderr[-300:]}")
     cmd = cmd_builder(False)
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
 
 # Emoji unicode ranges (covers most common emojis)
 _EMOJI_RE = re.compile(
@@ -432,7 +432,7 @@ def get_video_duration(file_path: str) -> float:
     """Get video duration in seconds using ffmpeg."""
     try:
         cmd = [FFMPEG_EXE, "-i", file_path]
-        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
         for line in result.stderr.split("\n"):
             if "Duration" in line:
                 parts = line.strip().split("Duration:")[1].split(",")[0].strip()
@@ -531,7 +531,7 @@ def generate_instagram_preview_clip(
     ])
 
     print(f"[Instagram Preview] Generating {clip_duration}s clip")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
 
     if frame_png and os.path.exists(frame_png):
         try:
@@ -612,7 +612,7 @@ def generate_instagram_preview_frame(
         raw_frame_path,
     ]
 
-    result = subprocess.run(extract_cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(extract_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
     if result.returncode != 0 or not os.path.exists(raw_frame_path):
         if os.path.exists(frame_png):
             try: os.remove(frame_png)
@@ -824,7 +824,7 @@ def generate_preview_frame(
 
     print(f"[FFmpeg CMD] {' '.join(cmd)}")
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
     except subprocess.CalledProcessError as e:
         print(f"[FFmpeg ERROR] returncode={e.returncode}")
         print(f"[FFmpeg STDERR] {e.stderr}")
@@ -1032,10 +1032,10 @@ def generate_preview_clip(
     cmd_cpu = cmd + cpu_codec + base_args
 
     print(f"[Preview] Generating {clip_duration}s clip with {len(lines) if caption_text else 0} text lines, split={use_split}, qsv={_qsv_supported()}")
-    result = subprocess.run(cmd_qsv, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(cmd_qsv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     if result.returncode != 0 and _qsv_supported():
         print(f"[Preview] QSV failed, retrying with libx264. stderr: {result.stderr[-200:]}")
-        result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd_cpu, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
 
     if rounded_box_path and os.path.exists(rounded_box_path):
         try:

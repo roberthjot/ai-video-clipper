@@ -111,7 +111,7 @@ def crop_video_pct(video_path: str, output_path: str,
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-c:a", "copy", "-y", output_path,
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         raise RuntimeError(f"Crop failed: {r.stderr[-500:]}")
     return output_path
@@ -381,7 +381,7 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
         "-y", output_path,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     for p in (bg_png, corner_png):
         try:
             if p:

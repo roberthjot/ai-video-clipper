@@ -231,10 +231,10 @@ def export_clip_with_style(
 
     try:
         print(f"[Export] Clip {clip.id}: Exporting... split={use_split}, qsv={video_service._qsv_supported()}")
-        result = subprocess.run(cmd_qsv, check=False, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd_qsv, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         if result.returncode != 0 and video_service._qsv_supported():
             print(f"[Export] Clip {clip.id}: QSV failed, retrying with libx264. stderr: {result.stderr[-200:]}")
-            result = subprocess.run(cmd_cpu, check=True, capture_output=True, text=True, timeout=600)
+            result = subprocess.run(cmd_cpu, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         elif result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd_cpu, output=result.stdout, stderr=result.stderr)
         print(f"[Export] Clip {clip.id}: Success!")
@@ -439,7 +439,7 @@ def export_instagram_clip(
 
     try:
         print(f"[Instagram Export] Clip {clip.id}: Exporting (ig_fill_mode={ig_fill_mode}, ig_top_padding={ig_top_padding})...")
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
+        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         print(f"[Instagram Export] Clip {clip.id}: Done!")
     except subprocess.CalledProcessError as e:
         print(f"[Instagram Export] Clip {clip.id} FAILED: {e.stderr[:500] if e.stderr else 'no stderr'}")
