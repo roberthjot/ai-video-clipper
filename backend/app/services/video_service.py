@@ -685,31 +685,31 @@ def generate_preview_frame(
     filter_parts = []
     input_index = 1  # [0] = video
 
-    # Black bg via `pad` (single chain, no source-timing issues).
-    # Blur bg via the original [bg]+[fg]+overlay pattern.
-    if use_split:
+    # Build the background chain. Both blur and black reuse the same scale+crop
+    # base (so timing/dimensions are identical to the foreground stream) and
+    # then either blur it or zero all color channels to make pure black.
+    def _bg(target_height: int) -> str:
+        base = f"[0:v]scale={W}:{target_height}:force_original_aspect_ratio=increase,crop={W}:{target_height}"
         if background_style == "black":
-            filter_parts.append(
-                f"[0:v]{fg_filter},pad={W}:{video_h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[video_part]"
-            )
-        else:
-            filter_parts.append(f"[0:v]scale={W}:{video_h}:force_original_aspect_ratio=increase,crop={W}:{video_h},boxblur=12:2[bg]")
-            filter_parts.append(f"[0:v]{fg_filter}[fg]")
-            filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part]")
+            # Zero RGB channels — produces a solid black frame with the same
+            # timing as the source video. Avoids both blur cost AND the
+            # color-source timing issues we hit before.
+            return base + ",colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0"
+        return base + ",boxblur=12:2"
+
+    if use_split:
+        filter_parts.append(f"{_bg(video_h)}[bg]")
+        filter_parts.append(f"[0:v]{fg_filter}[fg]")
+        filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part]")
         # Image portion: scale to fill, crop to exact size, match pixel format
         filter_parts.append(f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part]")
         # Stack vertically
         filter_parts.append("[video_part][img_part]vstack=inputs=2[v]")
         input_index = 2  # [0]=video, [1]=split image
     else:
-        if background_style == "black":
-            filter_parts.append(
-                f"[0:v]{fg_filter},pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[v]"
-            )
-        else:
-            filter_parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg]")
-            filter_parts.append(f"[0:v]{fg_filter}[fg]")
-            filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
+        filter_parts.append(f"{_bg(H)}[bg]")
+        filter_parts.append(f"[0:v]{fg_filter}[fg]")
+        filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
 
     last = "v"
     rounded_box_path = None
@@ -855,27 +855,23 @@ def generate_preview_clip(
     # Build filter
     input_index = 1
 
-    if use_split:
+    def _bg(target_height: int) -> str:
+        base = f"[0:v]scale={W}:{target_height}:force_original_aspect_ratio=increase,crop={W}:{target_height}"
         if background_style == "black":
-            filter_complex = (
-                f"[0:v]{fg_filter},pad={W}:{video_h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[video_part];"
-                f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
-                f"[video_part][img_part]vstack=inputs=2[v]"
-            )
-        else:
-            filter_complex = (
-                f"[0:v]scale={W}:{video_h}:force_original_aspect_ratio=increase,crop={W}:{video_h},boxblur=12:2[bg];"
-                f"[0:v]{fg_filter}[fg];"
-                f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part];"
-                f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
-                f"[video_part][img_part]vstack=inputs=2[v]"
-            )
+            return base + ",colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0"
+        return base + ",boxblur=12:2"
+
+    if use_split:
+        filter_complex = (
+            f"{_bg(video_h)}[bg];"
+            f"[0:v]{fg_filter}[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part];"
+            f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
+            f"[video_part][img_part]vstack=inputs=2[v]"
+        )
         input_index = 2
     else:
-        if background_style == "black":
-            filter_complex = f"[0:v]{fg_filter},pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[v]"
-        else:
-            filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
 
     last_label = "v"
     rounded_box_path = None
