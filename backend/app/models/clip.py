@@ -69,6 +69,9 @@ class StyleConfig(BaseModel):
     # Background style behind the video: "blur" (current default) or "black" (solid)
     background_style: str = "blur"
 
+    # Master toggle: skip caption + burned-in subtitles entirely (clean video)
+    no_text: bool = False
+
     # Anti-detect / uniquify (export only, not applied to preview)
     strip_metadata: bool = False
     flip_horizontal: bool = False

@@ -1123,6 +1123,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     subtitle_size_scale: 1.0,
     visual_filter: "none",
     background_style: "blur",
+    no_text: false,
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [exportMode, setExportMode] = useState("tiktok"); // "tiktok" | "instagram"
@@ -1242,7 +1243,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.background_style]);
+  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.background_style, style.no_text]);
 
   // Poll progress
   useEffect(() => {
@@ -1628,6 +1629,23 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* No text master toggle */}
+          <div className="control-section">
+            <h3>🚫 Sin textos</h3>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -4, marginBottom: 8 }}>
+              Oculta caption y subtítulos. Útil para video limpio sin nada de texto.
+            </p>
+            <button
+              className={`btn ${style.no_text ? "btn-primary" : "btn-secondary"}`}
+              onClick={() => setStyle((s) => ({ ...s, no_text: !s.no_text }))}
+              style={{ width: "100%", padding: "10px 14px", textAlign: "center" }}
+            >
+              {style.no_text
+                ? "✅ Sin textos activado — video limpio"
+                : "📝 Mostrar caption y subtítulos (default)"}
+            </button>
           </div>
 
           {/* Caption Style */}

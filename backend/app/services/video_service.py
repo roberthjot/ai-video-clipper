@@ -652,6 +652,7 @@ def generate_preview_frame(
     boost_contrast: bool = False,
     caption_style: str = "box",
     background_style: str = "blur",
+    no_text: bool = False,
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
@@ -715,7 +716,7 @@ def generate_preview_frame(
     rounded_box_path = None
 
     # Caption overlay — Y position relative to video portion in split mode
-    if caption_text:
+    if caption_text and not no_text:
         lines = split_text_into_lines(caption_text, max_chars=30)
         pad_x, pad_y = 12, 14
         line_gap = 5
@@ -822,6 +823,7 @@ def generate_preview_clip(
     visual_filter: str = "none",
     subtitle_size_scale: float = 1.0,
     background_style: str = "blur",
+    no_text: bool = False,
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -877,7 +879,7 @@ def generate_preview_clip(
     rounded_box_path = None
 
     # Caption overlay — Y relative to video portion in split mode
-    if caption_text:
+    if caption_text and not no_text:
         lines = split_text_into_lines(caption_text, max_chars=30)
         pad_x, pad_y = 12, 14
         line_gap = 5
@@ -915,7 +917,7 @@ def generate_preview_clip(
     # Burn-in subtitles in preview (so user can see exactly what will be exported)
     ass_subtitle_path = None
     ass_subtitle_path_extra = None  # cwd copy for FFmpeg-friendly relative path
-    if subtitle_style and subtitle_style != 'none' and transcript:
+    if subtitle_style and subtitle_style != 'none' and transcript and not no_text:
         try:
             from . import subtitle_service
             temp_dir = os.path.join(os.path.dirname(__file__), "temp")

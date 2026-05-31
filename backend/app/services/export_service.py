@@ -92,8 +92,11 @@ def export_clip_with_style(
     current_label = "v"
     rounded_box_path = None
 
+    # Master toggle: skip ALL on-screen text when no_text is set
+    no_text = getattr(style, 'no_text', False)
+
     # Caption overlay — Y relative to video portion in split mode
-    if clip.viral_caption:
+    if clip.viral_caption and not no_text:
         lines = video_service.split_text_into_lines(clip.viral_caption, max_chars=30)
         pad_x, pad_y = 12, 14
         line_gap = 5
@@ -146,7 +149,7 @@ def export_clip_with_style(
     ass_subtitle_path = None
     ass_subtitle_path_extra = None  # cwd copy for relative-path workaround
     sub_style = getattr(style, 'subtitle_style', 'none')
-    if sub_style and sub_style != 'none' and transcript:
+    if sub_style and sub_style != 'none' and transcript and not no_text:
         try:
             # The export uses fast-seek (clip.start - 4s) + output trim.
             # Subtitles must be shifted by `buffer` so they appear at the
