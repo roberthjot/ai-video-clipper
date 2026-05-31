@@ -1119,6 +1119,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     split_screen_enabled: false,
     split_ratio: 0.5,
     caption_style: "box",
+    caption_font: "calibri",
     subtitle_style: "none",
     subtitle_size_scale: 1.0,
     visual_filter: "none",
@@ -1243,7 +1244,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.background_style, style.no_text]);
+  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.background_style, style.no_text, style.caption_font]);
 
   // Poll progress
   useEffect(() => {
@@ -1666,6 +1667,41 @@ function EditorStep({ projectId, clips, onExportDone }) {
                   <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{desc}</div>
                 </button>
               ))}
+            </div>
+
+            {/* Font picker for caption */}
+            <div style={{ marginTop: 14 }}>
+              <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+                Fuente del caption
+              </label>
+              <select
+                value={style.caption_font}
+                onChange={(e) => setStyle((s) => ({ ...s, caption_font: e.target.value }))}
+                style={{
+                  width: "100%", background: "#111", border: "1px solid #333",
+                  borderRadius: 8, padding: "9px 12px", color: "#e5e5e5",
+                  fontSize: 13, cursor: "pointer",
+                }}
+              >
+                <optgroup label="Windows (siempre disponibles)">
+                  <option value="calibri">Calibri Bold (default)</option>
+                  <option value="arial_black">Arial Black — gruesa, alta impacto</option>
+                  <option value="impact">Impact — meme classic, condensada</option>
+                  <option value="verdana">Verdana Bold — ancha y legible</option>
+                  <option value="segoe_ui">Segoe UI Black — moderna Windows</option>
+                  <option value="trebuchet">Trebuchet MS Bold — casual con curvas</option>
+                </optgroup>
+                <optgroup label="Google Fonts (descargar — ver fonts/README.md)">
+                  <option value="montserrat">Montserrat Black — la más viral, profesional</option>
+                  <option value="poppins">Poppins Bold — redondeada, motivacional</option>
+                  <option value="bebas">Bebas Neue — alta condensada, headlines</option>
+                  <option value="anton">Anton — bold condensada moderna</option>
+                  <option value="oswald">Oswald Bold — condensada elegante</option>
+                </optgroup>
+              </select>
+              <p style={{ fontSize: 10, color: "#555", marginTop: 6, marginBottom: 0 }}>
+                Si eliges una de Google Fonts y aún no la descargaste, se usará Calibri como fallback (no rompe nada).
+              </p>
             </div>
           </div>
 

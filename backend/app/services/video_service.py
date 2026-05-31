@@ -6,6 +6,43 @@ from PIL import Image, ImageDraw
 
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
+# ─── Caption fonts ──────────────────────────────────────────────────────────
+# Map of font keys (used by StyleConfig.caption_font) to file paths.
+# Windows fonts are always available. Google fonts must be downloaded into
+# backend/app/fonts/ (see fonts/README.md for direct links).
+_FONTS_DIR = os.path.join(os.path.dirname(__file__), "..", "fonts")
+
+FONT_MAP = {
+    # Windows-installed (no download needed)
+    "calibri":     "C:/Windows/Fonts/calibrib.ttf",
+    "arial_black": "C:/Windows/Fonts/ariblk.ttf",
+    "impact":      "C:/Windows/Fonts/impact.ttf",
+    "verdana":     "C:/Windows/Fonts/verdanab.ttf",
+    "segoe_ui":    "C:/Windows/Fonts/seguibl.ttf",
+    "trebuchet":   "C:/Windows/Fonts/trebucbd.ttf",
+    # Google Fonts — download into backend/app/fonts/ (see README)
+    "montserrat":  os.path.join(_FONTS_DIR, "Montserrat-Black.ttf"),
+    "poppins":     os.path.join(_FONTS_DIR, "Poppins-Bold.ttf"),
+    "bebas":       os.path.join(_FONTS_DIR, "BebasNeue-Regular.ttf"),
+    "anton":       os.path.join(_FONTS_DIR, "Anton-Regular.ttf"),
+    "oswald":      os.path.join(_FONTS_DIR, "Oswald-Bold.ttf"),
+}
+
+
+def get_font_path(font_key: str) -> str:
+    """Resolve a font key to an actual TTF path. Falls back to Calibri Bold
+    if the requested file doesn't exist on disk (e.g. user didn't download
+    the Google Font yet)."""
+    path = FONT_MAP.get(font_key or "calibri", FONT_MAP["calibri"])
+    if not os.path.exists(path):
+        # Fallback to Calibri so render never crashes
+        fallback = FONT_MAP["calibri"]
+        if os.path.exists(fallback):
+            print(f"[Font] '{font_key}' not found at {path} — falling back to Calibri")
+            return fallback
+    return path
+
+
 # Cache QSV availability check across the process lifetime
 _QSV_AVAILABLE = None
 
@@ -101,7 +138,8 @@ def _measure_text_with_emoji(text: str, font, font_size: int) -> int:
 
 def create_caption_overlay(lines: list, font_size: int = 72,
                             pad_x: int = 18, pad_y: int = 10,
-                            line_gap: int = 0) -> tuple:
+                            line_gap: int = 0,
+                            font_key: str = "calibri") -> tuple:
     """TikTok-style caption: each line is a fully-rounded box (all 4 corners).
     Boxes drawn bottom-to-top, each overlapping the one below by `radius` px
     so junctions are seamless. Where widths differ, the wider box's rounded
@@ -112,7 +150,7 @@ def create_caption_overlay(lines: list, font_size: int = 72,
 
     W_vid = 1080
     fill = (255, 255, 255, 242)
-    font_path = 'C:/Windows/Fonts/calibrib.ttf'
+    font_path = get_font_path(font_key)
     try:
         font = _IF.truetype(font_path, font_size)
     except Exception:
@@ -189,7 +227,8 @@ def create_caption_overlay(lines: list, font_size: int = 72,
 def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
                                    pad_x: int = 20, pad_y: int = 10,
                                    line_gap: int = 8,
-                                   stroke_width: int = 4) -> tuple:
+                                   stroke_width: int = 4,
+                                   font_key: str = "calibri") -> tuple:
     """Render TikTok-style text: white text with thick black outline, transparent background.
     Emojis (if present) are rendered AFTER the outline pass using Pilmoji so they
     keep their natural color instead of being smeared by the black stroke.
@@ -198,7 +237,7 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
     import uuid as _uuid
 
     W_vid = 1080
-    font_path = 'C:/Windows/Fonts/calibrib.ttf'
+    font_path = get_font_path(font_key)
     try:
         font = _IF.truetype(font_path, font_size)
     except Exception:
@@ -653,6 +692,7 @@ def generate_preview_frame(
     caption_style: str = "box",
     background_style: str = "blur",
     no_text: bool = False,
+    caption_font: str = "calibri",
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
@@ -724,11 +764,12 @@ def generate_preview_frame(
 
         if caption_style == 'tiktok':
             rounded_box_path, box_w, box_h = create_tiktok_caption_overlay(
-                lines, font_size=font_size
+                lines, font_size=font_size, font_key=caption_font
             )
         else:
             rounded_box_path, box_w, box_h = create_caption_overlay(
-                lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
+                lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y,
+                line_gap=line_gap, font_key=caption_font,
             )
         box_x = max(0, min(W - box_w, int(text_x * W) - box_w // 2))
         box_y = base_y - pad_y
@@ -824,6 +865,7 @@ def generate_preview_clip(
     subtitle_size_scale: float = 1.0,
     background_style: str = "blur",
     no_text: bool = False,
+    caption_font: str = "calibri",
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -887,11 +929,12 @@ def generate_preview_clip(
 
         if caption_style == 'tiktok':
             rounded_box_path, box_w, box_h = create_tiktok_caption_overlay(
-                lines, font_size=font_size
+                lines, font_size=font_size, font_key=caption_font
             )
         else:
             rounded_box_path, box_w, box_h = create_caption_overlay(
-                lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y, line_gap=line_gap
+                lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y,
+                line_gap=line_gap, font_key=caption_font,
             )
         box_x = max(0, min(W - box_w, int(text_x * W) - box_w // 2))
         box_y = base_y - pad_y

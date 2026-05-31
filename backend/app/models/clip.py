@@ -72,6 +72,9 @@ class StyleConfig(BaseModel):
     # Master toggle: skip caption + burned-in subtitles entirely (clean video)
     no_text: bool = False
 
+    # Caption font choice (key in video_service.FONT_MAP). Default keeps Calibri.
+    caption_font: str = "calibri"
+
     # Anti-detect / uniquify (export only, not applied to preview)
     strip_metadata: bool = False
     flip_horizontal: bool = False
