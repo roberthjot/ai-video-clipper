@@ -114,12 +114,41 @@ def build_chunk_ranges(video_duration: float, max_chunk_seconds: float = CHUNK_D
     return ranges
 
 
-def extract_video_chunk(video_path: str, start: float, end: float, output_path: str) -> str:
-    """Extract [start..end] from video_path into output_path using FFmpeg stream copy
-    (no re-encoding — fast, no quality loss)."""
+def extract_video_chunk(video_path: str, start: float, end: float, output_path: str,
+                         accurate: bool = True) -> str:
+    """Extract [start..end] from video_path into output_path.
+
+    When `accurate=True` (default for analyze-range / Whisper transcription),
+    uses output-side seek + re-encoding so the extracted file's first frame
+    is EXACTLY at `start` — no keyframe-snap drift. Slower (~30s for 10 min
+    of 1080p) but Whisper word timestamps line up perfectly with the audio
+    you hear in preview/export.
+
+    When `accurate=False`, uses fast stream copy (instant but snaps to nearest
+    keyframe — drift of 0-3 seconds is possible).
+    """
     import imageio_ffmpeg
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     duration = end - start
+
+    if accurate:
+        # Output-side seek = decoded-frame-accurate cut. Re-encode is required.
+        cmd = [
+            ffmpeg, "-y",
+            "-i", video_path,
+            "-ss", str(start),
+            "-t", str(duration),
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k",
+            "-loglevel", "error",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode == 0 and os.path.exists(output_path):
+            return output_path
+        # Fall through to stream copy if accurate re-encode fails for any reason
+
+    # Fast path: stream copy (keyframe snap, no decoding)
     cmd = [
         ffmpeg, "-y",
         "-ss", str(start),
@@ -132,7 +161,7 @@ def extract_video_chunk(video_path: str, start: float, end: float, output_path: 
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     if result.returncode != 0 or not os.path.exists(output_path):
-        # Stream copy can fail on some containers — fall back to re-encoding
+        # Last-resort fallback: re-encode with -ss before -i (still snap, but works on weird containers)
         cmd = [
             ffmpeg, "-y",
             "-ss", str(start),

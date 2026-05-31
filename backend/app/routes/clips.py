@@ -54,11 +54,16 @@ async def analyze_video(req: AnalyzeRequest):
             temp_dir = os.path.join(os.path.dirname(__file__), "..", "services", "temp")
             os.makedirs(temp_dir, exist_ok=True)
             extracted_range_path = os.path.join(temp_dir, f"analyze_range_{project.id}_{uuid.uuid4().hex[:8]}.mp4")
-            print(f"[Analyze] Extracting range {analyze_start:.0f}s — {range_end:.0f}s "
-                  f"({(range_end - analyze_start)/60:.1f} min) before analysis")
+            print(f"[Analyze] Extracting accurate range {analyze_start:.0f}s — {range_end:.0f}s "
+                  f"({(range_end - analyze_start)/60:.1f} min) — this re-encodes (~30s) for "
+                  f"frame-accurate timestamps so subtitles align with audio.")
+            # accurate=True (default) — re-encodes so Whisper word timestamps
+            # match the audio exactly. Stream-copy keyframe snap would drift
+            # subtitles by 0-10 seconds depending on the source's keyframe
+            # interval, which is what 'subtitles don't match' bug reports trace to.
             await asyncio.to_thread(
                 gemini_service.extract_video_chunk,
-                project.video_path, analyze_start, range_end, extracted_range_path,
+                project.video_path, analyze_start, range_end, extracted_range_path, True,
             )
             video_for_analysis = extracted_range_path
             effective_duration = range_end - analyze_start
@@ -217,9 +222,11 @@ async def _analyze_in_chunks(project, duration: float, transcript: dict, video_p
         chunk_file = None
         try:
             print(f"[Chunked] Extracting chunk {idx+1}/{n_chunks}: {chunk_start:.0f}s-{chunk_end:.0f}s")
+            # accurate=True so chunk timestamps line up with the audio
+            # (no keyframe-snap drift across chunk boundaries).
             await asyncio.to_thread(
                 gemini_service.extract_video_chunk,
-                source_video, chunk_start, chunk_end, chunk_path,
+                source_video, chunk_start, chunk_end, chunk_path, True,
             )
             chunk_file = await asyncio.to_thread(gemini_service.upload_video, chunk_path)
             chunk_file = await asyncio.to_thread(gemini_service.wait_for_processing, chunk_file)
