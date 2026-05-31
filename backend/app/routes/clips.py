@@ -341,6 +341,7 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             flip_horizontal=style.flip_horizontal,
             boost_contrast=style.boost_contrast,
             caption_style=getattr(style, 'caption_style', 'box'),
+            background_style=getattr(style, 'background_style', 'blur'),
         )
     except Exception as e:
         import traceback

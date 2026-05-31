@@ -651,6 +651,7 @@ def generate_preview_frame(
     flip_horizontal: bool = False,
     boost_contrast: bool = False,
     caption_style: str = "box",
+    background_style: str = "blur",
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
@@ -684,9 +685,13 @@ def generate_preview_frame(
     filter_parts = []
     input_index = 1  # [0] = video
 
+    def _bg_chain(target_height: int) -> str:
+        if background_style == "black":
+            return f"color=c=black:s={W}x{target_height}"
+        return f"[0:v]scale={W}:{target_height}:force_original_aspect_ratio=increase,crop={W}:{target_height},boxblur=12:2"
+
     if use_split:
-        # Video portion with blur bg sized to video_h
-        filter_parts.append(f"[0:v]scale={W}:{video_h}:force_original_aspect_ratio=increase,crop={W}:{video_h},boxblur=12:2[bg]")
+        filter_parts.append(f"{_bg_chain(video_h)}[bg]")
         filter_parts.append(f"[0:v]{fg_filter}[fg]")
         filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part]")
         # Image portion: scale to fill, crop to exact size, match pixel format
@@ -695,7 +700,7 @@ def generate_preview_frame(
         filter_parts.append("[video_part][img_part]vstack=inputs=2[v]")
         input_index = 2  # [0]=video, [1]=split image
     else:
-        filter_parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=12:2[bg]")
+        filter_parts.append(f"{_bg_chain(H)}[bg]")
         filter_parts.append(f"[0:v]{fg_filter}[fg]")
         filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
 
