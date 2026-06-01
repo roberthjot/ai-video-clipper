@@ -574,15 +574,11 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [videoUrl, setVideoUrl] = useState(api.getVideoPreviewUrl(projectId, clip.id));
-
-  // Force a fresh preview URL (with new cache buster) when modal opens.
-  // First load may take ~10-15s while FFmpeg generates the composed preview.
-  useEffect(() => {
-    setVideoUrl(api.getVideoPreviewUrl(projectId, clip.id));
-    setLoadingVideo(true);
-    setLoadError(false);
-  }, [clip.id, projectId]);
+  // Lazy useState — runs ONCE on mount so the cache buster is set a single
+  // time. Setting it twice (via useEffect) caused the <video> to abort the
+  // first fetch when src changed, which fires `error` even though the second
+  // request was succeeding.
+  const [videoUrl, setVideoUrl] = useState(() => api.getVideoPreviewUrl(projectId, clip.id));
 
   // Loop the preview clip from 0 to its end. Note: Play Clip is 10s of the
   // ORIGINAL clip; trim sliders below adjust the actual clip range that gets
