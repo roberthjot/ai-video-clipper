@@ -560,6 +560,226 @@ function UploadStep({ onComplete }) {
 }
 
 // ================================================
+// Clip Editor Modal (zoom / pan / trim with live preview)
+// ================================================
+function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
+  const videoRef = useRef(null);
+  const [zoom, setZoom] = useState(clip.edit_zoom ?? 1.0);
+  const [panX, setPanX] = useState(clip.edit_pan_x ?? 0);
+  const [panY, setPanY] = useState(clip.edit_pan_y ?? 0);
+  const [startTime, setStartTime] = useState(clip.start_time);
+  const [endTime, setEndTime] = useState(clip.end_time);
+  const [currentTime, setCurrentTime] = useState(clip.start_time);
+  const [playing, setPlaying] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const videoUrl = api.getRawVideoUrl(projectId);
+
+  // Seek video to clip start when modal opens
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = startTime;
+    }
+  }, []);
+
+  // Loop within the trim range — when video reaches endTime, seek back to startTime
+  const handleTimeUpdate = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    setCurrentTime(v.currentTime);
+    if (v.currentTime >= endTime) {
+      v.currentTime = startTime;
+      if (!playing) v.pause();
+    }
+    if (v.currentTime < startTime) {
+      v.currentTime = startTime;
+    }
+  };
+
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) { v.play(); setPlaying(true); }
+    else { v.pause(); setPlaying(false); }
+  };
+
+  const seekTo = (t) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(startTime, Math.min(endTime, t));
+    setCurrentTime(v.currentTime);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await api.editClipTransform(projectId, clip.id, {
+        edit_zoom: zoom,
+        edit_pan_x: panX,
+        edit_pan_y: panY,
+        start_time: startTime,
+        end_time: endTime,
+      });
+      onSaved(res.clip);
+    } catch (e) {
+      alert(`Error guardando: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = () => {
+    setZoom(1.0); setPanX(0); setPanY(0);
+    setStartTime(clip.start_time); setEndTime(clip.end_time);
+    if (videoRef.current) videoRef.current.currentTime = clip.start_time;
+  };
+
+  const formatTime = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    const cs = Math.floor((sec % 1) * 10);
+    return `${m}:${s.toString().padStart(2, "0")}.${cs}`;
+  };
+
+  const clipDur = endTime - startTime;
+  const progress = clipDur > 0 ? ((currentTime - startTime) / clipDur) * 100 : 0;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}
+           style={{ maxWidth: 1100, width: "92vw" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>🎬 Editor · Clip {clip.id}: {clip.description}</h3>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#999", fontSize: 24, cursor: "pointer" }}>✕</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
+          {/* Preview — actual video playing with CSS transform overlaid */}
+          <div>
+            <div style={{
+              background: "#000", borderRadius: 12, overflow: "hidden",
+              aspectRatio: "9 / 16", maxHeight: 540, margin: "0 auto",
+              position: "relative",
+            }}>
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = startTime; }}
+                style={{
+                  width: "100%", height: "100%", objectFit: "cover",
+                  transform: `scale(${zoom}) translate(${panX}%, ${panY}%)`,
+                  transformOrigin: "center center",
+                  transition: "transform 0.05s linear",
+                }}
+              />
+            </div>
+
+            {/* Timeline + scrub */}
+            <div style={{ marginTop: 14, padding: "0 8px" }}>
+              <div style={{
+                position: "relative", height: 32, background: "#1a1a1a", borderRadius: 8,
+                cursor: "pointer", overflow: "hidden",
+              }}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const pct = (e.clientX - rect.left) / rect.width;
+                  seekTo(startTime + pct * clipDur);
+                }}
+              >
+                {/* Trim range (highlighted) */}
+                <div style={{
+                  position: "absolute", left: 0, top: 0, bottom: 0, right: 0,
+                  background: "linear-gradient(90deg, rgba(99,102,241,0.15), rgba(99,102,241,0.3))",
+                }} />
+                {/* Playhead */}
+                <div style={{
+                  position: "absolute", left: `${progress}%`, top: 0, bottom: 0,
+                  width: 3, background: "#fff", boxShadow: "0 0 8px rgba(255,255,255,0.6)",
+                  pointerEvents: "none",
+                }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginTop: 4, fontFamily: "monospace" }}>
+                <span>{formatTime(startTime)}</span>
+                <span style={{ color: "var(--accent)", fontWeight: 700 }}>{formatTime(currentTime)}</span>
+                <span>{formatTime(endTime)}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10 }}>
+                <button className="btn btn-secondary" onClick={() => seekTo(startTime)} style={{ padding: "6px 12px" }}>⏮</button>
+                <button className="btn btn-primary" onClick={togglePlay} style={{ padding: "6px 24px", minWidth: 80 }}>
+                  {playing ? "⏸ Pausa" : "▶ Play"}
+                </button>
+                <button className="btn btn-secondary" onClick={() => seekTo(endTime)} style={{ padding: "6px 12px" }}>⏭</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls panel */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "14px 16px" }}>
+              <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>Transform</h4>
+
+              <label style={{ fontSize: 12, color: "#aaa" }}>Zoom: <b style={{ color: "var(--accent)" }}>{zoom.toFixed(2)}x</b></label>
+              <input type="range" min={1.0} max={3.0} step={0.05} value={zoom}
+                onChange={(e) => setZoom(parseFloat(e.target.value))}
+                style={{ width: "100%", marginBottom: 12 }} />
+
+              <label style={{ fontSize: 12, color: "#aaa" }}>Posición X: <b style={{ color: "var(--accent)" }}>{panX.toFixed(0)}%</b></label>
+              <input type="range" min={-50} max={50} step={1} value={panX}
+                onChange={(e) => setPanX(parseFloat(e.target.value))}
+                style={{ width: "100%", marginBottom: 12 }} />
+
+              <label style={{ fontSize: 12, color: "#aaa" }}>Posición Y: <b style={{ color: "var(--accent)" }}>{panY.toFixed(0)}%</b></label>
+              <input type="range" min={-50} max={50} step={1} value={panY}
+                onChange={(e) => setPanY(parseFloat(e.target.value))}
+                style={{ width: "100%", marginBottom: 8 }} />
+
+              <button className="btn btn-secondary" onClick={handleReset}
+                style={{ width: "100%", padding: "8px 0", fontSize: 12 }}>
+                ↻ Reset todo
+              </button>
+            </div>
+
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "14px 16px" }}>
+              <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>Trim del clip</h4>
+              <label style={{ fontSize: 12, color: "#aaa" }}>Inicio: <b style={{ color: "var(--accent)", fontFamily: "monospace" }}>{formatTime(startTime)}</b></label>
+              <input type="range"
+                min={Math.max(0, clip.start_time - 10)}
+                max={endTime - 1}
+                step={0.1}
+                value={startTime}
+                onChange={(e) => setStartTime(parseFloat(e.target.value))}
+                style={{ width: "100%", marginBottom: 10 }} />
+              <label style={{ fontSize: 12, color: "#aaa" }}>Final: <b style={{ color: "var(--accent)", fontFamily: "monospace" }}>{formatTime(endTime)}</b></label>
+              <input type="range"
+                min={startTime + 1}
+                max={clip.end_time + 10}
+                step={0.1}
+                value={endTime}
+                onChange={(e) => setEndTime(parseFloat(e.target.value))}
+                style={{ width: "100%", marginBottom: 4 }} />
+              <p style={{ fontSize: 11, color: "#666", margin: "6px 0 0", textAlign: "center" }}>
+                Duración: {formatTime(endTime - startTime)}
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-secondary" onClick={onClose} style={{ flex: 1 }}>
+                Cancelar
+              </button>
+              <button className="btn btn-primary" onClick={handleSave} disabled={saving}
+                style={{ flex: 2 }}>
+                {saving ? "⏳ Guardando..." : "💾 Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ================================================
 // STEP 2: Clip Results
 // ================================================
 function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
@@ -589,6 +809,8 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
   const [confidenceFilter, setConfidenceFilter] = useState("all"); // "all" | "match" | "mismatch" | "no_audio"
   // Transcript modal — show the words spoken in a clip
   const [scriptViewClip, setScriptViewClip] = useState(null);
+  // In-app editor modal — zoom / pan / trim
+  const [editorClip, setEditorClip] = useState(null);
   // Drag and drop
   const [draggedId, setDraggedId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
@@ -946,6 +1168,12 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
                   📄 Guión
                 </button>
                 <button
+                  onClick={() => setEditorClip(clip)}
+                  title="Editor: zoom, posición y trim del clip"
+                >
+                  🎬 Editar
+                </button>
+                <button
                   onClick={() => {
                     setEditingClip(clip);
                     setEditText(clip.viral_caption);
@@ -1072,6 +1300,23 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Clip Editor Modal — zoom, pan, trim (live preview via CSS transform) */}
+      {editorClip && (
+        <ClipEditorModal
+          projectId={projectId}
+          clip={editorClip}
+          onClose={() => setEditorClip(null)}
+          onSaved={(updated) => {
+            // Patch the local clips list with the updated values
+            onEdit(updated.id, updated.viral_caption);  // existing handler for caption changes
+            // Replace the full clip object in parent state
+            // (parent only exposes onEdit for caption; we use it here to trigger refresh)
+            Object.assign(editorClip, updated);
+            setEditorClip(null);
+          }}
+        />
       )}
 
       {/* Video Player Modal */}

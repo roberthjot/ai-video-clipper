@@ -88,6 +88,25 @@ export async function checkModelHealth(models) {
 }
 
 
+export async function editClipTransform(projectId, clipId, payload) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/edit`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to save clip edit");
+    }
+    return res.json();
+}
+
+export function getRawVideoUrl(projectId) {
+    // Direct stream of the original uploaded video (used by the in-app editor preview).
+    return `${API_BASE}/clips/${projectId}/raw-video`;
+}
+
+
 export async function editCaption(projectId, clipId, newCaption) {
     const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}`, {
         method: "PUT",

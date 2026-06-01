@@ -17,6 +17,10 @@ class ClipData(BaseModel):
     # Caption validation against Whisper transcript
     transcript_snippet: str = ""           # what Whisper heard in this clip's range
     match_confidence: str = "unverified"   # "match" | "mismatch" | "no_audio" | "unverified"
+    # Per-clip transform (set by the in-app editor modal)
+    edit_zoom: float = 1.0          # 1.0 = no zoom, 2.0 = 2x
+    edit_pan_x: float = 0.0         # -50 to +50 (% of frame width)
+    edit_pan_y: float = 0.0         # -50 to +50 (% of frame height)
 
     def model_post_init(self, __context):
         if self.duration == 0.0:

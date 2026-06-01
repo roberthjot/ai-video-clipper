@@ -64,6 +64,21 @@ def export_clip_with_style(
     else:
         fg_filter = f"scale={W}:-2"
 
+    # Per-clip editor transform: zoom (scale around center) + pan offset.
+    # Applied on top of fg_filter — same CSS-style semantics as the editor modal.
+    _zoom = max(1.0, float(getattr(clip, 'edit_zoom', 1.0) or 1.0))
+    _pan_x = float(getattr(clip, 'edit_pan_x', 0.0) or 0.0)
+    _pan_y = float(getattr(clip, 'edit_pan_y', 0.0) or 0.0)
+    if _zoom != 1.0 or _pan_x != 0.0 or _pan_y != 0.0:
+        # Zoom by scaling 'iw*zoom':'ih*zoom' then crop back to original with
+        # offset = (iw*zoom - iw)/2 - pan, which centers the zoom and shifts
+        # by the pan percentage. Pan values are -50 to +50 (% of frame).
+        # The crop dimensions reference the SCALED video's iw/ih (post-scale).
+        crop_x = f"(iw-iw/{_zoom})/2-(iw/{_zoom})*{_pan_x/100:.4f}"
+        crop_y = f"(ih-ih/{_zoom})/2-(ih/{_zoom})*{_pan_y/100:.4f}"
+        fg_filter = f"{fg_filter},crop=iw/{_zoom}:ih/{_zoom}:{crop_x}:{crop_y}"
+        print(f"[Export] Clip {clip.id}: editor transform zoom={_zoom:.2f} pan=({_pan_x:.0f}%,{_pan_y:.0f}%)")
+
     input_index = 1
 
     # Background reuses the same scale+crop chain as blur but swaps the final

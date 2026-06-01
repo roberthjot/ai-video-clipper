@@ -28,6 +28,15 @@ class ModelHealthRequest(BaseModel):
     models: list[str] | None = None
 
 
+class EditTransformRequest(BaseModel):
+    """Per-clip edit set by the editor modal (zoom + pan + trim)."""
+    edit_zoom: float = 1.0
+    edit_pan_x: float = 0.0
+    edit_pan_y: float = 0.0
+    start_time: float | None = None  # optional trim — None = leave unchanged
+    end_time: float | None = None
+
+
 @router.post("/analyze")
 async def analyze_video(req: AnalyzeRequest):
     """Start AI analysis on a project's video."""
@@ -342,6 +351,40 @@ async def check_model_health(req: ModelHealthRequest):
         result = await asyncio.to_thread(gemini_service.check_model_health, model)
         results.append(result)
     return {"models": results}
+
+
+@router.get("/{project_id}/raw-video")
+async def stream_raw_video(project_id: str):
+    """Stream the raw uploaded video (used by the in-app editor modal so the
+    <video> element can play arbitrary timestamps for live preview)."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    path = projects[project_id].video_path
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Source video missing on disk")
+    return FileResponse(path, media_type="video/mp4")
+
+
+@router.put("/{project_id}/{clip_id}/edit")
+async def edit_clip_transform(project_id: str, clip_id: int, req: EditTransformRequest):
+    """Save the in-app editor's zoom/pan/trim values for a specific clip."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+    for clip in project.clips:
+        if clip.id == clip_id:
+            clip.edit_zoom = max(1.0, min(3.0, float(req.edit_zoom)))
+            clip.edit_pan_x = max(-50.0, min(50.0, float(req.edit_pan_x)))
+            clip.edit_pan_y = max(-50.0, min(50.0, float(req.edit_pan_y)))
+            if req.start_time is not None:
+                clip.start_time = max(0.0, float(req.start_time))
+            if req.end_time is not None:
+                clip.end_time = max(clip.start_time + 1.0, float(req.end_time))
+            clip.duration = clip.end_time - clip.start_time
+            return {"status": "updated", "clip": clip.model_dump()}
+    raise HTTPException(status_code=404, detail="Clip not found")
 
 
 @router.put("/{project_id}/{clip_id}")
