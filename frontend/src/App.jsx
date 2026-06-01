@@ -572,11 +572,17 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadingVideo, setLoadingVideo] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [videoUrl, setVideoUrl] = useState(api.getVideoPreviewUrl(projectId, clip.id));
 
-  // Use the COMPOSED Play Clip preview (with blur/black bg, caption, subtitles,
-  // filter, watermark all baked in). Editor edits ON TOP of the composition,
-  // not on the raw video. getVideoPreviewUrl already includes a cache buster.
-  const videoUrl = api.getVideoPreviewUrl(projectId, clip.id);
+  // Force a fresh preview URL (with new cache buster) when modal opens.
+  // First load may take ~10-15s while FFmpeg generates the composed preview.
+  useEffect(() => {
+    setVideoUrl(api.getVideoPreviewUrl(projectId, clip.id));
+    setLoadingVideo(true);
+    setLoadError(false);
+  }, [clip.id, projectId]);
 
   // Loop the preview clip from 0 to its end. Note: Play Clip is 10s of the
   // ORIGINAL clip; trim sliders below adjust the actual clip range that gets
@@ -657,14 +663,54 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
                 ref={videoRef}
                 src={videoUrl}
                 onTimeUpdate={handleTimeUpdate}
+                onLoadedData={() => { setLoadingVideo(false); setLoadError(false); }}
+                onError={() => { setLoadingVideo(false); setLoadError(true); }}
                 loop
                 style={{
                   width: "100%", height: "100%", objectFit: "cover",
                   transform: `scale(${zoom}) translate(${panX}%, ${panY}%)`,
                   transformOrigin: "center center",
                   transition: "transform 0.05s linear",
+                  display: loadError ? "none" : "block",
                 }}
               />
+              {loadingVideo && !loadError && (
+                <div style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  background: "rgba(0,0,0,0.85)", color: "#fff", gap: 14,
+                }}>
+                  <div className="loading-spinner" style={{ width: 36, height: 36 }} />
+                  <p style={{ margin: 0, fontSize: 13, textAlign: "center", padding: "0 20px" }}>
+                    Generando preview con todos los efectos...<br/>
+                    <span style={{ fontSize: 11, color: "#aaa" }}>Tarda ~10-15s la primera vez</span>
+                  </p>
+                </div>
+              )}
+              {loadError && (
+                <div style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  background: "#1a1a1a", color: "#ef4444", gap: 10, textAlign: "center", padding: 20,
+                }}>
+                  <div style={{ fontSize: 28 }}>❌</div>
+                  <p style={{ margin: 0, fontSize: 13 }}>
+                    No se pudo cargar el preview.<br/>
+                    <span style={{ fontSize: 11, color: "#999" }}>Cierra y haz click en "Play Clip" primero para generarlo.</span>
+                  </p>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setVideoUrl(api.getVideoPreviewUrl(projectId, clip.id));
+                      setLoadingVideo(true);
+                      setLoadError(false);
+                    }}
+                    style={{ marginTop: 8, padding: "6px 14px", fontSize: 12 }}
+                  >
+                    🔄 Reintentar
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Timeline + scrub */}
