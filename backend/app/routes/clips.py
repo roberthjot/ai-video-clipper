@@ -455,6 +455,9 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             no_text=getattr(style, 'no_text', False),
             caption_font=getattr(style, 'caption_font', 'calibri'),
             no_emojis=getattr(style, 'no_emojis', False),
+            edit_zoom=getattr(clip, 'edit_zoom', 1.0),
+            edit_pan_x=getattr(clip, 'edit_pan_x', 0.0),
+            edit_pan_y=getattr(clip, 'edit_pan_y', 0.0),
         )
     except Exception as e:
         import traceback

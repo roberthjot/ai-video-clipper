@@ -694,6 +694,9 @@ def generate_preview_frame(
     no_text: bool = False,
     caption_font: str = "calibri",
     no_emojis: bool = False,
+    edit_zoom: float = 1.0,
+    edit_pan_x: float = 0.0,
+    edit_pan_y: float = 0.0,
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
@@ -710,39 +713,42 @@ def generate_preview_frame(
     else:
         target_h = H
 
-    # Build fg_filter based on fill_mode and target height
+    # Per-clip editor transform — scales the BOX size (not the content)
+    _zoom = max(0.3, float(edit_zoom or 1.0))
+    _pan_x_pct = float(edit_pan_x or 0.0) / 100.0
+    _pan_y_pct = float(edit_pan_y or 0.0) / 100.0
+
+    # Build fg_filter based on fill_mode × zoom (matches generate_preview_clip + export)
     if fill_mode == "fill":
-        fg_filter = f"scale={W}:{target_h}:force_original_aspect_ratio=increase,crop={W}:{target_h}"
+        scaled_h = int(target_h * _zoom)
+        scaled_w = int(W * _zoom)
+        fg_filter = f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=increase,crop={scaled_w}:{scaled_h}"
+    elif fill_mode == "fit":
+        fg_filter = f"scale={int(W * _zoom)}:-2"
     elif fill_mode == "zoom":
-        fg_filter = f"scale=-2:{int(target_h * 0.9)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.9 * _zoom)}"
     elif fill_mode == "small":
-        fg_filter = f"scale=-2:{int(target_h * 0.78)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.78 * _zoom)}"
     elif fill_mode == "medium":
-        fg_filter = f"scale=-2:{int(target_h * 0.65)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.65 * _zoom)}"
     elif fill_mode == "mini":
-        fg_filter = f"scale=-2:{int(target_h * 0.50)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.50 * _zoom)}"
     else:
         fg_filter = f"scale={W}:-2"
 
     filter_parts = []
     input_index = 1  # [0] = video
 
-    # Build the background chain. Both blur and black reuse the same scale+crop
-    # base (so timing/dimensions are identical to the foreground stream) and
-    # then either blur it or zero all color channels to make pure black.
     def _bg(target_height: int) -> str:
         base = f"[0:v]scale={W}:{target_height}:force_original_aspect_ratio=increase,crop={W}:{target_height}"
         if background_style == "black":
-            # Zero RGB channels — produces a solid black frame with the same
-            # timing as the source video. Avoids both blur cost AND the
-            # color-source timing issues we hit before.
             return base + ",colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0"
         return base + ",boxblur=12:2"
 
     if use_split:
         filter_parts.append(f"{_bg(video_h)}[bg]")
         filter_parts.append(f"[0:v]{fg_filter}[fg]")
-        filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part]")
+        filter_parts.append(f"[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*{video_h},format=yuv420p[video_part]")
         # Image portion: scale to fill, crop to exact size, match pixel format
         filter_parts.append(f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part]")
         # Stack vertically
@@ -751,7 +757,7 @@ def generate_preview_frame(
     else:
         filter_parts.append(f"{_bg(H)}[bg]")
         filter_parts.append(f"[0:v]{fg_filter}[fg]")
-        filter_parts.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
+        filter_parts.append(f"[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H[v]")
 
     last = "v"
     rounded_box_path = None
