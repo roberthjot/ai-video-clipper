@@ -574,19 +574,31 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  // Lazy useState — runs ONCE on mount so the cache buster is set a single
-  // time. Setting it twice (via useEffect) caused the <video> to abort the
-  // first fetch when src changed, which fires `error` even though the second
-  // request was succeeding.
-  const [videoUrl, setVideoUrl] = useState(() => api.getVideoPreviewUrl(projectId, clip.id));
+  // Editor manipulates the RAW VIDEO CONTENT (what appears INSIDE the box
+  // in the final composition). Caption box, blur/black background, watermark
+  // and subtitles are applied OUTSIDE the editor — they stay fixed in the
+  // export. CapCut works the same way: you edit the clip layer, the canvas
+  // composition is separate.
+  const [videoUrl, setVideoUrl] = useState(() => api.getRawVideoUrl(projectId));
 
-  // Loop the preview clip from 0 to its end. Note: Play Clip is 10s of the
-  // ORIGINAL clip; trim sliders below adjust the actual clip range that gets
-  // exported, but the preview here always plays the composed 10s sample.
+  // Seek to clip start when modal opens
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = startTime;
+    }
+  }, [videoUrl]);
+
+  // Loop within the trim range — when video reaches endTime, jump back to startTime
   const handleTimeUpdate = () => {
     const v = videoRef.current;
     if (!v) return;
     setCurrentTime(v.currentTime);
+    if (v.currentTime >= endTime) {
+      v.currentTime = startTime;
+    }
+    if (v.currentTime < startTime - 0.5) {
+      v.currentTime = startTime;
+    }
   };
 
   const togglePlay = () => {
@@ -599,7 +611,7 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
   const seekTo = (t) => {
     const v = videoRef.current;
     if (!v) return;
-    v.currentTime = Math.max(0, Math.min(v.duration || 10, t));
+    v.currentTime = Math.max(startTime, Math.min(endTime, t));
     setCurrentTime(v.currentTime);
   };
 
@@ -635,8 +647,7 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
   };
 
   const clipDur = endTime - startTime;
-  const previewDur = videoRef.current?.duration || 10;
-  const progress = previewDur > 0 ? (currentTime / previewDur) * 100 : 0;
+  const progress = clipDur > 0 ? ((currentTime - startTime) / clipDur) * 100 : 0;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -674,13 +685,10 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
                 <div style={{
                   position: "absolute", inset: 0,
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                  background: "rgba(0,0,0,0.85)", color: "#fff", gap: 14,
+                  background: "rgba(0,0,0,0.85)", color: "#fff", gap: 10,
                 }}>
-                  <div className="loading-spinner" style={{ width: 36, height: 36 }} />
-                  <p style={{ margin: 0, fontSize: 13, textAlign: "center", padding: "0 20px" }}>
-                    Generando preview con todos los efectos...<br/>
-                    <span style={{ fontSize: 11, color: "#aaa" }}>Tarda ~10-15s la primera vez</span>
-                  </p>
+                  <div className="loading-spinner" style={{ width: 32, height: 32 }} />
+                  <p style={{ margin: 0, fontSize: 12, color: "#aaa" }}>Cargando video...</p>
                 </div>
               )}
               {loadError && (
@@ -691,13 +699,13 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
                 }}>
                   <div style={{ fontSize: 28 }}>❌</div>
                   <p style={{ margin: 0, fontSize: 13 }}>
-                    No se pudo cargar el preview.<br/>
-                    <span style={{ fontSize: 11, color: "#999" }}>Cierra y haz click en "Play Clip" primero para generarlo.</span>
+                    No se pudo cargar el video.<br/>
+                    <span style={{ fontSize: 11, color: "#999" }}>Reinicia el backend o intenta de nuevo.</span>
                   </p>
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
-                      setVideoUrl(api.getVideoPreviewUrl(projectId, clip.id));
+                      setVideoUrl(api.getRawVideoUrl(projectId));
                       setLoadingVideo(true);
                       setLoadError(false);
                     }}
@@ -718,7 +726,7 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const pct = (e.clientX - rect.left) / rect.width;
-                  seekTo(pct * previewDur);
+                  seekTo(startTime + pct * clipDur);
                 }}
               >
                 {/* Trim range (highlighted) */}
@@ -734,19 +742,20 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
                 }} />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginTop: 4, fontFamily: "monospace" }}>
-                <span>0:00</span>
+                <span>{formatTime(startTime)}</span>
                 <span style={{ color: "var(--accent)", fontWeight: 700 }}>{formatTime(currentTime)}</span>
-                <span>{formatTime(previewDur)}</span>
+                <span>{formatTime(endTime)}</span>
               </div>
-              <p style={{ fontSize: 11, color: "#666", marginTop: 6, textAlign: "center" }}>
-                Preview de 10s con todos los efectos aplicados (caption, subtítulos, fondo, filtro). El zoom/posición se aplica encima.
+              <p style={{ fontSize: 11, color: "#666", marginTop: 6, textAlign: "center", lineHeight: 1.5 }}>
+                Editando el <b>contenido del video</b> (lo que aparece dentro del cuadro en la composición final).<br/>
+                El fondo, caption, watermark y subtítulos se aplican aparte y no se ven aquí — verifícalos con <b>Play Clip</b> después de guardar.
               </p>
               <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10 }}>
-                <button className="btn btn-secondary" onClick={() => seekTo(0)} style={{ padding: "6px 12px" }}>⏮</button>
+                <button className="btn btn-secondary" onClick={() => seekTo(startTime)} style={{ padding: "6px 12px" }}>⏮</button>
                 <button className="btn btn-primary" onClick={togglePlay} style={{ padding: "6px 24px", minWidth: 80 }}>
                   {playing ? "⏸ Pausa" : "▶ Play"}
                 </button>
-                <button className="btn btn-secondary" onClick={() => seekTo(previewDur)} style={{ padding: "6px 12px" }}>⏭</button>
+                <button className="btn btn-secondary" onClick={() => seekTo(endTime)} style={{ padding: "6px 12px" }}>⏭</button>
               </div>
             </div>
           </div>

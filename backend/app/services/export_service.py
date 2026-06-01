@@ -64,6 +64,19 @@ def export_clip_with_style(
     else:
         fg_filter = f"scale={W}:-2"
 
+    # Per-clip editor transform: zoom and pan applied to the FOREGROUND VIDEO
+    # only — the background blur/black, caption box, watermark, and subtitles
+    # stay in their fixed positions. Only the content INSIDE the video box
+    # gets cropped/zoomed (same behavior as CapCut's video clip transform).
+    _zoom = max(1.0, float(getattr(clip, 'edit_zoom', 1.0) or 1.0))
+    _pan_x = float(getattr(clip, 'edit_pan_x', 0.0) or 0.0)
+    _pan_y = float(getattr(clip, 'edit_pan_y', 0.0) or 0.0)
+    if _zoom != 1.0 or _pan_x != 0.0 or _pan_y != 0.0:
+        crop_x = f"(iw-iw/{_zoom})/2-(iw/{_zoom})*{_pan_x/100:.4f}"
+        crop_y = f"(ih-ih/{_zoom})/2-(ih/{_zoom})*{_pan_y/100:.4f}"
+        fg_filter = f"{fg_filter},crop=iw/{_zoom}:ih/{_zoom}:{crop_x}:{crop_y}"
+        print(f"[Export] Clip {clip.id}: editor transform zoom={_zoom:.2f} pan=({_pan_x:.0f}%,{_pan_y:.0f}%)")
+
     input_index = 1
 
     # Background reuses the same scale+crop chain as blur but swaps the final
@@ -186,25 +199,6 @@ def export_clip_with_style(
                 print(f"[Export] Clip {clip.id}: subtitle style='{sub_style}' applied (ass={ass_basename})")
         except Exception as e:
             print(f"[Export] Clip {clip.id}: subtitle generation failed (continuing without): {e}")
-
-    # Per-clip editor transform — applied AT THE END, on top of the fully
-    # composed frame (background + video + caption + watermark + subtitles +
-    # filter all baked in). Same CSS-style semantics as the editor modal:
-    # zoom into the 1080x1920 canvas and pan by percentage of frame size.
-    _zoom = max(1.0, float(getattr(clip, 'edit_zoom', 1.0) or 1.0))
-    _pan_x = float(getattr(clip, 'edit_pan_x', 0.0) or 0.0)
-    _pan_y = float(getattr(clip, 'edit_pan_y', 0.0) or 0.0)
-    if _zoom != 1.0 or _pan_x != 0.0 or _pan_y != 0.0:
-        # Crop a iw/zoom × ih/zoom window centered on the frame, then shift
-        # by pan%. Scale that crop back up to W×H so the output stays 1080x1920.
-        crop_x = f"(iw-iw/{_zoom})/2-(iw/{_zoom})*{_pan_x/100:.4f}"
-        crop_y = f"(ih-ih/{_zoom})/2-(ih/{_zoom})*{_pan_y/100:.4f}"
-        filter_complex += (
-            f";[{current_label}]crop=iw/{_zoom}:ih/{_zoom}:{crop_x}:{crop_y},"
-            f"scale={W}:{H}[zoomed]"
-        )
-        current_label = "zoomed"
-        print(f"[Export] Clip {clip.id}: editor transform applied at END (zoom={_zoom:.2f} pan=({_pan_x:.0f}%,{_pan_y:.0f}%))")
 
     filter_complex += f";[{current_label}]format=yuv420p[out]"
 
