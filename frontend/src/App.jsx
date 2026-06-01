@@ -579,12 +579,10 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
   const [videoUrl] = useState(() => api.getRawVideoUrl(projectId));
   const bgVideoRef = useRef(null);  // blur background — synced with main video
 
-  // Seek to clip start when modal opens
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = startTime;
-    }
-  }, [videoUrl]);
+  // We seek on the video's onLoadedMetadata instead of in a useEffect —
+  // videoRef.current exists at mount but the video data isn't ready yet,
+  // so currentTime would silently fail. onLoadedMetadata fires when seeking
+  // is actually possible. See the <video> element below.
 
   // Sync the bg blur video's time/play state with the main editable video
   // so pausing/seeking the main also pauses/seeks the bg.
@@ -685,6 +683,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
               background: "#000", borderRadius: 12, overflow: "hidden",
               aspectRatio: "9 / 16", maxHeight: 540, margin: "0 auto",
               position: "relative",
+              containerType: "size",
             }}>
               {/* BACKGROUND — blur of the raw video (cheap CSS) or solid black */}
               {backgroundStyle === "black" ? (
@@ -732,6 +731,13 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                       ref={videoRef}
                       src={videoUrl}
                       onTimeUpdate={handleTimeUpdate}
+                      onLoadedMetadata={() => {
+                        // Seek to the clip's start_time once metadata is ready
+                        try {
+                          if (videoRef.current) videoRef.current.currentTime = startTime;
+                          if (bgVideoRef.current) bgVideoRef.current.currentTime = startTime;
+                        } catch {}
+                      }}
                       onLoadedData={() => { setLoadingVideo(false); setLoadError(false); }}
                       onError={() => { setLoadingVideo(false); setLoadError(true); }}
                       loop
@@ -745,34 +751,57 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                 );
               })()}
               {/* CAPTION OVERLAY — HTML approximation of the burned-in caption.
-                  Position uses the same text_y % as the export. */}
-              {clip.viral_caption && (
-                <div style={{
-                  position: "absolute",
-                  top: `${(clip.text_y ?? 0.15) * 100}%`,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  zIndex: 2,
-                  maxWidth: "85%",
-                  textAlign: "center",
-                  pointerEvents: "none",
-                }}>
+                  Splits the text the same way as PIL (max 30 chars per line)
+                  so the box width matches what Play Clip will show. */}
+              {clip.viral_caption && (() => {
+                // Mirror split_text_into_lines (max 30 chars, up to 4 lines)
+                const words = clip.viral_caption.split(/\s+/);
+                const lines = [];
+                let current = [];
+                for (const w of words) {
+                  if (lines.length === 4) break;
+                  const test = [...current, w].join(" ");
+                  if (test.length <= 30) current.push(w);
+                  else {
+                    if (current.length) lines.push(current.join(" "));
+                    if (lines.length === 4) break;
+                    current = [w];
+                  }
+                }
+                if (current.length && lines.length < 4) lines.push(current.join(" "));
+                return (
                   <div style={{
-                    background: "rgba(255,255,255,0.95)",
-                    color: "#000",
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    fontFamily: "Calibri, 'Segoe UI', Arial, sans-serif",
-                    fontWeight: 700,
-                    fontSize: "clamp(11px, 2.4vw, 16px)",
-                    lineHeight: 1.25,
-                    display: "inline-block",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+                    position: "absolute",
+                    top: `${(clip.text_y ?? 0.15) * 100}%`,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    zIndex: 2,
+                    textAlign: "center",
+                    pointerEvents: "none",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 0,
+                    alignItems: "center",
                   }}>
-                    {clip.viral_caption}
+                    {lines.map((line, i) => (
+                      <div key={i} style={{
+                        background: "rgba(255,255,255,0.95)",
+                        color: "#000",
+                        padding: "0 8px",
+                        borderRadius: i === 0 ? "6px 6px 0 0" :
+                                      i === lines.length - 1 ? "0 0 6px 6px" : "0",
+                        fontFamily: "'Calibri Bold', Calibri, 'Segoe UI', Arial, sans-serif",
+                        fontWeight: 900,
+                        fontSize: "3.6cqh",  // matches PIL ~70px on a 1920 canvas
+                        lineHeight: 1.3,
+                        whiteSpace: "nowrap",
+                      }}>
+                        {line}
+                      </div>
+                    ))}
                   </div>
-                </div>
-              )}
+                );
+              })()}
               {loadingVideo && !loadError && (
                 <div style={{
                   position: "absolute", inset: 0,
