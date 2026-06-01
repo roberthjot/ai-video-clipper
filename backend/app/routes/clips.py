@@ -375,7 +375,7 @@ async def edit_clip_transform(project_id: str, clip_id: int, req: EditTransformR
     project = projects[project_id]
     for clip in project.clips:
         if clip.id == clip_id:
-            clip.edit_zoom = max(1.0, min(3.0, float(req.edit_zoom)))
+            clip.edit_zoom = max(0.3, min(3.0, float(req.edit_zoom)))
             clip.edit_pan_x = max(-50.0, min(50.0, float(req.edit_pan_x)))
             clip.edit_pan_y = max(-50.0, min(50.0, float(req.edit_pan_y)))
             if req.start_time is not None:

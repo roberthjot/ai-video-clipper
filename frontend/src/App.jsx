@@ -685,39 +685,49 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                   pointerEvents: "none",
                 }}
               />
-              {/* FOREGROUND LAYER — editable inner video box sized by fill_mode.
-                  Covers the foreground area in the background composition exactly,
-                  so the user only sees the EDITED video inside while still seeing
-                  caption/blur/etc. from the background layer outside the box. */}
-              <div style={{
-                position: "relative", zIndex: 1,
-                width: "100%",
-                height: fillMode === "fill" ? "100%" :
-                        fillMode === "zoom" ? "90%" :
-                        fillMode === "small" ? "78%" :
-                        fillMode === "medium" ? "65%" :
-                        fillMode === "mini" ? "50%" :
-                        "auto",
-                overflow: "hidden",
-                background: "#000",
-              }}>
-                <video
-                  ref={videoRef}
-                  src={videoUrl}
-                  onTimeUpdate={handleTimeUpdate}
-                  onLoadedData={() => { setLoadingVideo(false); setLoadError(false); }}
-                  onError={() => { setLoadingVideo(false); setLoadError(true); }}
-                  loop
-                  style={{
-                    width: "100%", height: "100%",
-                    objectFit: fillMode === "fit" ? "contain" : "cover",
-                    transform: `scale(${zoom}) translate(${panX}%, ${panY}%)`,
-                    transformOrigin: "center center",
-                    transition: "transform 0.05s linear",
-                    display: loadError ? "none" : "block",
-                  }}
-                />
-              </div>
+              {/* FOREGROUND LAYER — editable inner video box.
+                  Zoom = scale the BOX itself (makes the video occupy more of
+                  the canvas). Position X/Y = move the box around. The video
+                  CONTENT keeps its aspect ratio inside the box. */}
+              {(() => {
+                const baseHeightPct =
+                  fillMode === "fill"   ? 100 :
+                  fillMode === "zoom"   ? 90 :
+                  fillMode === "small"  ? 78 :
+                  fillMode === "medium" ? 65 :
+                  fillMode === "mini"   ? 50 :
+                  100;  // fit
+                const boxH = baseHeightPct * zoom;
+                const boxW = 100 * zoom;
+                return (
+                  <div style={{
+                    position: "absolute",
+                    width: `${boxW}%`,
+                    height: `${boxH}%`,
+                    left: `${50 + panX}%`,
+                    top: `${50 + panY}%`,
+                    transform: "translate(-50%, -50%)",
+                    overflow: "hidden",
+                    background: "#000",
+                    transition: "all 0.05s linear",
+                    zIndex: 1,
+                  }}>
+                    <video
+                      ref={videoRef}
+                      src={videoUrl}
+                      onTimeUpdate={handleTimeUpdate}
+                      onLoadedData={() => { setLoadingVideo(false); setLoadError(false); }}
+                      onError={() => { setLoadingVideo(false); setLoadError(true); }}
+                      loop
+                      style={{
+                        width: "100%", height: "100%",
+                        objectFit: fillMode === "fit" ? "contain" : "cover",
+                        display: loadError ? "none" : "block",
+                      }}
+                    />
+                  </div>
+                );
+              })()}
               {loadingVideo && !loadError && (
                 <div style={{
                   position: "absolute", inset: 0,
@@ -802,8 +812,8 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
             <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "14px 16px" }}>
               <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>Transform</h4>
 
-              <label style={{ fontSize: 12, color: "#aaa" }}>Zoom: <b style={{ color: "var(--accent)" }}>{zoom.toFixed(2)}x</b></label>
-              <input type="range" min={1.0} max={3.0} step={0.05} value={zoom}
+              <label style={{ fontSize: 12, color: "#aaa" }}>Tamaño del cuadro: <b style={{ color: "var(--accent)" }}>{zoom.toFixed(2)}x</b></label>
+              <input type="range" min={0.3} max={2.0} step={0.05} value={zoom}
                 onChange={(e) => setZoom(parseFloat(e.target.value))}
                 style={{ width: "100%", marginBottom: 12 }} />
 

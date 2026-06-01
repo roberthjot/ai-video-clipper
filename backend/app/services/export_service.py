@@ -50,32 +50,38 @@ def export_clip_with_style(
     else:
         target_h = H
 
-    # Build fg_filter based on fill_mode and target height
-    if style.fill_mode == "fill":
-        fg_filter = f"scale={W}:{target_h}:force_original_aspect_ratio=increase,crop={W}:{target_h}"
-    elif style.fill_mode == "zoom":
-        fg_filter = f"scale=-2:{int(target_h * 0.9)}"
-    elif style.fill_mode == "small":
-        fg_filter = f"scale=-2:{int(target_h * 0.78)}"
-    elif style.fill_mode == "medium":
-        fg_filter = f"scale=-2:{int(target_h * 0.65)}"
-    elif style.fill_mode == "mini":
-        fg_filter = f"scale=-2:{int(target_h * 0.50)}"
-    else:
-        fg_filter = f"scale={W}:-2"
+    # Per-clip editor transform: zoom scales the BOX size (makes the inner
+    # video take up more of the canvas). Pan offsets the overlay position.
+    # Same semantics as CapCut: scale changes how big the clip appears on
+    # the canvas; it does NOT crop INTO the video content.
+    _zoom = max(0.3, float(getattr(clip, 'edit_zoom', 1.0) or 1.0))
+    _pan_x_pct = float(getattr(clip, 'edit_pan_x', 0.0) or 0.0) / 100.0  # -0.5 to +0.5
+    _pan_y_pct = float(getattr(clip, 'edit_pan_y', 0.0) or 0.0) / 100.0
 
-    # Per-clip editor transform: zoom and pan applied to the FOREGROUND VIDEO
-    # only — the background blur/black, caption box, watermark, and subtitles
-    # stay in their fixed positions. Only the content INSIDE the video box
-    # gets cropped/zoomed (same behavior as CapCut's video clip transform).
-    _zoom = max(1.0, float(getattr(clip, 'edit_zoom', 1.0) or 1.0))
-    _pan_x = float(getattr(clip, 'edit_pan_x', 0.0) or 0.0)
-    _pan_y = float(getattr(clip, 'edit_pan_y', 0.0) or 0.0)
-    if _zoom != 1.0 or _pan_x != 0.0 or _pan_y != 0.0:
-        crop_x = f"(iw-iw/{_zoom})/2-(iw/{_zoom})*{_pan_x/100:.4f}"
-        crop_y = f"(ih-ih/{_zoom})/2-(ih/{_zoom})*{_pan_y/100:.4f}"
-        fg_filter = f"{fg_filter},crop=iw/{_zoom}:ih/{_zoom}:{crop_x}:{crop_y}"
-        print(f"[Export] Clip {clip.id}: editor transform zoom={_zoom:.2f} pan=({_pan_x:.0f}%,{_pan_y:.0f}%)")
+    # Build fg_filter based on fill_mode and target height, multiplied by zoom
+    fm = style.fill_mode
+    base_height_pct = (
+        1.0  if fm == "fill"   else
+        0.9  if fm == "zoom"   else
+        0.78 if fm == "small"  else
+        0.65 if fm == "medium" else
+        0.5  if fm == "mini"   else
+        1.0  # fit (handled by width scale below)
+    )
+    if fm == "fill":
+        # fill always covers the full canvas; zoom > 1 still uses cover
+        scaled_h = int(target_h * _zoom)
+        scaled_w = int(W * _zoom)
+        fg_filter = f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=increase,crop={scaled_w}:{scaled_h}"
+    elif fm == "fit":
+        # fit: width = W * zoom, height auto preserving aspect
+        fg_filter = f"scale={int(W * _zoom)}:-2"
+    else:
+        # medium / mini / small / zoom: height-based scaling
+        fg_filter = f"scale=-2:{int(target_h * base_height_pct * _zoom)}"
+
+    if _zoom != 1.0 or _pan_x_pct != 0.0 or _pan_y_pct != 0.0:
+        print(f"[Export] Clip {clip.id}: editor transform zoom={_zoom:.2f} pan=({_pan_x_pct*100:.0f}%,{_pan_y_pct*100:.0f}%) — scales the box, not the content")
 
     input_index = 1
 
@@ -94,13 +100,13 @@ def export_clip_with_style(
         filter_complex = (
             f"{_bg(video_h)}[bg];"
             f"[0:v]{fg_filter}[fg];"
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part];"
+            f"[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*{video_h},format=yuv420p[video_part];"
             f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
             f"[video_part][img_part]vstack=inputs=2[v]"
         )
         input_index = 2
     else:
-        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H[v]"
 
     current_label = "v"
     rounded_box_path = None
