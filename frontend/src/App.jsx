@@ -574,12 +574,13 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
   const [saving, setSaving] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  // Editor manipulates the RAW VIDEO CONTENT (what appears INSIDE the box
-  // in the final composition). Caption box, blur/black background, watermark
-  // and subtitles are applied OUTSIDE the editor — they stay fixed in the
-  // export. CapCut works the same way: you edit the clip layer, the canvas
-  // composition is separate.
-  const [videoUrl, setVideoUrl] = useState(() => api.getRawVideoUrl(projectId));
+  // Background: Play Clip MP4 (composed, with caption + blur/black + subs + filter).
+  // Foreground (editable): raw video positioned where fg appears in composition,
+  // so user's zoom/pan only affects the inner video box content. They see the
+  // FULL composition context AND can edit just the inner box — CapCut-like.
+  const [bgVideoUrl] = useState(() => api.getVideoPreviewUrl(projectId, clip.id));
+  const [videoUrl] = useState(() => api.getRawVideoUrl(projectId));
+  const bgVideoRef = useRef(null);
 
   // Seek to clip start when modal opens
   useEffect(() => {
@@ -658,44 +659,47 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
           <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#999", fontSize: 24, cursor: "pointer" }}>✕</button>
         </div>
 
-        {/* Calculate the inner video box height % based on the current fill_mode.
-            Matches the FFmpeg fg_filter percentages in export_service.py. */}
+        {/* Box height % matches fill_mode percentages in export_service.py */}
         {(() => null)()}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
-          {/* Preview — 9:16 canvas with the video positioned per fill_mode.
-              User's zoom/pan only affects the inner video box content. */}
+          {/* Preview — composed Play Clip as BACKGROUND (with all effects baked in)
+              + raw video on TOP positioned in the fg box, with editable zoom/pan. */}
           <div>
             <div style={{
-              background: backgroundStyle === "black" ? "#000" : "#111",
-              borderRadius: 12, overflow: "hidden",
+              background: "#000", borderRadius: 12, overflow: "hidden",
               aspectRatio: "9 / 16", maxHeight: 540, margin: "0 auto",
               position: "relative",
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              {/* Background hint — show a soft gradient when blur mode is selected */}
-              {backgroundStyle === "blur" && (
-                <div style={{
+              {/* BACKGROUND LAYER — composed preview with caption + bg + subs + filter */}
+              <video
+                ref={bgVideoRef}
+                src={bgVideoUrl}
+                autoPlay
+                loop
+                muted
+                playsInline
+                style={{
                   position: "absolute", inset: 0,
-                  background: "radial-gradient(ellipse at center, rgba(80,80,80,0.4) 0%, rgba(20,20,20,0.8) 100%)",
+                  width: "100%", height: "100%", objectFit: "cover",
                   pointerEvents: "none",
-                }} />
-              )}
-              {/* The actual video box — sized by fill_mode */}
+                }}
+              />
+              {/* FOREGROUND LAYER — editable inner video box sized by fill_mode.
+                  Covers the foreground area in the background composition exactly,
+                  so the user only sees the EDITED video inside while still seeing
+                  caption/blur/etc. from the background layer outside the box. */}
               <div style={{
-                position: "relative",
-                width: fillMode === "fit" || fillMode === "fill" ? "100%" :
-                       fillMode === "zoom" ? "100%" :
-                       fillMode === "small" ? "100%" :
-                       fillMode === "medium" ? "100%" :
-                       fillMode === "mini" ? "100%" : "100%",
+                position: "relative", zIndex: 1,
+                width: "100%",
                 height: fillMode === "fill" ? "100%" :
                         fillMode === "zoom" ? "90%" :
                         fillMode === "small" ? "78%" :
                         fillMode === "medium" ? "65%" :
-                        fillMode === "mini" ? "50%" : "auto",
+                        fillMode === "mini" ? "50%" :
+                        "auto",
                 overflow: "hidden",
                 background: "#000",
-                border: fillMode !== "fill" ? "1px dashed rgba(255,255,255,0.15)" : "none",
               }}>
                 <video
                   ref={videoRef}
@@ -706,7 +710,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                   loop
                   style={{
                     width: "100%", height: "100%",
-                    objectFit: fillMode === "fill" ? "cover" : "contain",
+                    objectFit: fillMode === "fit" ? "contain" : "cover",
                     transform: `scale(${zoom}) translate(${panX}%, ${panY}%)`,
                     transformOrigin: "center center",
                     transition: "transform 0.05s linear",
@@ -780,8 +784,8 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                 <span>{formatTime(endTime)}</span>
               </div>
               <p style={{ fontSize: 11, color: "#666", marginTop: 6, textAlign: "center", lineHeight: 1.5 }}>
-                Editando el <b>contenido del video</b> (lo que aparece dentro del cuadro en la composición final).<br/>
-                El fondo, caption, watermark y subtítulos se aplican aparte y no se ven aquí — verifícalos con <b>Play Clip</b> después de guardar.
+                El <b>fondo</b> es la composición completa (caption, blur/negro, subtítulos, filtro).<br/>
+                Tu zoom/posición solo afecta el <b>contenido del cuadro central</b> donde está el video.
               </p>
               <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10 }}>
                 <button className="btn btn-secondary" onClick={() => seekTo(startTime)} style={{ padding: "6px 12px" }}>⏮</button>
