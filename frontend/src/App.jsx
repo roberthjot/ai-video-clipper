@@ -569,30 +569,22 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
   const [panY, setPanY] = useState(clip.edit_pan_y ?? 0);
   const [startTime, setStartTime] = useState(clip.start_time);
   const [endTime, setEndTime] = useState(clip.end_time);
-  const [currentTime, setCurrentTime] = useState(clip.start_time);
+  const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
-  const videoUrl = api.getRawVideoUrl(projectId);
 
-  // Seek video to clip start when modal opens
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = startTime;
-    }
-  }, []);
+  // Use the COMPOSED Play Clip preview (with blur/black bg, caption, subtitles,
+  // filter, watermark all baked in). Editor edits ON TOP of the composition,
+  // not on the raw video. getVideoPreviewUrl already includes a cache buster.
+  const videoUrl = api.getVideoPreviewUrl(projectId, clip.id);
 
-  // Loop within the trim range — when video reaches endTime, seek back to startTime
+  // Loop the preview clip from 0 to its end. Note: Play Clip is 10s of the
+  // ORIGINAL clip; trim sliders below adjust the actual clip range that gets
+  // exported, but the preview here always plays the composed 10s sample.
   const handleTimeUpdate = () => {
     const v = videoRef.current;
     if (!v) return;
     setCurrentTime(v.currentTime);
-    if (v.currentTime >= endTime) {
-      v.currentTime = startTime;
-      if (!playing) v.pause();
-    }
-    if (v.currentTime < startTime) {
-      v.currentTime = startTime;
-    }
   };
 
   const togglePlay = () => {
@@ -605,7 +597,7 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
   const seekTo = (t) => {
     const v = videoRef.current;
     if (!v) return;
-    v.currentTime = Math.max(startTime, Math.min(endTime, t));
+    v.currentTime = Math.max(0, Math.min(v.duration || 10, t));
     setCurrentTime(v.currentTime);
   };
 
@@ -641,7 +633,8 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
   };
 
   const clipDur = endTime - startTime;
-  const progress = clipDur > 0 ? ((currentTime - startTime) / clipDur) * 100 : 0;
+  const previewDur = videoRef.current?.duration || 10;
+  const progress = previewDur > 0 ? (currentTime / previewDur) * 100 : 0;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -664,7 +657,7 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
                 ref={videoRef}
                 src={videoUrl}
                 onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = startTime; }}
+                loop
                 style={{
                   width: "100%", height: "100%", objectFit: "cover",
                   transform: `scale(${zoom}) translate(${panX}%, ${panY}%)`,
@@ -683,7 +676,7 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const pct = (e.clientX - rect.left) / rect.width;
-                  seekTo(startTime + pct * clipDur);
+                  seekTo(pct * previewDur);
                 }}
               >
                 {/* Trim range (highlighted) */}
@@ -699,16 +692,19 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
                 }} />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginTop: 4, fontFamily: "monospace" }}>
-                <span>{formatTime(startTime)}</span>
+                <span>0:00</span>
                 <span style={{ color: "var(--accent)", fontWeight: 700 }}>{formatTime(currentTime)}</span>
-                <span>{formatTime(endTime)}</span>
+                <span>{formatTime(previewDur)}</span>
               </div>
+              <p style={{ fontSize: 11, color: "#666", marginTop: 6, textAlign: "center" }}>
+                Preview de 10s con todos los efectos aplicados (caption, subtítulos, fondo, filtro). El zoom/posición se aplica encima.
+              </p>
               <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10 }}>
-                <button className="btn btn-secondary" onClick={() => seekTo(startTime)} style={{ padding: "6px 12px" }}>⏮</button>
+                <button className="btn btn-secondary" onClick={() => seekTo(0)} style={{ padding: "6px 12px" }}>⏮</button>
                 <button className="btn btn-primary" onClick={togglePlay} style={{ padding: "6px 24px", minWidth: 80 }}>
                   {playing ? "⏸ Pausa" : "▶ Play"}
                 </button>
-                <button className="btn btn-secondary" onClick={() => seekTo(endTime)} style={{ padding: "6px 12px" }}>⏭</button>
+                <button className="btn btn-secondary" onClick={() => seekTo(previewDur)} style={{ padding: "6px 12px" }}>⏭</button>
               </div>
             </div>
           </div>
