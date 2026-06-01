@@ -574,13 +574,9 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
   const [saving, setSaving] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  // Background: Play Clip MP4 (composed, with caption + blur/black + subs + filter).
-  // Foreground (editable): raw video positioned where fg appears in composition,
-  // so user's zoom/pan only affects the inner video box content. They see the
-  // FULL composition context AND can edit just the inner box — CapCut-like.
-  const [bgVideoUrl] = useState(() => api.getVideoPreviewUrl(projectId, clip.id));
+  // Single raw video — composition built live with HTML/CSS so the box can be
+  // scaled/moved without hiding the surrounding caption/background.
   const [videoUrl] = useState(() => api.getRawVideoUrl(projectId));
-  const bgVideoRef = useRef(null);
 
   // Seek to clip start when modal opens
   useEffect(() => {
@@ -662,33 +658,36 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
         {/* Box height % matches fill_mode percentages in export_service.py */}
         {(() => null)()}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
-          {/* Preview — composed Play Clip as BACKGROUND (with all effects baked in)
-              + raw video on TOP positioned in the fg box, with editable zoom/pan. */}
+          {/* Preview — 9:16 canvas with composition built in HTML/CSS:
+              - Background: blur of raw video (or solid black)
+              - Inner box: editable raw video, sized by fill_mode × zoom
+              - Caption overlay: HTML approximation of the caption text */}
           <div>
             <div style={{
               background: "#000", borderRadius: 12, overflow: "hidden",
               aspectRatio: "9 / 16", maxHeight: 540, margin: "0 auto",
               position: "relative",
-              display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              {/* BACKGROUND LAYER — composed preview with caption + bg + subs + filter */}
-              <video
-                ref={bgVideoRef}
-                src={bgVideoUrl}
-                autoPlay
-                loop
-                muted
-                playsInline
-                style={{
-                  position: "absolute", inset: 0,
-                  width: "100%", height: "100%", objectFit: "cover",
-                  pointerEvents: "none",
-                }}
-              />
-              {/* FOREGROUND LAYER — editable inner video box.
-                  Zoom = scale the BOX itself (makes the video occupy more of
-                  the canvas). Position X/Y = move the box around. The video
-                  CONTENT keeps its aspect ratio inside the box. */}
+              {/* BACKGROUND — blur of the raw video (cheap CSS) or solid black */}
+              {backgroundStyle === "black" ? (
+                <div style={{ position: "absolute", inset: 0, background: "#000" }} />
+              ) : (
+                <video
+                  src={videoUrl}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  style={{
+                    position: "absolute", inset: 0,
+                    width: "100%", height: "100%", objectFit: "cover",
+                    filter: "blur(24px) brightness(0.55)",
+                    transform: "scale(1.1)",  // hide blur edges
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+              {/* INNER VIDEO BOX — scaled by fill_mode × zoom, moved by pan */}
               {(() => {
                 const baseHeightPct =
                   fillMode === "fill"   ? 100 :
@@ -708,7 +707,6 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                     top: `${50 + panY}%`,
                     transform: "translate(-50%, -50%)",
                     overflow: "hidden",
-                    background: "#000",
                     transition: "all 0.05s linear",
                     zIndex: 1,
                   }}>
@@ -728,6 +726,35 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                   </div>
                 );
               })()}
+              {/* CAPTION OVERLAY — HTML approximation of the burned-in caption.
+                  Position uses the same text_y % as the export. */}
+              {clip.viral_caption && (
+                <div style={{
+                  position: "absolute",
+                  top: `${(clip.text_y ?? 0.15) * 100}%`,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  zIndex: 2,
+                  maxWidth: "85%",
+                  textAlign: "center",
+                  pointerEvents: "none",
+                }}>
+                  <div style={{
+                    background: "rgba(255,255,255,0.95)",
+                    color: "#000",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    fontFamily: "Calibri, 'Segoe UI', Arial, sans-serif",
+                    fontWeight: 700,
+                    fontSize: "clamp(11px, 2.4vw, 16px)",
+                    lineHeight: 1.25,
+                    display: "inline-block",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+                  }}>
+                    {clip.viral_caption}
+                  </div>
+                </div>
+              )}
               {loadingVideo && !loadError && (
                 <div style={{
                   position: "absolute", inset: 0,
