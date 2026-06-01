@@ -1427,6 +1427,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
   const [progress, setProgress] = useState({ current: 0, total: 0, current_file: "" });
   const [exportedFiles, setExportedFiles] = useState([]);
   const [selectedClip, setSelectedClip] = useState(clips[0] || null);
+  const [editorClip, setEditorClip] = useState(null);  // 🎬 Editar modal
   const [previewUrl, setPreviewUrl] = useState(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -1885,6 +1886,15 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 }}
               >
                 {loadingPreview ? "⏳" : "📸 IG"}
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => selectedClip && setEditorClip(selectedClip)}
+                disabled={!selectedClip}
+                style={{ fontSize: 13 }}
+                title="Editor de zoom, posición y trim del clip seleccionado"
+              >
+                🎬 Editar
               </button>
             </div>
           </div>
@@ -2397,6 +2407,27 @@ function EditorStep({ projectId, clips, onExportDone }) {
           </div>
         </div>
       </div>
+
+      {/* 🎬 Clip Editor Modal — also accessible from this step */}
+      {editorClip && (
+        <ClipEditorModal
+          projectId={projectId}
+          clip={editorClip}
+          onClose={() => setEditorClip(null)}
+          onSaved={(updated) => {
+            // Patch the local clip object so subsequent previews use new values
+            Object.assign(editorClip, updated);
+            // If the saved clip is the currently selected one, refresh the preview
+            if (selectedClip && selectedClip.id === updated.id) {
+              setSelectedClip({ ...selectedClip, ...updated });
+              // Force preview refresh by clearing cache
+              setPreviewUrl(null);
+              setVideoPreviewUrl(null);
+            }
+            setEditorClip(null);
+          }}
+        />
+      )}
     </div>
   );
 }
