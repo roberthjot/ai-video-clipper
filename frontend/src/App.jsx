@@ -574,9 +574,10 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
   const [saving, setSaving] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  // Single raw video — composition built live with HTML/CSS so the box can be
-  // scaled/moved without hiding the surrounding caption/background.
+  // Single raw video URL — composition built live with HTML/CSS so the box
+  // can be scaled/moved without hiding the surrounding caption/background.
   const [videoUrl] = useState(() => api.getRawVideoUrl(projectId));
+  const bgVideoRef = useRef(null);  // blur background — synced with main video
 
   // Seek to clip start when modal opens
   useEffect(() => {
@@ -584,6 +585,19 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
       videoRef.current.currentTime = startTime;
     }
   }, [videoUrl]);
+
+  // Sync the bg blur video's time/play state with the main editable video
+  // so pausing/seeking the main also pauses/seeks the bg.
+  const syncBg = () => {
+    const v = videoRef.current;
+    const bg = bgVideoRef.current;
+    if (!v || !bg) return;
+    if (Math.abs(bg.currentTime - v.currentTime) > 0.3) {
+      try { bg.currentTime = v.currentTime; } catch {}
+    }
+    if (v.paused && !bg.paused) bg.pause();
+    else if (!v.paused && bg.paused) bg.play().catch(() => {});
+  };
 
   // Loop within the trim range — when video reaches endTime, jump back to startTime
   const handleTimeUpdate = () => {
@@ -596,6 +610,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
     if (v.currentTime < startTime - 0.5) {
       v.currentTime = startTime;
     }
+    syncBg();
   };
 
   const togglePlay = () => {
@@ -603,6 +618,8 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
     if (!v) return;
     if (v.paused) { v.play(); setPlaying(true); }
     else { v.pause(); setPlaying(false); }
+    // sync immediately
+    setTimeout(syncBg, 0);
   };
 
   const seekTo = (t) => {
@@ -610,6 +627,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
     if (!v) return;
     v.currentTime = Math.max(startTime, Math.min(endTime, t));
     setCurrentTime(v.currentTime);
+    setTimeout(syncBg, 0);
   };
 
   const handleSave = async () => {
@@ -673,8 +691,8 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                 <div style={{ position: "absolute", inset: 0, background: "#000" }} />
               ) : (
                 <video
+                  ref={bgVideoRef}
                   src={videoUrl}
-                  autoPlay
                   loop
                   muted
                   playsInline

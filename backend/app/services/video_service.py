@@ -872,6 +872,9 @@ def generate_preview_clip(
     no_text: bool = False,
     caption_font: str = "calibri",
     no_emojis: bool = False,
+    edit_zoom: float = 1.0,
+    edit_pan_x: float = 0.0,
+    edit_pan_y: float = 0.0,
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -888,17 +891,26 @@ def generate_preview_clip(
     else:
         target_h = H
 
-    # Build fg_filter based on fill_mode and target height
+    # Per-clip editor transform — scales the BOX size (not the content)
+    _zoom = max(0.3, float(edit_zoom or 1.0))
+    _pan_x_pct = float(edit_pan_x or 0.0) / 100.0
+    _pan_y_pct = float(edit_pan_y or 0.0) / 100.0
+
+    # Build fg_filter based on fill_mode × zoom
     if fill_mode == "fill":
-        fg_filter = f"scale={W}:{target_h}:force_original_aspect_ratio=increase,crop={W}:{target_h}"
+        scaled_h = int(target_h * _zoom)
+        scaled_w = int(W * _zoom)
+        fg_filter = f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=increase,crop={scaled_w}:{scaled_h}"
+    elif fill_mode == "fit":
+        fg_filter = f"scale={int(W * _zoom)}:-2"
     elif fill_mode == "zoom":
-        fg_filter = f"scale=-2:{int(target_h * 0.9)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.9 * _zoom)}"
     elif fill_mode == "small":
-        fg_filter = f"scale=-2:{int(target_h * 0.78)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.78 * _zoom)}"
     elif fill_mode == "medium":
-        fg_filter = f"scale=-2:{int(target_h * 0.65)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.65 * _zoom)}"
     elif fill_mode == "mini":
-        fg_filter = f"scale=-2:{int(target_h * 0.50)}"
+        fg_filter = f"scale=-2:{int(target_h * 0.50 * _zoom)}"
     else:
         fg_filter = f"scale={W}:-2"
 
@@ -915,13 +927,13 @@ def generate_preview_clip(
         filter_complex = (
             f"{_bg(video_h)}[bg];"
             f"[0:v]{fg_filter}[fg];"
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[video_part];"
+            f"[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*{video_h},format=yuv420p[video_part];"
             f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
             f"[video_part][img_part]vstack=inputs=2[v]"
         )
         input_index = 2
     else:
-        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H[v]"
 
     last_label = "v"
     rounded_box_path = None
