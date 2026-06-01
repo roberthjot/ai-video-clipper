@@ -562,7 +562,7 @@ function UploadStep({ onComplete }) {
 // ================================================
 // Clip Editor Modal (zoom / pan / trim with live preview)
 // ================================================
-function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
+function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = "blur", onClose, onSaved }) {
   const videoRef = useRef(null);
   const [zoom, setZoom] = useState(clip.edit_zoom ?? 1.0);
   const [panX, setPanX] = useState(clip.edit_pan_x ?? 0);
@@ -658,29 +658,62 @@ function ClipEditorModal({ projectId, clip, onClose, onSaved }) {
           <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#999", fontSize: 24, cursor: "pointer" }}>✕</button>
         </div>
 
+        {/* Calculate the inner video box height % based on the current fill_mode.
+            Matches the FFmpeg fg_filter percentages in export_service.py. */}
+        {(() => null)()}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
-          {/* Preview — actual video playing with CSS transform overlaid */}
+          {/* Preview — 9:16 canvas with the video positioned per fill_mode.
+              User's zoom/pan only affects the inner video box content. */}
           <div>
             <div style={{
-              background: "#000", borderRadius: 12, overflow: "hidden",
+              background: backgroundStyle === "black" ? "#000" : "#111",
+              borderRadius: 12, overflow: "hidden",
               aspectRatio: "9 / 16", maxHeight: 540, margin: "0 auto",
               position: "relative",
+              display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedData={() => { setLoadingVideo(false); setLoadError(false); }}
-                onError={() => { setLoadingVideo(false); setLoadError(true); }}
-                loop
-                style={{
-                  width: "100%", height: "100%", objectFit: "cover",
-                  transform: `scale(${zoom}) translate(${panX}%, ${panY}%)`,
-                  transformOrigin: "center center",
-                  transition: "transform 0.05s linear",
-                  display: loadError ? "none" : "block",
-                }}
-              />
+              {/* Background hint — show a soft gradient when blur mode is selected */}
+              {backgroundStyle === "blur" && (
+                <div style={{
+                  position: "absolute", inset: 0,
+                  background: "radial-gradient(ellipse at center, rgba(80,80,80,0.4) 0%, rgba(20,20,20,0.8) 100%)",
+                  pointerEvents: "none",
+                }} />
+              )}
+              {/* The actual video box — sized by fill_mode */}
+              <div style={{
+                position: "relative",
+                width: fillMode === "fit" || fillMode === "fill" ? "100%" :
+                       fillMode === "zoom" ? "100%" :
+                       fillMode === "small" ? "100%" :
+                       fillMode === "medium" ? "100%" :
+                       fillMode === "mini" ? "100%" : "100%",
+                height: fillMode === "fill" ? "100%" :
+                        fillMode === "zoom" ? "90%" :
+                        fillMode === "small" ? "78%" :
+                        fillMode === "medium" ? "65%" :
+                        fillMode === "mini" ? "50%" : "auto",
+                overflow: "hidden",
+                background: "#000",
+                border: fillMode !== "fill" ? "1px dashed rgba(255,255,255,0.15)" : "none",
+              }}>
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedData={() => { setLoadingVideo(false); setLoadError(false); }}
+                  onError={() => { setLoadingVideo(false); setLoadError(true); }}
+                  loop
+                  style={{
+                    width: "100%", height: "100%",
+                    objectFit: fillMode === "fill" ? "cover" : "contain",
+                    transform: `scale(${zoom}) translate(${panX}%, ${panY}%)`,
+                    transformOrigin: "center center",
+                    transition: "transform 0.05s linear",
+                    display: loadError ? "none" : "block",
+                  }}
+                />
+              </div>
               {loadingVideo && !loadError && (
                 <div style={{
                   position: "absolute", inset: 0,
@@ -2460,6 +2493,8 @@ function EditorStep({ projectId, clips, onExportDone }) {
         <ClipEditorModal
           projectId={projectId}
           clip={editorClip}
+          fillMode={style.fill_mode}
+          backgroundStyle={style.background_style}
           onClose={() => setEditorClip(null)}
           onSaved={(updated) => {
             // Patch the local clip object so subsequent previews use new values
