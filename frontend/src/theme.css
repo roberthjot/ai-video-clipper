@@ -1,0 +1,133 @@
+/* ============================================================
+   Studio design tokens — light / dark themes.
+   Migrated from design_handoff_clipper_studio/studio.jsx stTok().
+   Prefixed --st-* so they coexist with the legacy App.css vars
+   during the redesign migration.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..800&family=JetBrains+Mono:wght@400..600&display=swap');
+
+:root,
+[data-theme="light"] {
+  --st-bg:        #faf9f6;
+  --st-surface:   #ffffff;
+  --st-alt:       #f4f2ee;
+  --st-soft:      #f7f5f1;
+  --st-border:    #e7e4dd;
+  --st-line:      #efece6;
+  --st-text:      #1b1a17;
+  --st-muted:     #79756c;
+  --st-faint:     #aaa49a;
+  --st-accent:    #1b1a17;
+  --st-on-accent: #faf9f6;
+
+  /* Semantic (minimal, outside the monochrome) */
+  --st-ok:   #5a9e6f;   /* match / online */
+  --st-live: #c0392b;   /* recording / live */
+  --st-gold: #d9cfa0;   /* overlay accent / music vibe */
+
+  /* Soft shadow for preview + modal (light only) */
+  --st-shadow: 0 12px 40px rgba(0,0,0,.18);
+  --st-shadow-modal: 0 24px 70px rgba(0,0,0,.30);
+}
+
+[data-theme="dark"] {
+  --st-bg:        #100f0e;
+  --st-surface:   #1a1917;
+  --st-alt:       #211f1d;
+  --st-soft:      #1d1b19;
+  --st-border:    #322f2b;
+  --st-line:      #262421;
+  --st-text:      #f2efe9;
+  --st-muted:     #989186;
+  --st-faint:     #665f57;
+  --st-accent:    #f2efe9;
+  --st-on-accent: #100f0e;
+
+  --st-ok:   #5a9e6f;
+  --st-live: #c0392b;
+  --st-gold: #d9cfa0;
+
+  /* In dark, shadows are replaced by a 1px ring */
+  --st-shadow: 0 0 0 1px var(--st-border);
+  --st-shadow-modal: 0 0 0 1px var(--st-border);
+}
+
+/* ── Type families ── */
+:root {
+  --st-display: 'Bricolage Grotesque', sans-serif;
+  --st-ui:      'Hanken Grotesk', sans-serif;
+  --st-mono:    'JetBrains Mono', monospace;
+}
+
+/* ── Studio shell base (only applies inside .st-root so it doesn't
+   disturb the legacy screens until they're migrated) ── */
+.st-root {
+  background: var(--st-bg);
+  color: var(--st-text);
+  font-family: var(--st-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.st-root h1, .st-root h2, .st-root h3, .st-root h4 {
+  font-family: var(--st-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.st-mono { font-family: var(--st-mono); }
+.st-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--st-faint);
+}
+
+/* Reusable building blocks */
+.st-card {
+  background: var(--st-surface);
+  border: 1px solid var(--st-line);
+  border-radius: 14px;
+}
+
+.st-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--st-ui); font-size: 13px; font-weight: 600;
+  border-radius: 9px; padding: 8px 13px; cursor: pointer;
+  border: 1px solid transparent; white-space: nowrap; line-height: 1;
+  transition: all .15s; background: transparent; color: var(--st-text);
+}
+.st-btn:hover { background: var(--st-alt); }
+.st-btn--primary { background: var(--st-accent); color: var(--st-on-accent); border-color: var(--st-accent); }
+.st-btn--primary:hover { opacity: .9; background: var(--st-accent); }
+.st-btn--ghost { border-color: var(--st-border); }
+.st-btn--ghost:hover { background: var(--st-alt); }
+.st-btn--quiet { color: var(--st-muted); }
+.st-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.st-iconbtn {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border-radius: 8px; color: var(--st-muted);
+  border: 1px solid var(--st-border); background: var(--st-surface);
+  cursor: pointer; transition: all .15s;
+}
+.st-iconbtn:hover { background: var(--st-alt); color: var(--st-text); }
+
+.st-input, .st-select, .st-textarea {
+  width: 100%; font-family: var(--st-ui); font-size: 13.5px;
+  color: var(--st-text); background: var(--st-surface);
+  border: 1px solid var(--st-border); border-radius: 9px;
+  padding: 9px 11px; outline: none; transition: border-color .15s;
+}
+.st-input:focus, .st-select:focus, .st-textarea:focus { border-color: var(--st-accent); }
+
+/* Range sliders themed to the accent */
+.st-root input[type="range"] { accent-color: var(--st-accent); }
+
+/* Thin scrollbars in the studio */
+.st-root ::-webkit-scrollbar { width: 10px; height: 10px; }
+.st-root ::-webkit-scrollbar-thumb { background: var(--st-border); border-radius: 99px; }
+.st-root ::-webkit-scrollbar-track { background: transparent; }
