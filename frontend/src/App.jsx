@@ -60,18 +60,19 @@ function ModelSelector({ value, onChange, health = {}, checking = false, onCheck
               onClick={() => onChange(val)}
               title={health[val]?.message || val}
               style={{
-                padding: "9px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700,
-                cursor: disabled ? "wait" : "pointer", transition: "all 0.2s",
-                background: value === val ? "linear-gradient(135deg, #10b981, #14b8a6)" : "#111",
-                border: value === val ? "1px solid #14b8a6" : `1px solid ${status ? color : "#333"}`,
-                color: value === val ? "#fff" : "#aaa",
+                padding: "9px 8px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                cursor: disabled ? "wait" : "pointer", transition: "all 0.15s",
+                fontFamily: "var(--st-ui)",
+                background: value === val ? "var(--st-accent)" : "var(--st-surface)",
+                border: value === val ? "1px solid var(--st-accent)" : "1px solid var(--st-border)",
+                color: value === val ? "var(--st-on-accent)" : "var(--st-muted)",
                 opacity: disabled ? 0.6 : 1,
                 textAlign: "center",
               }}
             >
-              <div style={{ fontSize: 12, fontWeight: 700 }}>{label}</div>
-              <div style={{ fontSize: 10, opacity: 0.75, marginTop: 1 }}>{sub}</div>
-              <div style={{ fontSize: 10, color: status ? color : "#666", marginTop: 3 }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{label}</div>
+              <div style={{ fontSize: 10, opacity: 0.7, marginTop: 1 }}>{sub}</div>
+              <div style={{ fontSize: 9.5, fontFamily: "var(--st-mono)", color: value === val ? "var(--st-on-accent)" : (status ? color : "var(--st-faint)"), opacity: value === val ? 0.7 : 1, marginTop: 3 }}>
                 {healthLabel(status)}
               </div>
             </button>
@@ -266,21 +267,21 @@ function UploadStep({ onComplete }) {
               <div key={p.key} style={{ display: "flex", alignItems: "center" }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                   <div style={{
-                    width: 44, height: 44, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 20,
-                    background: isDone ? "#4ade80" : isActive ? "var(--accent)" : "#1a1a1a",
-                    border: isActive ? "2px solid var(--accent)" : isDone ? "2px solid #4ade80" : "2px solid #333",
-                    boxShadow: isActive ? "0 0 16px rgba(99,102,241,0.5)" : "none",
-                    transition: "all 0.3s",
+                    width: 42, height: 42, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 18,
+                    background: isDone ? "var(--st-accent)" : isActive ? "var(--st-accent)" : "var(--st-alt)",
+                    color: (isDone || isActive) ? "var(--st-on-accent)" : "var(--st-faint)",
+                    border: isActive ? "1px solid var(--st-accent)" : isDone ? "1px solid var(--st-accent)" : "1px solid var(--st-border)",
+                    transition: "all 0.2s",
                   }}>
                     {isDone ? "✓" : p.icon}
                   </div>
-                  <span style={{ fontSize: 11, color: isActive ? "#fff" : isDone ? "#4ade80" : "#555", fontWeight: isActive ? 700 : 400 }}>
+                  <span style={{ fontSize: 11, color: isActive ? "var(--st-text)" : "var(--st-faint)", fontWeight: isActive ? 600 : 400 }}>
                     {p.label}
                   </span>
                 </div>
                 {idx < phases.length - 1 && (
-                  <div style={{ width: 60, height: 2, background: isDone ? "#4ade80" : "#222", margin: "0 8px", marginBottom: 20, transition: "background 0.3s" }} />
+                  <div style={{ width: 56, height: 1, background: isDone ? "var(--st-accent)" : "var(--st-border)", margin: "0 8px", marginBottom: 20, transition: "background 0.3s" }} />
                 )}
               </div>
             );
@@ -288,36 +289,30 @@ function UploadStep({ onComplete }) {
         </div>
 
         {/* Main card */}
-        <div style={{
-          background: "#111", borderRadius: 18, padding: "32px 28px", textAlign: "center",
-          border: "1px solid #2a2a2a", boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-        }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>{currentPhase.icon}</div>
-          <h3 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 700 }}>{currentPhase.label}</h3>
-          <p style={{ color: "var(--text-secondary)", fontSize: 14, margin: "0 0 4px" }}>
+        <div className="st-card" style={{ padding: "32px 28px", textAlign: "center", boxShadow: "var(--st-shadow)" }}>
+          <div style={{ fontSize: 44, marginBottom: 14 }}>{currentPhase.icon}</div>
+          <h3 style={{ margin: "0 0 6px", fontFamily: "var(--st-display)", fontSize: 20, fontWeight: 600 }}>{currentPhase.label}</h3>
+          <p style={{ color: "var(--st-muted)", fontSize: 14, margin: "0 0 4px" }}>
             {currentPhase.desc}
           </p>
           {statusMsg && (
-            <p style={{ color: "#6366f1", fontSize: 13, margin: "0 0 20px", fontFamily: "monospace" }}>
+            <p style={{ color: "var(--st-muted)", fontSize: 12.5, margin: "0 0 20px", fontFamily: "var(--st-mono)" }}>
               {statusMsg}
             </p>
           )}
 
           {/* Progress bar */}
-          <div style={{ background: "#1a1a1a", borderRadius: 99, height: 8, overflow: "hidden", marginBottom: 8 }}>
+          <div style={{ background: "var(--st-alt)", borderRadius: 99, height: 8, overflow: "hidden", marginBottom: 8 }}>
             <div style={{
-              height: "100%", borderRadius: 99,
-              background: "linear-gradient(90deg, #6366f1, #8b5cf6)",
-              width: `${percent}%`,
-              transition: "width 0.4s ease",
-              boxShadow: "0 0 8px rgba(99,102,241,0.6)",
+              height: "100%", borderRadius: 99, background: "var(--st-accent)",
+              width: `${percent}%`, transition: "width 0.4s ease",
             }} />
           </div>
-          <p style={{ color: "var(--text-muted)", fontSize: 13, margin: 0 }}>{percent}%</p>
+          <p style={{ color: "var(--st-faint)", fontFamily: "var(--st-mono)", fontSize: 12.5, margin: 0 }}>{percent}%</p>
 
           {phase === "analyzing" && (
-            <div style={{ marginTop: 20, padding: "12px 16px", background: "#0a0a0a", borderRadius: 10, border: "1px solid #2a2a2a" }}>
-              <p style={{ fontSize: 12, color: "#555", margin: 0, lineHeight: 1.6 }}>
+            <div style={{ marginTop: 20, padding: "12px 16px", background: "var(--st-soft)", borderRadius: 10, border: "1px solid var(--st-line)" }}>
+              <p style={{ fontSize: 12, color: "var(--st-muted)", margin: 0, lineHeight: 1.6 }}>
                 💡 Mientras esperas, Gemini identifica los momentos más virales, analiza las reacciones y genera los captions automáticamente.
               </p>
             </div>
@@ -365,70 +360,60 @@ function UploadStep({ onComplete }) {
         <div className="icon">{file ? "✅" : "📁"}</div>
         {file ? (
           <div>
-            <p style={{ fontWeight: 700, fontSize: 15, color: "#22c55e", margin: "0 0 4px" }}>{file.name}</p>
-            <p style={{ color: "#666", fontSize: 13, margin: 0 }}>{(file.size / 1024 / 1024).toFixed(1)} MB · Click para cambiar</p>
+            <p style={{ fontWeight: 700, fontSize: 15, color: "var(--st-ok)", margin: "0 0 4px" }}>{file.name}</p>
+            <p style={{ color: "var(--st-faint)", fontFamily: "var(--st-mono)", fontSize: 12, margin: 0 }}>{(file.size / 1024 / 1024).toFixed(1)} MB · click para cambiar</p>
           </div>
         ) : (
           <>
-            <h3 style={{ margin: "0 0 6px", color: "#ccc" }}>Drag & drop your video here</h3>
-            <p style={{ color: "#555", margin: 0 }}>or click to browse (MP4, MOV, AVI)</p>
+            <h3 style={{ margin: "0 0 6px", color: "var(--st-text)" }}>Arrastra tu video aquí</h3>
+            <p style={{ color: "var(--st-faint)", fontFamily: "var(--st-mono)", fontSize: 12, margin: 0 }}>o clic para elegir (MP4, MOV, AVI)</p>
           </>
         )}
       </div>
 
       {/* Config */}
       <div style={{
-        background: "#1a1a1a", borderRadius: 14, padding: "20px 24px",
-        border: "1px solid #2a2a2a", marginBottom: 20,
+        background: "var(--st-surface)", borderRadius: 14, padding: "20px 24px",
+        border: "1px solid var(--st-line)", marginBottom: 18,
       }}>
-        <div style={{ fontSize: 12, color: "#666", fontWeight: 700, letterSpacing: "0.06em", marginBottom: 16, textTransform: "uppercase" }}>
-          Configuración
-        </div>
+        <div className="st-eyebrow" style={{ marginBottom: 16 }}>Configuración</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
           <div>
-            <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>
               Número de clips
             </label>
             <input
               type="number" value={clipCount}
               onChange={(e) => setClipCount(Math.max(1, parseInt(e.target.value) || 1))}
               min={1} max={50}
-              style={{
-                width: "100%", background: "#111", border: "1px solid #333",
-                borderRadius: 8, padding: "8px 12px", color: "#fff", fontSize: 14,
-                boxSizing: "border-box",
-              }}
+              className="st-input" style={{ fontFamily: "var(--st-mono)" }}
             />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>
               Duración mínima (seg)
             </label>
             <input
               type="number" value={minDuration}
               onChange={(e) => setMinDuration(parseInt(e.target.value) || 10)}
               min={5} max={120}
-              style={{
-                width: "100%", background: "#111", border: "1px solid #333",
-                borderRadius: 8, padding: "8px 12px", color: "#fff", fontSize: 14,
-                boxSizing: "border-box",
-              }}
+              className="st-input" style={{ fontFamily: "var(--st-mono)" }}
             />
           </div>
         </div>
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+          <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>
             Formato de salida
           </label>
           <div style={{
-            background: "#111", border: "1px solid #333", borderRadius: 8,
-            padding: "8px 12px", color: "#6366f1", fontSize: 14, fontWeight: 600,
+            background: "var(--st-alt)", border: "1px solid var(--st-border)", borderRadius: 9,
+            padding: "9px 12px", color: "var(--st-text)", fontSize: 13.5, fontWeight: 600,
           }}>
             9:16 — TikTok / Reels / Shorts
           </div>
         </div>
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 8 }}>
+          <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>
             Modelo de IA
           </label>
           <ModelSelector
@@ -438,56 +423,44 @@ function UploadStep({ onComplete }) {
             checking={checkingModels}
             onCheck={handleCheckModels}
           />
-          <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, marginBottom: 0 }}>
+          <p style={{ fontSize: 11.5, color: "var(--st-faint)", marginTop: 6, marginBottom: 0 }}>
             Si un modelo da 429 (cuota) o 503 (saturado), cambia a otro. El botón
             <b> Check modelos</b> hace un ping rápido a cada uno y pinta su estado.
           </p>
         </div>
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 8 }}>
+          <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>
             Tipo de contenido
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <button
-              type="button"
-              onClick={() => {
-                setContentType("drama");
-                setCustomPrompt("");
-              }}
-              style={{
-                padding: "12px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700,
-                cursor: "pointer", transition: "all 0.2s",
-                background: contentType === "drama" ? "linear-gradient(135deg, #ef4444, #f97316)" : "#111",
-                border: contentType === "drama" ? "1px solid #f97316" : "1px solid #333",
-                color: contentType === "drama" ? "#fff" : "#888",
-                boxShadow: contentType === "drama" ? "0 4px 14px rgba(249,115,22,0.3)" : "none",
-              }}
-            >
-              🎭 Drama / Entretenimiento
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setContentType("motivational");
-                setCustomPrompt(
-                  "Find the most powerful, inspiring, and motivational moments. Prioritize: life-changing quotes, transformation stories, breakthrough realizations, words of wisdom, advice that hits hard, success principles, mindset shifts, and statements that make viewers want to take action. Skip drama, conflict, complaints, or negative emotions. Each clip MUST leave the viewer feeling inspired, motivated, or with a powerful insight. Start at the PEAK of the impactful statement — not before it builds up."
-                );
-              }}
-              style={{
-                padding: "12px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700,
-                cursor: "pointer", transition: "all 0.2s",
-                background: contentType === "motivational" ? "linear-gradient(135deg, #6366f1, #8b5cf6)" : "#111",
-                border: contentType === "motivational" ? "1px solid #8b5cf6" : "1px solid #333",
-                color: contentType === "motivational" ? "#fff" : "#888",
-                boxShadow: contentType === "motivational" ? "0 4px 14px rgba(99,102,241,0.3)" : "none",
-              }}
-            >
-              💪 Motivacional
-            </button>
+            {[
+              { val: "drama", label: "🎭 Drama / Entretenimiento" },
+              { val: "motivational", label: "💪 Motivacional" },
+            ].map(({ val, label }) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => {
+                  setContentType(val);
+                  setCustomPrompt(val === "motivational"
+                    ? "Find the most powerful, inspiring, and motivational moments. Prioritize: life-changing quotes, transformation stories, breakthrough realizations, words of wisdom, advice that hits hard, success principles, mindset shifts, and statements that make viewers want to take action. Skip drama, conflict, complaints, or negative emotions. Each clip MUST leave the viewer feeling inspired, motivated, or with a powerful insight. Start at the PEAK of the impactful statement — not before it builds up."
+                    : "");
+                }}
+                style={{
+                  padding: "12px 14px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", transition: "all 0.15s", fontFamily: "var(--st-ui)",
+                  background: contentType === val ? "var(--st-accent)" : "var(--st-surface)",
+                  border: contentType === val ? "1px solid var(--st-accent)" : "1px solid var(--st-border)",
+                  color: contentType === val ? "var(--st-on-accent)" : "var(--st-muted)",
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+          <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>
             🏷️ Nombre del creador / persona (opcional)
           </label>
           <input
@@ -495,82 +468,56 @@ function UploadStep({ onComplete }) {
             value={creatorName}
             onChange={(e) => setCreatorName(e.target.value)}
             placeholder="e.g. Sophie Rain   ·   varios: Sophie, Piper, Julia, Aishah"
-            style={{
-              width: "100%", background: "#111", border: "1px solid #333",
-              borderRadius: 8, padding: "10px 12px", color: "#e5e5e5", fontSize: 13,
-              boxSizing: "border-box",
-            }}
+            className="st-input"
           />
-          <p style={{ fontSize: 11, color: "#555", margin: "6px 0 0" }}>
+          <p style={{ fontSize: 11.5, color: "var(--st-faint)", margin: "6px 0 0" }}>
             Gemini incluye el nombre en captions y títulos donde fluya natural.
             Varios nombres separados por coma — intenta identificar quién sale en cada clip.
           </p>
         </div>
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+          <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>
             ✂️ Analizar solo un rango (opcional)
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <input
-              type="text"
-              value={analyzeStartStr}
+              type="text" value={analyzeStartStr}
               onChange={(e) => setAnalyzeStartStr(e.target.value)}
               placeholder="Desde (ej. 5:00)"
-              style={{
-                background: "#111", border: "1px solid #333", borderRadius: 8,
-                padding: "10px 12px", color: "#e5e5e5", fontSize: 13,
-                boxSizing: "border-box", fontFamily: "monospace",
-              }}
+              className="st-input" style={{ fontFamily: "var(--st-mono)" }}
             />
             <input
-              type="text"
-              value={analyzeEndStr}
+              type="text" value={analyzeEndStr}
               onChange={(e) => setAnalyzeEndStr(e.target.value)}
               placeholder="Hasta (ej. 15:00)"
-              style={{
-                background: "#111", border: "1px solid #333", borderRadius: 8,
-                padding: "10px 12px", color: "#e5e5e5", fontSize: 13,
-                boxSizing: "border-box", fontFamily: "monospace",
-              }}
+              className="st-input" style={{ fontFamily: "var(--st-mono)" }}
             />
           </div>
-          <p style={{ fontSize: 11, color: "#555", margin: "6px 0 0" }}>
+          <p style={{ fontSize: 11.5, color: "var(--st-faint)", margin: "6px 0 0" }}>
             Formato mm:ss (ej. 10:30) o solo minutos (ej. 10). Vacío = analizar todo el video.
             Recomendado: rangos de 10-15 min para mejor precisión de Gemini.
           </p>
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 12, color: "#888", marginBottom: 6 }}>
+          <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>
             🧠 Instrucciones para la IA (opcional)
           </label>
           <textarea
             value={customPrompt}
             onChange={(e) => setCustomPrompt(e.target.value)}
             placeholder="e.g. Find the most dramatic moments. Prioritize funny reactions and confessions..."
-            style={{
-              width: "100%", background: "#111", border: "1px solid #333",
-              borderRadius: 8, padding: "10px 12px", color: "#e5e5e5", fontSize: 13,
-              resize: "vertical", minHeight: 80, fontFamily: "inherit", boxSizing: "border-box",
-            }}
+            className="st-textarea" style={{ resize: "vertical", minHeight: 80 }}
           />
         </div>
       </div>
 
       <button
-        style={{
-          width: "100%", fontSize: 15, padding: "14px 0", borderRadius: 12,
-          border: "none", cursor: file ? "pointer" : "default", fontWeight: 700,
-          background: file
-            ? "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)"
-            : "#1a1a1a",
-          color: file ? "#fff" : "#444",
-          transition: "all 0.2s",
-          boxShadow: file ? "0 4px 20px rgba(99,102,241,0.3)" : "none",
-        }}
+        className="btn btn-primary"
+        style={{ width: "100%", fontSize: 14, padding: "13px 0", borderRadius: 11 }}
         disabled={!file}
         onClick={handleSubmit}
       >
-        🚀 Analyze Video
+        Analizar video
       </button>
     </div>
   );
