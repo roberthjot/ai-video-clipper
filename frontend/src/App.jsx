@@ -331,16 +331,16 @@ function UploadStep({ onComplete }) {
     <div style={{ maxWidth: 660, margin: "0 auto" }}>
       {/* Header */}
       <div style={{
-        background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)",
-        borderRadius: 16, padding: "22px 28px", marginBottom: 20,
-        border: "1px solid #2a2a4a",
+        background: "var(--st-surface)",
+        borderRadius: 14, padding: "20px 24px", marginBottom: 18,
+        border: "1px solid var(--st-line)",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 28 }}>🎬</div>
+          <div style={{ fontSize: 26 }}>🎬</div>
           <div>
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#fff" }}>Upload Video</h2>
-            <p style={{ margin: 0, color: "#8888aa", fontSize: 13 }}>
-              Gemini watches your video and finds the most viral moments automatically
+            <h2 style={{ margin: 0, fontFamily: "var(--st-display)", fontSize: 19, fontWeight: 600, color: "var(--st-text)", letterSpacing: "-0.02em" }}>Subir video</h2>
+            <p style={{ margin: 0, color: "var(--st-muted)", fontSize: 13 }}>
+              Gemini mira tu video y encuentra los momentos más virales automáticamente
             </p>
           </div>
         </div>
@@ -354,10 +354,10 @@ function UploadStep({ onComplete }) {
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
         style={{
-          borderRadius: 14, marginBottom: 20,
-          background: file ? "#0d1a0d" : "#111",
-          border: file ? "2px dashed #22c55e" : "2px dashed #333",
-          transition: "all 0.2s",
+          borderRadius: 14, marginBottom: 18,
+          background: file ? "var(--st-soft)" : "var(--st-soft)",
+          border: file ? "1.5px solid var(--st-ok)" : "1.5px dashed var(--st-border)",
+          transition: "all 0.15s",
         }}
       >
         <input ref={inputRef} type="file" accept="video/*" hidden
