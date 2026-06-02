@@ -1,6 +1,23 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import "./App.css";
 import * as api from "./services/api";
+import { useTheme } from "./ThemeContext.jsx";
+import { Sun, Moon } from "lucide-react";
+
+// Small light/dark toggle for the header (Studio redesign)
+function ThemeToggle() {
+  const { theme, toggle } = useTheme();
+  return (
+    <button
+      onClick={toggle}
+      title={theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
+      className="st-iconbtn"
+      style={{ marginLeft: 4 }}
+    >
+      {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
+  );
+}
 
 const GEMINI_VIDEO_MODELS = [
   { val: "gemini-2.5-flash",              label: "⚡ 2.5 Flash",       sub: "1500/día · recomendado" },
@@ -6311,32 +6328,34 @@ function App() {
           <span className="icon">🎬</span>
           AI Video Clipper
         </div>
-        <span className="app-version">v9.1</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="app-version">v9.6</span>
+          <ThemeToggle />
+        </div>
       </header>
 
       <main className="app-main">
-        {/* Mode toggle */}
+        {/* Mode toggle — Studio segmented control (monochrome) */}
         <div style={{ padding: "20px 16px 0", display: "flex", justifyContent: "center" }}>
           <div style={{
-            display: "inline-flex", gap: 6, background: "#111", borderRadius: 16,
-            padding: 6, border: "1px solid #2a2a2a", boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+            display: "inline-flex", gap: 4, background: "var(--st-alt)", borderRadius: 12,
+            padding: 4, border: "1px solid var(--st-line)",
           }}>
             {[
-              { key: "video",    icon: "📹", label: "Video Clipper",   active: "linear-gradient(135deg,#6366f1,#8b5cf6)" },
-              { key: "analyzer", icon: "🔍", label: "Analyzer",         active: "linear-gradient(135deg,#0891b2,#06b6d4)" },
-              { key: "stream",   icon: "🔴", label: "Live Stream",      active: "linear-gradient(135deg,#dc2626,#ef4444)" },
-              { key: "meme",     icon: "😂", label: "Meme Generator",   active: "linear-gradient(135deg,#d97706,#f59e0b)" },
-              { key: "editor",   icon: "🎬", label: "Editor",            active: "linear-gradient(135deg,#22c55e,#16a34a)" },
-            ].map(({ key, icon, label, active }) => (
+              { key: "video",    icon: "📹", label: "Video Clipper" },
+              { key: "analyzer", icon: "🔍", label: "Analyzer" },
+              { key: "stream",   icon: "🔴", label: "Live Stream" },
+              { key: "meme",     icon: "😂", label: "Meme Generator" },
+              { key: "editor",   icon: "🎬", label: "Editor" },
+            ].map(({ key, icon, label }) => (
               <button
                 key={key}
                 onClick={() => setMode(key)}
                 style={{
-                  padding: "10px 22px", borderRadius: 12, border: "none", cursor: "pointer",
-                  background: mode === key ? active : "transparent",
-                  color: mode === key ? "#fff" : "#666",
-                  fontWeight: 700, fontSize: 14, transition: "all 0.2s",
-                  boxShadow: mode === key ? "0 2px 12px rgba(0,0,0,0.3)" : "none",
+                  padding: "9px 18px", borderRadius: 9, border: "1px solid transparent", cursor: "pointer",
+                  background: mode === key ? "var(--st-accent)" : "transparent",
+                  color: mode === key ? "var(--st-on-accent)" : "var(--st-muted)",
+                  fontFamily: "var(--st-ui)", fontWeight: 600, fontSize: 13.5, transition: "all 0.15s",
                   whiteSpace: "nowrap",
                 }}
               >
