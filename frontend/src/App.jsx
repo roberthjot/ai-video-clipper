@@ -562,11 +562,48 @@ function UploadStep({ onComplete }) {
 // ================================================
 // Clip Editor Modal (zoom / pan / trim with live preview)
 // ================================================
+// Linear interpolation between keyframes (mirror of the Python helper in
+// backend/services/video_service.interpolate_keyframes). t is clip-relative
+// seconds. Hold first/last value outside the range.
+function interpolateKeyframes(kfs, t) {
+  if (!kfs || kfs.length === 0) return { zoom: 1, pan_x: 0, pan_y: 0 };
+  const sorted = [...kfs].sort((a, b) => a.time - b.time);
+  if (t <= sorted[0].time) return { zoom: sorted[0].zoom, pan_x: sorted[0].pan_x, pan_y: sorted[0].pan_y };
+  const last = sorted[sorted.length - 1];
+  if (t >= last.time) return { zoom: last.zoom, pan_x: last.pan_x, pan_y: last.pan_y };
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i], b = sorted[i + 1];
+    if (a.time <= t && t < b.time) {
+      const u = b.time > a.time ? (t - a.time) / (b.time - a.time) : 0;
+      return {
+        zoom:  a.zoom  + (b.zoom  - a.zoom)  * u,
+        pan_x: a.pan_x + (b.pan_x - a.pan_x) * u,
+        pan_y: a.pan_y + (b.pan_y - a.pan_y) * u,
+      };
+    }
+  }
+  return { zoom: last.zoom, pan_x: last.pan_x, pan_y: last.pan_y };
+}
+
 function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = "blur", onClose, onSaved }) {
   const videoRef = useRef(null);
+  // Static transform (used when keyframes is empty — backward compat)
   const [zoom, setZoom] = useState(clip.edit_zoom ?? 1.0);
   const [panX, setPanX] = useState(clip.edit_pan_x ?? 0);
   const [panY, setPanY] = useState(clip.edit_pan_y ?? 0);
+  // Animated transform — non-empty array switches modal into keyframes mode.
+  // Each kf is { time (seconds from clip start), zoom, pan_x, pan_y }.
+  const [keyframes, setKeyframes] = useState(() => (clip.keyframes || []).map(k => ({
+    time: Number(k.time) || 0,
+    zoom: Number(k.zoom) || 1,
+    pan_x: Number(k.pan_x) || 0,
+    pan_y: Number(k.pan_y) || 0,
+  })));
+  // Index of the keyframe whose values the sliders edit (null = none, edits
+  // static state in non-keyframes mode; auto-defaults to first kf on open).
+  const [selectedKfIndex, setSelectedKfIndex] = useState(
+    (clip.keyframes && clip.keyframes.length > 0) ? 0 : null
+  );
   const [startTime, setStartTime] = useState(clip.start_time);
   const [endTime, setEndTime] = useState(clip.end_time);
   const [currentTime, setCurrentTime] = useState(0);
@@ -576,7 +613,8 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
   const [loadError, setLoadError] = useState(false);
   // Single raw video URL — composition built live with HTML/CSS so the box
   // can be scaled/moved without hiding the surrounding caption/background.
-  const [videoUrl] = useState(() => api.getRawVideoUrl(projectId));
+  // Setter exposed so the Retry button can force-reload the source.
+  const [videoUrl, setVideoUrl] = useState(() => api.getRawVideoUrl(projectId));
   const bgVideoRef = useRef(null);  // blur background — synced with main video
 
   // We seek on the video's onLoadedMetadata instead of in a useEffect —
@@ -628,6 +666,82 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
     setTimeout(syncBg, 0);
   };
 
+  // ─── Keyframes plumbing ─────────────────────────────────────────────────
+  // Keyframes mode is "active" whenever the keyframes array has any entries.
+  const kfMode = keyframes.length > 0;
+  const editingKf = (kfMode && selectedKfIndex !== null && selectedKfIndex < keyframes.length)
+    ? keyframes[selectedKfIndex]
+    : null;
+
+  // What the sliders SHOW (and edit). In static mode = the static state.
+  // In keyframes mode with a selected kf = that kf's values. Without a
+  // selected kf, we still show the static state so the sliders aren't blank.
+  const sliderZoom = editingKf ? editingKf.zoom : zoom;
+  const sliderPanX = editingKf ? editingKf.pan_x : panX;
+  const sliderPanY = editingKf ? editingKf.pan_y : panY;
+
+  // Live VISUAL values for the preview box: in static mode = slider values,
+  // in keyframes mode = interpolated at the current playhead position so the
+  // user sees the animation while scrubbing/playing.
+  const tRelative = currentTime - clip.start_time;
+  const liveValues = kfMode
+    ? interpolateKeyframes(keyframes, tRelative)
+    : { zoom: sliderZoom, pan_x: sliderPanX, pan_y: sliderPanY };
+
+  // Smoother preview while playing — RAF polls video.currentTime at 60 Hz
+  // (timeupdate fires only ~4 Hz which is too coarse for animated zooms).
+  useEffect(() => {
+    if (!playing || !kfMode) return;
+    let raf;
+    const tick = () => {
+      if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, kfMode]);
+
+  // Slider onChange dispatch: edit the selected kf if any, else the static.
+  const setSliderZoom = (v) => {
+    if (editingKf) {
+      setKeyframes(prev => prev.map((k, i) => i === selectedKfIndex ? { ...k, zoom: v } : k));
+    } else { setZoom(v); }
+  };
+  const setSliderPanX = (v) => {
+    if (editingKf) {
+      setKeyframes(prev => prev.map((k, i) => i === selectedKfIndex ? { ...k, pan_x: v } : k));
+    } else { setPanX(v); }
+  };
+  const setSliderPanY = (v) => {
+    if (editingKf) {
+      setKeyframes(prev => prev.map((k, i) => i === selectedKfIndex ? { ...k, pan_y: v } : k));
+    } else { setPanY(v); }
+  };
+
+  // Add a keyframe at the current playhead with current visible values.
+  // Snapshot interpolated values when keyframes already exist (so the new
+  // keyframe doesn't introduce a discontinuity).
+  const addKeyframeHere = () => {
+    const t = Math.max(0, Math.min(clip.end_time - clip.start_time, tRelative));
+    const snap = kfMode ? interpolateKeyframes(keyframes, t) : { zoom, pan_x: panX, pan_y: panY };
+    const newKf = { time: t, zoom: snap.zoom, pan_x: snap.pan_x, pan_y: snap.pan_y };
+    const next = [...keyframes, newKf].sort((a, b) => a.time - b.time);
+    setKeyframes(next);
+    setSelectedKfIndex(next.indexOf(newKf));
+  };
+
+  const deleteSelectedKf = () => {
+    if (selectedKfIndex === null) return;
+    setKeyframes(prev => prev.filter((_, i) => i !== selectedKfIndex));
+    setSelectedKfIndex(null);
+  };
+
+  const selectKfAndSeek = (i) => {
+    setSelectedKfIndex(i);
+    const kf = keyframes[i];
+    if (kf) seekTo(clip.start_time + kf.time);
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -637,6 +751,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
         edit_pan_y: panY,
         start_time: startTime,
         end_time: endTime,
+        keyframes: keyframes,  // wire format already (snake_case)
       });
       onSaved(res.clip);
     } catch (e) {
@@ -648,6 +763,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
 
   const handleReset = () => {
     setZoom(1.0); setPanX(0); setPanY(0);
+    setKeyframes([]); setSelectedKfIndex(null);
     setStartTime(clip.start_time); setEndTime(clip.end_time);
     if (videoRef.current) videoRef.current.currentTime = clip.start_time;
   };
@@ -704,7 +820,9 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                   }}
                 />
               )}
-              {/* INNER VIDEO BOX — scaled by fill_mode × zoom, moved by pan */}
+              {/* INNER VIDEO BOX — scaled by fill_mode × zoom, moved by pan.
+                  In keyframes mode the size/position come from interpolated
+                  liveValues so the user sees the animation in real time. */}
               {(() => {
                 const baseHeightPct =
                   fillMode === "fill"   ? 100 :
@@ -713,18 +831,24 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                   fillMode === "medium" ? 65 :
                   fillMode === "mini"   ? 50 :
                   100;  // fit
-                const boxH = baseHeightPct * zoom;
-                const boxW = 100 * zoom;
+                // In keyframes mode the pan range is [-100, +100] (full source-
+                // crop range). Halve it to match the static overlay-shift feel
+                // so the HTML preview ≈ what FFmpeg's zoompan outputs.
+                const _z = liveValues.zoom;
+                const _px = kfMode ? liveValues.pan_x / 2 : liveValues.pan_x;
+                const _py = kfMode ? liveValues.pan_y / 2 : liveValues.pan_y;
+                const boxH = baseHeightPct * _z;
+                const boxW = 100 * _z;
                 return (
                   <div style={{
                     position: "absolute",
                     width: `${boxW}%`,
                     height: `${boxH}%`,
-                    left: `${50 + panX}%`,
-                    top: `${50 + panY}%`,
+                    left: `${50 + _px}%`,
+                    top: `${50 + _py}%`,
                     transform: "translate(-50%, -50%)",
                     overflow: "hidden",
-                    transition: "all 0.05s linear",
+                    transition: kfMode ? "none" : "all 0.05s linear",
                     zIndex: 1,
                   }}>
                     <video
@@ -826,7 +950,8 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
-                      setVideoUrl(api.getRawVideoUrl(projectId));
+                      // Cache-bust the URL so the browser actually re-fetches
+                      setVideoUrl(`${api.getRawVideoUrl(projectId)}?t=${Date.now()}`);
                       setLoadingVideo(true);
                       setLoadError(false);
                     }}
@@ -841,8 +966,8 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
             {/* Timeline + scrub */}
             <div style={{ marginTop: 14, padding: "0 8px" }}>
               <div style={{
-                position: "relative", height: 32, background: "#1a1a1a", borderRadius: 8,
-                cursor: "pointer", overflow: "hidden",
+                position: "relative", height: 40, background: "#1a1a1a", borderRadius: 8,
+                cursor: "pointer", overflow: "visible",
               }}
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
@@ -854,6 +979,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                 <div style={{
                   position: "absolute", left: 0, top: 0, bottom: 0, right: 0,
                   background: "linear-gradient(90deg, rgba(99,102,241,0.15), rgba(99,102,241,0.3))",
+                  borderRadius: 8,
                 }} />
                 {/* Playhead */}
                 <div style={{
@@ -861,6 +987,33 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                   width: 3, background: "#fff", boxShadow: "0 0 8px rgba(255,255,255,0.6)",
                   pointerEvents: "none",
                 }} />
+                {/* Keyframe markers (diamonds). Time is clip-relative, so the
+                    visible position depends on the current trim window. */}
+                {keyframes.map((kf, i) => {
+                  const tAbs = clip.start_time + kf.time;
+                  const pct = clipDur > 0 ? ((tAbs - startTime) / clipDur) * 100 : 0;
+                  if (pct < -2 || pct > 102) return null;  // outside visible trim
+                  const isSel = selectedKfIndex === i;
+                  return (
+                    <div
+                      key={i}
+                      onClick={(e) => { e.stopPropagation(); selectKfAndSeek(i); }}
+                      title={`Keyframe ${i + 1} — t=${kf.time.toFixed(2)}s · zoom ${kf.zoom.toFixed(2)} · pan (${kf.pan_x.toFixed(0)},${kf.pan_y.toFixed(0)})`}
+                      style={{
+                        position: "absolute",
+                        left: `${pct}%`,
+                        top: "50%",
+                        width: 14, height: 14,
+                        transform: "translate(-50%, -50%) rotate(45deg)",
+                        background: isSel ? "#fbbf24" : "#6366f1",
+                        border: "2px solid #000",
+                        boxShadow: isSel ? "0 0 10px rgba(251,191,36,0.7)" : "0 0 4px rgba(0,0,0,0.6)",
+                        cursor: "pointer",
+                        zIndex: 4,
+                      }}
+                    />
+                  );
+                })}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginTop: 4, fontFamily: "monospace" }}>
                 <span>{formatTime(startTime)}</span>
@@ -883,27 +1036,118 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
 
           {/* Controls panel */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* ─── Keyframes section ─────────────────────────────────────── */}
+            <div style={{
+              background: "var(--bg-secondary)", borderRadius: 10, padding: "14px 16px",
+              border: kfMode ? "1px solid rgba(251,191,36,0.4)" : "1px solid transparent",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <h4 style={{ margin: 0, fontSize: 14 }}>
+                  🎞 Keyframes <span style={{ color: "#777", fontWeight: 400 }}>({keyframes.length})</span>
+                </h4>
+                <button
+                  onClick={addKeyframeHere}
+                  className="btn btn-primary"
+                  style={{ padding: "4px 10px", fontSize: 12 }}
+                  title="Agregar un keyframe en el tiempo actual con los valores visibles"
+                >
+                  ➕ Aquí
+                </button>
+              </div>
+              {kfMode ? (
+                <>
+                  <div style={{
+                    display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8,
+                    maxHeight: 80, overflowY: "auto",
+                  }}>
+                    {keyframes.map((kf, i) => (
+                      <button
+                        key={i}
+                        onClick={() => selectKfAndSeek(i)}
+                        style={{
+                          padding: "3px 8px", fontSize: 11, borderRadius: 6,
+                          border: selectedKfIndex === i ? "1px solid #fbbf24" : "1px solid #333",
+                          background: selectedKfIndex === i ? "rgba(251,191,36,0.15)" : "#1a1a1a",
+                          color: selectedKfIndex === i ? "#fbbf24" : "#aaa",
+                          cursor: "pointer", fontFamily: "monospace",
+                        }}
+                        title={`zoom ${kf.zoom.toFixed(2)} · pan (${kf.pan_x.toFixed(0)},${kf.pan_y.toFixed(0)})`}
+                      >
+                        {i + 1}·{kf.time.toFixed(1)}s
+                      </button>
+                    ))}
+                  </div>
+                  {editingKf ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <span style={{ fontSize: 11, color: "#fbbf24", flex: 1, alignSelf: "center" }}>
+                        Editando KF {selectedKfIndex + 1}
+                      </span>
+                      <button
+                        onClick={deleteSelectedKf}
+                        className="btn btn-secondary"
+                        style={{ padding: "3px 10px", fontSize: 11 }}
+                      >
+                        🗑 Borrar
+                      </button>
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: 11, color: "#888", margin: 0 }}>
+                      Click un keyframe para editarlo.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p style={{ fontSize: 11, color: "#888", margin: 0 }}>
+                  Modo estático. Agrega un keyframe para animar zoom/posición durante el clip.
+                </p>
+              )}
+            </div>
+
             <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "14px 16px" }}>
-              <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>Transform</h4>
+              <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>
+                Transform
+                {editingKf && <span style={{ color: "#fbbf24", fontSize: 11, fontWeight: 400, marginLeft: 6 }}>· KF {selectedKfIndex + 1}</span>}
+                {kfMode && !editingKf && <span style={{ color: "#888", fontSize: 11, fontWeight: 400, marginLeft: 6 }}>· (estático — sin kf seleccionado)</span>}
+              </h4>
 
-              <label style={{ fontSize: 12, color: "#aaa" }}>Tamaño del cuadro: <b style={{ color: "var(--accent)" }}>{zoom.toFixed(2)}x</b></label>
-              <input type="range" min={0.3} max={2.0} step={0.05} value={zoom}
-                onChange={(e) => setZoom(parseFloat(e.target.value))}
+              {/* Zoom slider — in keyframes mode min is 1.0 (zoompan can't zoom out) */}
+              <label style={{ fontSize: 12, color: "#aaa" }}>
+                Tamaño del cuadro: <b style={{ color: editingKf ? "#fbbf24" : "var(--accent)" }}>{sliderZoom.toFixed(2)}x</b>
+              </label>
+              <input type="range"
+                min={editingKf ? 1.0 : 0.3}
+                max={editingKf ? 3.0 : 2.0}
+                step={0.05}
+                value={sliderZoom}
+                onChange={(e) => setSliderZoom(parseFloat(e.target.value))}
                 style={{ width: "100%", marginBottom: 12 }} />
 
-              <label style={{ fontSize: 12, color: "#aaa" }}>Posición X: <b style={{ color: "var(--accent)" }}>{panX.toFixed(0)}%</b></label>
-              <input type="range" min={-50} max={50} step={1} value={panX}
-                onChange={(e) => setPanX(parseFloat(e.target.value))}
+              {/* Pan ranges differ between modes (overlay-shift vs source-crop) */}
+              <label style={{ fontSize: 12, color: "#aaa" }}>
+                Posición X: <b style={{ color: editingKf ? "#fbbf24" : "var(--accent)" }}>{sliderPanX.toFixed(0)}{editingKf ? "" : "%"}</b>
+              </label>
+              <input type="range"
+                min={editingKf ? -100 : -50}
+                max={editingKf ? 100 : 50}
+                step={1}
+                value={sliderPanX}
+                onChange={(e) => setSliderPanX(parseFloat(e.target.value))}
                 style={{ width: "100%", marginBottom: 12 }} />
 
-              <label style={{ fontSize: 12, color: "#aaa" }}>Posición Y: <b style={{ color: "var(--accent)" }}>{panY.toFixed(0)}%</b></label>
-              <input type="range" min={-50} max={50} step={1} value={panY}
-                onChange={(e) => setPanY(parseFloat(e.target.value))}
+              <label style={{ fontSize: 12, color: "#aaa" }}>
+                Posición Y: <b style={{ color: editingKf ? "#fbbf24" : "var(--accent)" }}>{sliderPanY.toFixed(0)}{editingKf ? "" : "%"}</b>
+              </label>
+              <input type="range"
+                min={editingKf ? -100 : -50}
+                max={editingKf ? 100 : 50}
+                step={1}
+                value={sliderPanY}
+                onChange={(e) => setSliderPanY(parseFloat(e.target.value))}
                 style={{ width: "100%", marginBottom: 8 }} />
 
               <button className="btn btn-secondary" onClick={handleReset}
                 style={{ width: "100%", padding: "8px 0", fontSize: 12 }}>
-                ↻ Reset todo
+                ↻ Reset todo (limpia keyframes)
               </button>
             </div>
 
@@ -950,7 +1194,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
 // ================================================
 // STEP 2: Clip Results
 // ================================================
-function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
+function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }) {
   const [editingClip, setEditingClip] = useState(null);
   const [editText, setEditText] = useState("");
   const [playingClip, setPlayingClip] = useState(null);
@@ -1311,6 +1555,17 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
                 <span className="tag">
                   📍 {formatTime(clip.start_time)} — {formatTime(clip.end_time)}
                 </span>
+                {/* Editor badge — appears when zoom/pan has been modified.
+                    Trims are already reflected in the duration tag above. */}
+                {((clip.edit_zoom ?? 1) !== 1 || (clip.edit_pan_x ?? 0) !== 0 || (clip.edit_pan_y ?? 0) !== 0) && (
+                  <span
+                    className="tag"
+                    title={`zoom ${(clip.edit_zoom ?? 1).toFixed(2)}x · pan ${(clip.edit_pan_x ?? 0).toFixed(0)},${(clip.edit_pan_y ?? 0).toFixed(0)}`}
+                    style={{ background: "rgba(99,102,241,0.18)", color: "#a5b4fc", borderColor: "rgba(99,102,241,0.45)" }}
+                  >
+                    🎬 editado
+                  </span>
+                )}
                 {clip.viral_score && (
                   <span style={{
                     padding: "2px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700,
@@ -1470,18 +1725,19 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
         </div>
       )}
 
-      {/* Clip Editor Modal — zoom, pan, trim (live preview via CSS transform) */}
+      {/* Clip Editor Modal — zoom, pan, trim (live preview via CSS transform).
+          Style is unknown at this step (user hasn't picked one yet), so the
+          modal preview uses the StyleConfig defaults: fit + blur. */}
       {editorClip && (
         <ClipEditorModal
           projectId={projectId}
           clip={editorClip}
           onClose={() => setEditorClip(null)}
           onSaved={(updated) => {
-            // Patch the local clips list with the updated values
-            onEdit(updated.id, updated.viral_caption);  // existing handler for caption changes
-            // Replace the full clip object in parent state
-            // (parent only exposes onEdit for caption; we use it here to trigger refresh)
-            Object.assign(editorClip, updated);
+            // Propagate the full clip (zoom/pan/trim/duration/caption) to the
+            // parent's clips array so the edit survives going to step 3.
+            if (onUpdateClip) onUpdateClip(updated.id, updated);
+            else onEdit(updated.id, updated.viral_caption);
             setEditorClip(null);
           }}
         />
@@ -1556,7 +1812,7 @@ function ClipsStep({ projectId, clips, onEdit, onReorder, onNext }) {
 // ================================================
 // STEP 3: Visual Editor & Export
 // ================================================
-function EditorStep({ projectId, clips, onExportDone }) {
+function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
   const [watermarkFile, setWatermarkFile] = useState(null);
   const [watermarkPreview, setWatermarkPreview] = useState(null);
   const [splitImagePreview, setSplitImagePreview] = useState(null);
@@ -1572,6 +1828,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     watermark_scale: 0.3,
     watermark_opacity: 0.9,
     fill_mode: "fit",
+    fill_mode_scale: 1.0,
     ig_fill_mode: "fit",
     ig_top_padding: 130,
     ig_watermark_y: 0.85,
@@ -1585,6 +1842,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
     caption_font: "calibri",
     subtitle_style: "none",
     subtitle_size_scale: 1.0,
+    subtitle_y: 0.0,         // -0.5 (down) to +0.5 (up) — offset from style default
     visual_filter: "none",
     background_style: "blur",
     no_text: false,
@@ -1709,7 +1967,7 @@ function EditorStep({ projectId, clips, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.background_style, style.no_text, style.caption_font, style.no_emojis]);
+  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis]);
 
   // Poll progress
   useEffect(() => {
@@ -2083,6 +2341,32 @@ function EditorStep({ projectId, clips, onExportDone }) {
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
               Fit = full · Medium = un poco más chico · Mini = el más pequeño · Zoom = grande · Fill = frame completo · Small = reducido
             </p>
+
+            {/* Fine-tune multiplier on top of the chosen preset (1.0 = preset as-is) */}
+            <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                Tamaño fino:
+              </span>
+              <input
+                type="range" min={0.5} max={1.5} step={0.02}
+                value={style.fill_mode_scale ?? 1.0}
+                onChange={(e) => setStyle((s) => ({ ...s, fill_mode_scale: parseFloat(e.target.value) }))}
+                style={{ flex: 1 }}
+              />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", minWidth: 50, textAlign: "right" }}>
+                {Math.round((style.fill_mode_scale ?? 1.0) * 100)}%
+              </span>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: "4px 10px", fontSize: 11 }}
+                onClick={() => setStyle((s) => ({ ...s, fill_mode_scale: 1.0 }))}
+              >
+                Reset
+              </button>
+            </div>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+              Multiplica el tamaño del preset elegido. 100% = preset tal cual · 120% = un poco más grande · 80% = más chico.
+            </p>
           </div>
 
           {/* Background */}
@@ -2278,6 +2562,35 @@ function EditorStep({ projectId, clips, onExportDone }) {
                 </button>
               </div>
             )}
+
+            {/* Subtitle vertical position slider */}
+            {style.subtitle_style !== "none" && (() => {
+              const y = style.subtitle_y || 0;
+              const labelTxt = y === 0 ? "default" : y > 0 ? `⬆ ${Math.round(y * 100)}%` : `⬇ ${Math.round(-y * 100)}%`;
+              return (
+                <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                    Posición:
+                  </span>
+                  <input
+                    type="range" min={-0.5} max={0.5} step={0.02}
+                    value={y}
+                    onChange={(e) => setStyle((s) => ({ ...s, subtitle_y: parseFloat(e.target.value) }))}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", minWidth: 70, textAlign: "right" }}>
+                    {labelTxt}
+                  </span>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: "4px 10px", fontSize: 11 }}
+                    onClick={() => setStyle((s) => ({ ...s, subtitle_y: 0.0 }))}
+                  >
+                    Reset
+                  </button>
+                </div>
+              );
+            })()}
           </div>
 
           {/* IG Video Size */}
@@ -2585,12 +2898,14 @@ function EditorStep({ projectId, clips, onExportDone }) {
           backgroundStyle={style.background_style}
           onClose={() => setEditorClip(null)}
           onSaved={(updated) => {
-            // Patch the local clip object so subsequent previews use new values
-            Object.assign(editorClip, updated);
-            // If the saved clip is the currently selected one, refresh the preview
+            // Persist the full clip update to the parent's clips array so the
+            // edit survives navigating back to step 2 or re-rendering.
+            if (onUpdateClip) onUpdateClip(updated.id, updated);
+            // If the saved clip is the currently selected one, sync local
+            // selectedClip state and force the next preview to regenerate
+            // (URLs already include ?t=Date.now() so any new call cache-busts).
             if (selectedClip && selectedClip.id === updated.id) {
               setSelectedClip({ ...selectedClip, ...updated });
-              // Force preview refresh by clearing cache
               setPreviewUrl(null);
               setVideoPreviewUrl(null);
             }
@@ -4389,10 +4704,1561 @@ function AnalyzerStep() {
   );
 }
 
+// ================================================
+// SubtitleOverlay — renders the active subtitle word(s) live over an HTML
+// <video>, in sync with currentTime. Implements the 8 styles in CSS so the
+// editor gives instant visual feedback (no FFmpeg roundtrip while editing).
+// The final FFmpeg export is the source of truth; this is a faithful preview.
+// ================================================
+function _groupSizeForStyle(style) {
+  if (style === "popup" || style === "big_center" || style === "bounce") return 1;
+  if (style === "twoword") return 2;
+  return 4; // clean, karaoke, highlight, typewriter
+}
+
+function _currentGroup(words, t, groupSize) {
+  // Walk grouped words; return the group active at time t (clip-relative
+  // = original-video-time since the API stores absolute times).
+  for (let i = 0; i < words.length; i += groupSize) {
+    const grp = words.slice(i, i + groupSize);
+    if (!grp.length) continue;
+    const g0 = grp[0].start;
+    const gN = grp[grp.length - 1].end;
+    if (t >= g0 && t <= gN + 0.05) {
+      const active = grp.find((w) => t >= w.start && t <= w.end + 0.02) || grp[grp.length - 1];
+      // Index of active letter for typewriter
+      const aw = active || grp[0];
+      const letterFrac = aw.end > aw.start
+        ? Math.max(0, Math.min(1, (t - aw.start) / (aw.end - aw.start)))
+        : 1;
+      return { group: grp, active, letterFrac, gStart: g0, gEnd: gN };
+    }
+  }
+  return null;
+}
+
+function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
+  if (!words || words.length === 0) return null;
+  const groupSize = _groupSizeForStyle(style);
+  const cur = _currentGroup(words, currentTime, groupSize);
+  if (!cur) return null;
+  const { group, active, letterFrac } = cur;
+
+  // Mirror the backend's base sizes from subtitle_service._ass_header
+  const baseSizes = {
+    clean: 75, karaoke: 80, popup: 110, highlight: 78,
+    big_center: 150, twoword: 100, bounce: 120, typewriter: 80,
+  };
+  // Mirror the marginV defaults too — ASS uses bottom-anchored margin.
+  // 0.30 = 30% above the bottom of the canvas.
+  const baseMargins = {
+    clean: 0.30, karaoke: 0.30, highlight: 0.30, typewriter: 0.30,
+    twoword: 0.40, bounce: 0.40, popup: 0.45, big_center: 0.45,
+  };
+  const fontPx = (baseSizes[style] || 75) * Math.max(0.6, Math.min(1.6, sizeScale || 1));
+  // Convert canvas px (out of 1920 tall) to container-relative cqh
+  const fontCqh = (fontPx / 1920) * 100;
+  const baseBottomFrac = baseMargins[style] || 0.30;
+  // yOffset is +up / -down, additive on top of baseMargin
+  const bottomFrac = Math.max(0.04, Math.min(0.96, baseBottomFrac + (yOffset || 0)));
+  const bottomPct = bottomFrac * 100;
+
+  // Common positioning wrapper
+  const wrapStyle = {
+    position: "absolute",
+    left: 0, right: 0,
+    bottom: `${bottomPct}%`,
+    textAlign: "center",
+    pointerEvents: "none",
+    fontFamily: "'Arial Black', 'Segoe UI Black', sans-serif",
+    fontWeight: 900,
+    lineHeight: 1.1,
+    textTransform: "uppercase",
+    zIndex: 5,
+  };
+
+  // Mirror the heavy black outline ASS uses — stack drop-shadows for crispness
+  const outline = "2px 2px 0 #000, -2px 2px 0 #000, 2px -2px 0 #000, -2px -2px 0 #000, 0 0 4px #000";
+
+  // ── Style-specific rendering ──
+  if (style === "clean") {
+    const text = group.map((w) => w.word).join(" ");
+    return (
+      <div style={wrapStyle}>
+        <span style={{ color: "#fff", fontSize: `${fontCqh}cqh`, textShadow: outline, padding: "0 0.4cqh" }}>{text}</span>
+      </div>
+    );
+  }
+
+  if (style === "karaoke") {
+    return (
+      <div style={wrapStyle}>
+        <span style={{ fontSize: `${fontCqh}cqh`, textShadow: outline, padding: "0 0.4cqh" }}>
+          {group.map((w, i) => (
+            <span key={i} style={{ color: w === active ? "#fde047" : "#fff", transition: "color 0.08s" }}>
+              {w.word}{i < group.length - 1 ? " " : ""}
+            </span>
+          ))}
+        </span>
+      </div>
+    );
+  }
+
+  if (style === "popup") {
+    // Single word, scale-in animation each new active word
+    return (
+      <div style={wrapStyle}>
+        <span
+          key={`${active.start}`}  // re-mount on word change → re-trigger animation
+          style={{
+            display: "inline-block",
+            color: "#fff", fontSize: `${fontCqh}cqh`,
+            textShadow: outline,
+            animation: "subPopup 180ms cubic-bezier(.34,1.56,.64,1)",
+          }}
+        >
+          {active?.word || ""}
+        </span>
+        <style>{`@keyframes subPopup { 0%{transform:scale(0.4);opacity:0} 70%{transform:scale(1.15)} 100%{transform:scale(1);opacity:1} }`}</style>
+      </div>
+    );
+  }
+
+  if (style === "highlight") {
+    // Submagic-style — full group visible, active word on yellow box
+    return (
+      <div style={wrapStyle}>
+        <span style={{ fontSize: `${fontCqh}cqh`, padding: "0 0.4cqh", textShadow: outline }}>
+          {group.map((w, i) => (
+            <span key={i} style={{
+              color: w === active ? "#000" : "#fff",
+              background: w === active ? "#fde047" : "transparent",
+              padding: w === active ? "0 0.6cqh" : 0,
+              borderRadius: "0.4cqh",
+              transition: "all 0.05s",
+            }}>
+              {w.word}{i < group.length - 1 ? " " : ""}
+            </span>
+          ))}
+        </span>
+      </div>
+    );
+  }
+
+  if (style === "big_center") {
+    // Huge single word at vertical centre regardless of bottom margin
+    return (
+      <div style={{ ...wrapStyle, bottom: "auto", top: "50%", transform: "translateY(-50%)" }}>
+        <span key={`${active.start}`} style={{
+          color: "#fff", fontSize: `${fontCqh}cqh`, textShadow: outline,
+          display: "inline-block", animation: "subPopup 150ms ease-out",
+        }}>{active?.word || ""}</span>
+      </div>
+    );
+  }
+
+  if (style === "twoword") {
+    const text = group.map((w) => w.word).join(" ");
+    return (
+      <div style={wrapStyle}>
+        <span key={`${cur.gStart}`} style={{
+          color: "#fff", fontSize: `${fontCqh}cqh`, textShadow: outline,
+          display: "inline-block", animation: "subPopup 140ms ease-out",
+        }}>{text}</span>
+      </div>
+    );
+  }
+
+  if (style === "bounce") {
+    return (
+      <div style={wrapStyle}>
+        <span key={`${active.start}`} style={{
+          color: "#fff", fontSize: `${fontCqh}cqh`, textShadow: outline,
+          display: "inline-block", animation: "subBounce 320ms cubic-bezier(.5,1.6,.4,1)",
+        }}>{active?.word || ""}</span>
+        <style>{`@keyframes subBounce { 0%{transform:translateY(40%) scale(0.6);opacity:0} 60%{transform:translateY(-12%) scale(1.18)} 80%{transform:translateY(4%) scale(0.96)} 100%{transform:translateY(0) scale(1);opacity:1} }`}</style>
+      </div>
+    );
+  }
+
+  if (style === "typewriter") {
+    // Show full group, but the active word reveals letter-by-letter
+    return (
+      <div style={wrapStyle}>
+        <span style={{ fontSize: `${fontCqh}cqh`, color: "#fff", textShadow: outline, padding: "0 0.4cqh" }}>
+          {group.map((w, i) => {
+            if (w === active) {
+              const cut = Math.max(1, Math.ceil(w.word.length * letterFrac));
+              return <span key={i}>{w.word.slice(0, cut)}{i < group.length - 1 ? " " : ""}</span>;
+            }
+            // Past words: full; future words: hidden (typewriter mood)
+            const isPast = w.end <= (active?.start || 0);
+            return isPast ? <span key={i}>{w.word}{i < group.length - 1 ? " " : ""}</span> : null;
+          })}
+        </span>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+
+// ================================================
+// TimelineEditor — CapCut-style compacted, reorderable timeline.
+// Shows ONLY the kept segments as blocks (width ∝ duration) in playback order.
+// Drag a block to reorder, click to select, ✂️ split at playhead, 🗑 delete.
+// The playhead and all interaction are in OUTPUT time (the final video's
+// timeline). Each block shows the thumbnails that fall in its source range.
+// ================================================
+function TimelineEditor({
+  thumbnails, segments, selectedIdx, outputTime, outputDuration,
+  onSeekOutput, onSelectSegment, onSplit, onDeleteSegment, onReorder, onResizeSegment,
+  loadingThumbs,
+}) {
+  const rulerRef = useRef(null);   // thin scrub bar
+  const blocksRef = useRef(null);  // blocks row
+  const [scrubbing, setScrubbing] = useState(false);
+  // Manual block drag state (ref so listeners see latest without re-subscribing)
+  const dragRef = useRef(null);    // {idx, startX, moved}
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dropIdx, setDropIdx] = useState(null);
+  const resizeRef = useRef(null);  // {idx, startX, pxPerSec, startVal, isImage}
+  const [resizingIdx, setResizingIdx] = useState(null);
+
+  const fmt = (sec) => {
+    const m = Math.floor(sec / 60), s = Math.floor(Math.max(0, sec) % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+  const pctOut = (t) => (outputDuration > 0 ? (t / outputDuration) * 100 : 0);
+
+  // ── Scrub (ruler) ──
+  const seekFromClientX = (clientX) => {
+    const el = rulerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    onSeekOutput(frac * outputDuration);
+  };
+  useEffect(() => {
+    if (!scrubbing) return;
+    const move = (e) => seekFromClientX(e.clientX);
+    const up = () => setScrubbing(false);
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+  }, [scrubbing, outputDuration]); // eslint-disable-line
+
+  // ── Block drag-to-reorder (manual, with a movement threshold so a plain
+  // click still selects without triggering a reorder) ──
+  const dropIdxFromClientX = (clientX) => {
+    const el = blocksRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const x = clientX - rect.left;
+    // Walk block widths (proportional to duration) to find which slot x is over
+    let acc = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const w = (segments[i].end - segments[i].start) / (outputDuration || 1) * rect.width;
+      if (x < acc + w / 2) return i;
+      acc += w;
+    }
+    return segments.length - 1;
+  };
+
+  useEffect(() => {
+    const move = (e) => {
+      const d = dragRef.current;
+      if (!d) return;
+      if (!d.moved && Math.abs(e.clientX - d.startX) > 6) d.moved = true;
+      if (d.moved) setDropIdx(dropIdxFromClientX(e.clientX));
+    };
+    const up = (e) => {
+      const d = dragRef.current;
+      if (!d) return;
+      if (d.moved) {
+        const to = dropIdxFromClientX(e.clientX);
+        if (to !== d.idx) {
+          const next = [...segments];
+          const [moved] = next.splice(d.idx, 1);
+          next.splice(to, 0, moved);
+          onReorder(next);
+        }
+      } else {
+        // Plain click → select that block
+        onSelectSegment(d.idx);
+      }
+      dragRef.current = null;
+      setDragIdx(null);
+      setDropIdx(null);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+  }, [segments, outputDuration]); // eslint-disable-line
+
+  // Resize handle drag (stretch a block: image→duration, video→trim end)
+  useEffect(() => {
+    const move = (e) => {
+      const r = resizeRef.current;
+      if (!r) return;
+      const deltaSec = (e.clientX - r.startX) / (r.pxPerSec || 30);
+      onResizeSegment(r.idx, r.startVal + deltaSec, r.isImage);
+    };
+    const up = () => { resizeRef.current = null; setResizingIdx(null); };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+  }, [onResizeSegment]); // eslint-disable-line
+
+  const thumbsFor = (seg) => {
+    const inside = thumbnails.filter((t) => t.time >= seg.start && t.time <= seg.end);
+    return inside.length ? inside : thumbnails.slice(0, 1);
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {/* Toolbar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <button className="btn btn-primary" onClick={onSplit}
+          title="Cortar aquí (divide el segmento bajo el cursor)"
+          style={{ padding: "6px 14px", fontSize: 13 }}>
+          ✂️ Cortar aquí
+        </button>
+        <button className="btn btn-secondary" onClick={onDeleteSegment}
+          disabled={selectedIdx === null || segments.length <= 1}
+          style={{ padding: "6px 14px", fontSize: 13, opacity: (selectedIdx === null || segments.length <= 1) ? 0.5 : 1 }}>
+          🗑 Borrar
+        </button>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#888", fontFamily: "monospace" }}>
+          {fmt(outputTime)} / {fmt(outputDuration)}
+        </span>
+      </div>
+
+      {/* Ruler (scrub the playhead) */}
+      <div
+        ref={rulerRef}
+        onMouseDown={(e) => { setScrubbing(true); seekFromClientX(e.clientX); }}
+        style={{
+          position: "relative", height: 18, background: "#161616",
+          borderRadius: "6px 6px 0 0", border: "1px solid #2a2a2a", borderBottom: "none",
+          cursor: "pointer", userSelect: "none",
+        }}
+      >
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(99,102,241,0.12), rgba(99,102,241,0.22))" }} />
+        {/* Playhead on the ruler */}
+        {outputDuration > 0 && (
+          <div style={{
+            position: "absolute", top: 0, bottom: -56, left: `${pctOut(outputTime)}%`,
+            width: 2, background: "#fff", boxShadow: "0 0 8px rgba(255,255,255,0.9)",
+            pointerEvents: "none", zIndex: 6,
+          }}>
+            <div style={{
+              position: "absolute", top: -3, left: "50%", transform: "translateX(-50%)",
+              width: 11, height: 11, background: "#fff", borderRadius: "50%",
+              boxShadow: "0 0 6px rgba(0,0,0,0.6)",
+            }} />
+          </div>
+        )}
+      </div>
+
+      {/* Blocks row */}
+      <div
+        ref={blocksRef}
+        style={{
+          position: "relative", height: 70, background: "#0a0a0a",
+          borderRadius: "0 0 8px 8px", border: "1px solid #2a2a2a", userSelect: "none",
+          display: "flex", overflow: "hidden",
+        }}
+      >
+        {loadingThumbs ? (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#555", fontSize: 12 }}>
+            Generando miniaturas...
+          </div>
+        ) : segments.map((seg, i) => {
+          // Width must use OUTPUT duration (image clips have end-start=0; their
+          // length is `duration`. Video clips shrink/grow with speed).
+          const segDur = seg.type === "image" ? (seg.duration || 3) : (seg.end - seg.start) / (seg.speed || 1);
+          const w = outputDuration > 0 ? (segDur / outputDuration) * 100 : 0;
+          const isSel = selectedIdx === i;
+          const isImage = seg.type === "image";
+          return (
+            <div
+              key={i}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                dragRef.current = { idx: i, startX: e.clientX, moved: false };
+                setDragIdx(i);
+              }}
+              title="Arrastrá para reordenar · click para seleccionar · borde derecho para estirar"
+              style={{
+                position: "relative", width: `${w}%`, minWidth: 14, height: "100%",
+                cursor: "grab", overflow: "hidden",
+                borderRight: i < segments.length - 1 ? "2px solid #000" : "none",
+                outline: isSel ? "2px solid #fbbf24" : "none",
+                outlineOffset: "-2px",
+                opacity: dragIdx === i ? 0.4 : 1,
+                boxShadow: dropIdx === i && dragIdx !== null ? "inset 4px 0 0 #22c55e" : "none",
+                background: isImage ? "#1e293b" : "transparent",
+              }}
+            >
+              {isImage ? (
+                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {seg.url ? <img src={seg.url} alt="" draggable={false} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", opacity: 0.9 }} />
+                    : <span style={{ fontSize: 18 }}>🖼</span>}
+                </div>
+              ) : (
+                <div style={{ position: "absolute", inset: 0, display: "flex" }}>
+                  {thumbsFor(seg).map((t, k) => (
+                    <img key={k} src={t.url} alt="" draggable={false}
+                      style={{ flex: 1, height: "100%", objectFit: "cover", minWidth: 0, opacity: 0.85 }} />
+                  ))}
+                </div>
+              )}
+              {isSel && <div style={{ position: "absolute", inset: 0, background: "rgba(251,191,36,0.14)", pointerEvents: "none" }} />}
+              <div style={{ position: "absolute", top: 2, left: 4, fontSize: 10, fontWeight: 700, color: "#fff", textShadow: "0 1px 2px #000", pointerEvents: "none" }}>
+                {i + 1}{!isImage && seg.speed && seg.speed !== 1 ? ` · ${seg.speed}x` : ""}{isImage ? ` · ${(seg.duration || 3).toFixed(1)}s` : ""}
+              </div>
+              {/* Resize handle on the right edge — drag to stretch (image =
+                  duration, video = trim its end). Wider hit area, visible grip. */}
+              <div
+                onMouseDown={(e) => {
+                  e.preventDefault(); e.stopPropagation();
+                  const rect = blocksRef.current?.getBoundingClientRect();
+                  resizeRef.current = {
+                    idx: i, startX: e.clientX,
+                    pxPerSec: rect && outputDuration > 0 ? rect.width / outputDuration : 30,
+                    startVal: isImage ? (seg.duration || 3) : seg.end,
+                    isImage,
+                  };
+                  setResizingIdx(i);
+                }}
+                style={{
+                  position: "absolute", right: 0, top: 0, bottom: 0, width: 10,
+                  cursor: "ew-resize", zIndex: 4,
+                  background: "linear-gradient(90deg, transparent, rgba(251,191,36,0.5))",
+                  display: "flex", alignItems: "center", justifyContent: "flex-end",
+                }}
+                title="Arrastrá para estirar"
+              >
+                <div style={{ width: 3, height: "40%", background: "#fbbf24", borderRadius: 2, marginRight: 2 }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p style={{ fontSize: 11, color: "#666", margin: "8px 0 0", lineHeight: 1.5 }}>
+        Barra de arriba = cursor. Bloques: <b>arrastrá</b> para reordenar, <b>click</b> para seleccionar,
+        <b> borde derecho (amarillo)</b> para estirar. <b>✂️ Cortar</b> · <b>🗑 Borrar</b>.
+      </p>
+    </div>
+  );
+}
+
+
+// ================================================
+// EDITOR MODE — standalone manual editor (no AI clip detection)
+// Upload → cut timeline → on-demand Whisper → subtitles → export
+// ================================================
+function EditorMode() {
+  // ─── Upload state ───────────────────────────────────────────────────────
+  const [projectId, setProjectId] = useState(null);
+  const [filename, setFilename] = useState("");
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [uploadingProgress, setUploadingProgress] = useState(0);
+  const [uploadError, setUploadError] = useState(null);
+  const fileInputRef = useRef(null);
+  const [draggingFile, setDraggingFile] = useState(false);
+
+  // ─── Timeline cut state ─────────────────────────────────────────────────
+  // segments = kept pieces in source seconds. Starts as one piece covering the
+  // whole video; the user splits/deletes to cut out boring middles.
+  const [segments, setSegments] = useState([]);            // [{start, end}]
+  const [selectedSegIdx, setSelectedSegIdx] = useState(null);
+  const [thumbnails, setThumbnails] = useState([]);
+  const [loadingThumbs, setLoadingThumbs] = useState(false);
+
+  // ─── Clip object (for ClipEditorModal — it wants a full clip shape) ─────
+  const [clipObj, setClipObj] = useState(null);
+  const [showKeyframesModal, setShowKeyframesModal] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState("9:16");
+  // Direct mouse manipulation of the video (pan/zoom) in the main preview.
+  const videoDragRef = useRef(null);  // {startX, startY, ox, oy}
+
+  // ─── Image overlays state ───────────────────────────────────────────────
+  // Each: {url, path, x, y, scale, start, end, opacity}. x/y/scale relative to
+  // canvas; start/end in OUTPUT seconds. selectedOverlayIdx drives the editor.
+  const [overlays, setOverlays] = useState([]);
+  const [selectedOverlayIdx, setSelectedOverlayIdx] = useState(null);
+  const [uploadingOverlay, setUploadingOverlay] = useState(false);
+  const overlayFileRef = useRef(null);
+  const imageClipFileRef = useRef(null);
+  const previewBoxRef = useRef(null);  // the 9:16 preview container (for drag math)
+  const overlayDragRef = useRef(null); // {mode:'move'|'resize', startX, startY, ...}
+
+  // ─── Subtitles state ────────────────────────────────────────────────────
+  const [subtitlesOn, setSubtitlesOn] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribeError, setTranscribeError] = useState(null);
+  const [transcribedRange, setTranscribedRange] = useState(null); // {start,end}
+  const [subWordCount, setSubWordCount] = useState(0);
+  // Full word list from Whisper — used by the LIVE SubtitleOverlay so the
+  // user sees real subtitles painted onto the HTML <video> while editing.
+  const [transcriptWords, setTranscriptWords] = useState([]);
+  const [subStyle, setSubStyle] = useState("clean");
+  const [subSize, setSubSize] = useState(1.0);
+  const [subY, setSubY] = useState(0.0);
+
+  // Live currentTime updated at 60Hz while playing (timeupdate only fires
+  // ~4Hz which makes the overlay laggy for fast-cadence styles like Two-Word).
+  const [livePlayheadTime, setLivePlayheadTime] = useState(0);
+
+  // ─── Export ─────────────────────────────────────────────────────────────
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState({ current: 0, total: 0 });
+  const [exportFiles, setExportFiles] = useState([]);
+
+  // ─── Raw video URL for inline scrubbing preview ─────────────────────────
+  const rawVideoUrl = projectId ? api.getRawVideoUrl(projectId) : null;
+  const videoRef = useRef(null);
+  const bgVideoRef = useRef(null);   // blurred background fill, synced to main
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);   // SOURCE time (drives video + subtitle overlay)
+  // Which segment (index in the array = playback order) is currently playing.
+  const playbackSegIdx = useRef(0);
+
+  // ─── Helpers ────────────────────────────────────────────────────────────
+  const formatT = (sec) => {
+    if (!isFinite(sec)) return "0:00";
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  // Derived: kept span + total kept duration from segments
+  const sortedSegs = [...segments].sort((a, b) => a.start - b.start);
+  const trimStart = sortedSegs.length ? sortedSegs[0].start : 0;
+  const trimEnd = sortedSegs.length ? sortedSegs[sortedSegs.length - 1].end : videoDuration;
+  const trimDuration = segments.reduce((a, s) => a + (s.end - s.start), 0);
+
+  // ─── Output<->source mapping (segments in ARRAY order = playback order) ──
+  // Each segment's OUTPUT duration accounts for speed (video) or its own
+  // duration (image clip).
+  const segOutDur = (seg) => {
+    if (!seg) return 0;
+    if (seg.type === "image") return seg.duration || 3;
+    return (seg.end - seg.start) / (seg.speed || 1);
+  };
+  const outputDuration = segments.reduce((a, s) => a + segOutDur(s), 0);
+  // output seconds -> { segIdx, sourceTime }
+  const outputToSource = (outT) => {
+    let acc = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const d = segOutDur(segments[i]);
+      if (outT < acc + d || i === segments.length - 1) {
+        const seg = segments[i];
+        const sp = seg.type === "image" ? 1 : (seg.speed || 1);
+        return { segIdx: i, sourceTime: seg.start + Math.max(0, outT - acc) * sp };
+      }
+      acc += d;
+    }
+    return { segIdx: 0, sourceTime: segments[0]?.start ?? 0 };
+  };
+  // (segIdx, sourceTime) -> output seconds
+  const sourceToOutput = (segIdx, sourceTime) => {
+    let acc = 0;
+    for (let i = 0; i < segIdx && i < segments.length; i++) acc += segOutDur(segments[i]);
+    const seg = segments[segIdx];
+    if (!seg) return acc;
+    const sp = seg.type === "image" ? 1 : (seg.speed || 1);
+    return acc + Math.max(0, sourceTime - seg.start) / sp;
+  };
+  // Current playhead position in OUTPUT time (for the timeline)
+  const outputTime = sourceToOutput(playbackSegIdx.current, currentTime);
+  // Segment currently under the playhead (to show image clips in the preview)
+  const currentSegment = segments.length ? segments[Math.min(playbackSegIdx.current, segments.length - 1)] : null;
+  const showingImageClip = currentSegment && currentSegment.type === "image";
+  const subsStale = subtitlesOn && transcribedRange && (
+    Math.abs(transcribedRange.start - trimStart) > 0.5 ||
+    Math.abs(transcribedRange.end - trimEnd) > 0.5
+  );
+
+  // ─── Upload ─────────────────────────────────────────────────────────────
+  const handleFile = async (file) => {
+    if (!file) return;
+    setUploadError(null);
+    setUploadingProgress(0);
+    try {
+      const result = await api.uploadForEditor(file, (pct) => setUploadingProgress(pct));
+      setProjectId(result.project_id);
+      setFilename(result.filename);
+      setVideoDuration(result.duration);
+      // One segment covering the whole video to start.
+      setSegments([{ start: 0, end: result.duration }]);
+      setSelectedSegIdx(0);
+      setClipObj({
+        id: result.clip_id,
+        start_time: 0,
+        end_time: result.duration,
+        duration: result.duration,
+        description: "edit",
+        viral_caption: "",
+        keyframes: [],
+        edit_zoom: 1,
+        edit_pan_x: 0,
+        edit_pan_y: 0,
+      });
+      // Default style (no subtitles yet). no_text=false because that flag
+      // ALSO disables burned-in subtitles (export_service.py:179); the AI
+      // caption won't render anyway since viral_caption is "" in editor mode.
+      // The central style useEffect keeps it in sync afterwards.
+      try {
+        await api.updateStyle(result.project_id, {
+          fill_mode: "fit", fill_mode_scale: 1.0, background_style: "black",
+          caption_style: "tiktok", aspect_ratio: "9:16",
+          subtitle_style: "none", subtitle_size_scale: 1.0, subtitle_y: 0.0,
+          no_text: false, no_emojis: true, visual_filter: "none",
+        });
+      } catch (_) { /* style is best-effort */ }
+      // Generate timeline thumbnails in the background
+      setLoadingThumbs(true);
+      api.getEditorThumbnails(result.project_id, 30)
+        .then((d) => setThumbnails(d.thumbnails || []))
+        .catch((e) => console.error("thumbnails failed:", e))
+        .finally(() => setLoadingThumbs(false));
+    } catch (e) {
+      setUploadError(e.message || "Upload failed");
+    } finally {
+      setUploadingProgress(0);
+    }
+  };
+
+  // ─── Segments — push to backend (debounced) ─────────────────────────────
+  useEffect(() => {
+    if (!projectId || segments.length === 0) return;
+    const t = setTimeout(async () => {
+      try {
+        await api.saveEditorSegments(projectId, segments.map(segToPayload));
+      } catch (e) {
+        console.error("segments save failed:", e);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [projectId, segments]);
+
+  // ─── Cut operations (all in OUTPUT time) ────────────────────────────────
+  const splitAtPlayhead = () => {
+    // Split the segment currently under the playhead at the source position.
+    const { segIdx, sourceTime } = outputToSource(outputTime);
+    const seg = segments[segIdx];
+    if (!seg) return;
+    if (sourceTime <= seg.start + 0.1 || sourceTime >= seg.end - 0.1) return; // at edge
+    const next = [...segments];
+    next.splice(segIdx, 1, { start: seg.start, end: sourceTime }, { start: sourceTime, end: seg.end });
+    setSegments(next);
+    setSelectedSegIdx(segIdx + 1);
+  };
+
+  const deleteSelectedSegment = () => {
+    if (selectedSegIdx === null || segments.length <= 1) return;
+    const next = segments.filter((_, i) => i !== selectedSegIdx);
+    setSegments(next);
+    setSelectedSegIdx(null);
+    playbackSegIdx.current = 0;
+    seekOutput(0);
+  };
+
+  const reorderSegments = (next) => {
+    setSegments(next);
+    setSelectedSegIdx(null);
+  };
+
+  // Wire format for persisting a segment (image clips include image_path/duration)
+  const segToPayload = (s) => ({
+    start: s.start, end: s.end, speed: s.speed || 1,
+    type: s.type || "video", image_path: s.image_path || null,
+    duration: s.duration || 0,
+  });
+
+  // Insert an image as a timeline clip (full-screen, default 3s, appended)
+  const addImageClip = async (file) => {
+    if (!file || !projectId) return;
+    setUploadingOverlay(true);
+    try {
+      const res = await api.uploadOverlayImage(projectId, file);
+      const newSeg = { type: "image", image_path: res.path, url: res.url, duration: 3, start: 0, end: 0, speed: 1 };
+      setSegments((prev) => {
+        const next = [...prev, newSeg];
+        setSelectedSegIdx(next.length - 1);
+        return next;
+      });
+    } catch (e) {
+      alert(`Error subiendo imagen: ${e.message}`);
+    } finally {
+      setUploadingOverlay(false);
+    }
+  };
+
+  // Change the selected segment's speed (video clips only)
+  const setSegmentSpeed = (idx, speed) => {
+    setSegments((prev) => prev.map((s, i) => (i === idx ? { ...s, speed } : s)));
+  };
+  const setImageClipDuration = (idx, duration) => {
+    setSegments((prev) => prev.map((s, i) => (i === idx ? { ...s, duration } : s)));
+  };
+
+  // Drag the right edge of a block: image → set duration; video → set end (trim)
+  const resizeSegment = (idx, newVal, isImage) => {
+    setSegments((prev) => prev.map((s, i) => {
+      if (i !== idx) return s;
+      if (isImage) {
+        return { ...s, duration: Math.max(0.5, Math.min(30, newVal)) };
+      }
+      // video: new end clamped to (start+0.3 .. videoDuration)
+      return { ...s, end: Math.max(s.start + 0.3, Math.min(videoDuration, newVal)) };
+    }));
+    setSelectedSegIdx(idx);
+  };
+
+  // ─── Video transform (mouse pan/zoom in the preview) ────────────────────
+  const vZoom = clipObj?.edit_zoom ?? 1;
+  const vPanX = clipObj?.edit_pan_x ?? 0;   // -100..100 (% of canvas)
+  const vPanY = clipObj?.edit_pan_y ?? 0;
+  const setVideoTransform = (patch) => {
+    setClipObj((c) => c ? { ...c, ...patch } : c);
+  };
+  const resetVideoTransform = () => setVideoTransform({ edit_zoom: 1, edit_pan_x: 0, edit_pan_y: 0 });
+
+  // Persist transform to backend (debounced). editClipTransform overwrites
+  // start/end so we re-save segments right after to keep the cut intact.
+  useEffect(() => {
+    if (!projectId || !clipObj) return;
+    const t = setTimeout(async () => {
+      try {
+        await api.editClipTransform(projectId, clipObj.id, {
+          edit_zoom: vZoom, edit_pan_x: vPanX, edit_pan_y: vPanY,
+          keyframes: clipObj.keyframes || [],
+        });
+        if (segments.length) {
+          await api.saveEditorSegments(projectId, segments.map(segToPayload));
+        }
+      } catch (e) { console.error("transform save failed:", e); }
+    }, 450);
+    return () => clearTimeout(t);
+  }, [vZoom, vPanX, vPanY]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mouse drag (pan) + wheel (zoom) on the main preview video
+  useEffect(() => {
+    const onMove = (e) => {
+      const d = videoDragRef.current;
+      if (!d) return;
+      const box = previewBoxRef.current;
+      if (!box) return;
+      const rect = box.getBoundingClientRect();
+      const dx = ((e.clientX - d.startX) / rect.width) * 100;
+      const dy = ((e.clientY - d.startY) / rect.height) * 100;
+      setVideoTransform({
+        edit_pan_x: Math.max(-100, Math.min(100, d.ox + dx)),
+        edit_pan_y: Math.max(-100, Math.min(100, d.oy + dy)),
+      });
+    };
+    const onUp = () => { videoDragRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Image overlays ──────────────────────────────────────────────────────
+  const handleOverlayUpload = async (file) => {
+    if (!file || !projectId) return;
+    setUploadingOverlay(true);
+    try {
+      const res = await api.uploadOverlayImage(projectId, file);
+      const newOv = {
+        url: res.url, path: res.path,
+        x: 0.5, y: 0.35, scale: 0.4,
+        start: 0, end: Math.max(1, Math.round(outputDuration || 5)),
+        opacity: 1.0,
+      };
+      setOverlays((prev) => {
+        const next = [...prev, newOv];
+        setSelectedOverlayIdx(next.length - 1);
+        return next;
+      });
+    } catch (e) {
+      alert(`Error subiendo imagen: ${e.message}`);
+    } finally {
+      setUploadingOverlay(false);
+    }
+  };
+
+  const updateOverlay = (idx, patch) => {
+    setOverlays((prev) => prev.map((o, i) => (i === idx ? { ...o, ...patch } : o)));
+  };
+  const deleteOverlay = (idx) => {
+    setOverlays((prev) => prev.filter((_, i) => i !== idx));
+    setSelectedOverlayIdx(null);
+  };
+
+  // Central style builder — the PUT /style endpoint REPLACES the whole style,
+  // so every save must include all editor fields or they'd reset to defaults.
+  const buildEditorStyle = () => ({
+    fill_mode: "fit", fill_mode_scale: 1.0, background_style: "black",
+    caption_style: "tiktok", aspect_ratio: aspectRatio,
+    subtitle_style: subtitlesOn ? subStyle : "none",
+    subtitle_size_scale: subSize, subtitle_y: subY,
+    no_text: false, no_emojis: true, visual_filter: "none",
+    image_overlays: overlays.map((o) => ({
+      path: o.path, x: o.x, y: o.y, scale: o.scale,
+      start: o.start, end: o.end, opacity: o.opacity,
+    })),
+  });
+
+  // Single debounced persist whenever ANY style-affecting field changes.
+  useEffect(() => {
+    if (!projectId) return;
+    const t = setTimeout(() => {
+      api.updateStyle(projectId, buildEditorStyle()).catch((e) => console.error("style save failed:", e));
+    }, 350);
+    return () => clearTimeout(t);
+  }, [aspectRatio, subtitlesOn, subStyle, subSize, subY, overlays]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Drag / resize an overlay on the preview (mouse)
+  useEffect(() => {
+    const onMove = (e) => {
+      const d = overlayDragRef.current;
+      if (!d) return;
+      const box = previewBoxRef.current;
+      if (!box) return;
+      const rect = box.getBoundingClientRect();
+      const dx = (e.clientX - d.startX) / rect.width;
+      const dy = (e.clientY - d.startY) / rect.height;
+      if (d.mode === "move") {
+        updateOverlay(d.idx, {
+          x: Math.max(0, Math.min(1, d.ox + dx)),
+          y: Math.max(0, Math.min(1, d.oy + dy)),
+        });
+      } else if (d.mode === "resize") {
+        updateOverlay(d.idx, { scale: Math.max(0.05, Math.min(1.5, d.oscale + dx)) });
+      }
+    };
+    const onUp = () => { overlayDragRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep the blurred background video roughly in step with the main one.
+  const syncBg = (t, play) => {
+    const bg = bgVideoRef.current;
+    if (!bg) return;
+    if (t !== undefined && isFinite(t) && Math.abs(bg.currentTime - t) > 0.25) {
+      try { bg.currentTime = t; } catch {}
+    }
+    if (play === true && bg.paused) bg.play().catch(() => {});
+    if (play === false && !bg.paused) bg.pause();
+  };
+
+  // ─── Seek by OUTPUT time: map to source, set the playing segment + video ──
+  const seekOutput = (outT) => {
+    const v = videoRef.current;
+    const clampedOut = Math.max(0, Math.min(outputDuration || 0, outT));
+    const { segIdx, sourceTime } = outputToSource(clampedOut);
+    playbackSegIdx.current = segIdx;
+    if (v) v.currentTime = sourceTime;
+    setCurrentTime(sourceTime);
+    syncBg(sourceTime);
+  };
+
+  // onTimeUpdate only matters when paused (manual seek); RAF drives playback.
+  const onTimeUpdate = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (!playing) setCurrentTime(v.currentTime);
+  };
+
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      // If at/after the end, restart from the first segment.
+      if (outputTime >= outputDuration - 0.05) {
+        playbackSegIdx.current = 0;
+        if (segments[0]) { v.currentTime = segments[0].start; setCurrentTime(segments[0].start); }
+      } else {
+        // Make sure the video is positioned at the current playhead's source.
+        const { segIdx, sourceTime } = outputToSource(outputTime);
+        playbackSegIdx.current = segIdx;
+        v.currentTime = sourceTime;
+      }
+      const p = v.play();
+      if (p && p.then) p.then(() => setPlaying(true)).catch((err) => { console.error("play() rejected:", err); setPlaying(false); });
+      else setPlaying(true);
+      syncBg(v.currentTime, true);
+    } else {
+      v.pause();
+      setPlaying(false);
+      syncBg(undefined, false);
+    }
+  };
+
+  // ─── Add Subtitles (button → trigger Whisper on the trim) ──────────────
+  const activateSubtitles = async () => {
+    if (!projectId) return;
+    setTranscribing(true);
+    setTranscribeError(null);
+    try {
+      const result = await api.editorTranscribeTrim(projectId);
+      setSubtitlesOn(true);  // the central style useEffect persists the change
+      setSubWordCount(result.word_count);
+      setTranscribedRange({ start: result.trim_start, end: result.trim_end });
+      setTranscriptWords(result.words || []);  // for the live overlay
+    } catch (e) {
+      setTranscribeError(e.message || "Transcription failed");
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const deactivateSubtitles = () => {
+    setSubtitlesOn(false);  // central style useEffect persists subtitle_style:none
+    setTranscriptWords([]);
+  };
+
+  // ─── Playback driver (60Hz RAF) — plays segments in ARRAY order ─────────
+  // The raw <video> is the source. We let it play within the current segment;
+  // when it reaches that segment's end we jump to the NEXT segment in the
+  // array (which may be earlier or later in source time — that's the reorder).
+  // currentTime stays in source time (drives the video + subtitle overlay);
+  // the timeline derives output time from (playbackSegIdx, currentTime).
+  const imgElapsedRef = useRef(0);
+  const lastTsRef = useRef(0);
+  useEffect(() => {
+    if (!playing) return;
+    let raf;
+    const tick = (ts) => {
+      const v = videoRef.current;
+      if (segments.length) {
+        let idx = playbackSegIdx.current;
+        if (idx >= segments.length) idx = 0;
+        const seg = segments[idx];
+
+        if (seg.type === "image") {
+          // Image clip: advance a wall-clock timer; show the still; no video.
+          // NOTE: v.pause() here no longer kills playback because we removed
+          // the onPause handler — `playing` is controlled only by togglePlay.
+          if (v && !v.paused) v.pause();
+          syncBg(undefined, false);
+          if (!lastTsRef.current) lastTsRef.current = ts;
+          imgElapsedRef.current += (ts - lastTsRef.current) / 1000;
+          lastTsRef.current = ts;
+          const dur = seg.duration || 3;
+          if (imgElapsedRef.current >= dur) {
+            imgElapsedRef.current = 0;
+            const nextIdx = idx + 1 >= segments.length ? 0 : idx + 1;
+            playbackSegIdx.current = nextIdx;
+            const ns = segments[nextIdx];
+            if (ns.type === "video" && v) { v.currentTime = ns.start; v.playbackRate = ns.speed || 1; v.play().catch(() => {}); }
+          } else {
+            // currentTime = elapsed makes sourceToOutput (start=0) give the
+            // right output playhead for the image block.
+            setCurrentTime(imgElapsedRef.current);
+            setLivePlayheadTime(imgElapsedRef.current);
+          }
+        } else if (v) {
+          // Video clip: play at its speed; jump to next at end.
+          lastTsRef.current = 0;
+          if (v.paused) v.play().catch(() => {});
+          v.playbackRate = seg.speed || 1;
+          let t = v.currentTime;
+          if (t >= seg.end - 0.03) {
+            const nextIdx = idx + 1 >= segments.length ? 0 : idx + 1;
+            playbackSegIdx.current = nextIdx;
+            const ns = segments[nextIdx];
+            if (ns.type === "image") { imgElapsedRef.current = 0; lastTsRef.current = ts; v.pause(); }
+            else { v.currentTime = ns.start; v.playbackRate = ns.speed || 1; t = ns.start; setCurrentTime(t); setLivePlayheadTime(t); }
+          } else if (t < seg.start - 0.1) {
+            v.currentTime = seg.start; t = seg.start; setCurrentTime(t); setLivePlayheadTime(t);
+          } else {
+            setCurrentTime(t); setLivePlayheadTime(t);
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, segments]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Export ─────────────────────────────────────────────────────────────
+  const handleExport = async () => {
+    if (!projectId) return;
+    setExporting(true);
+    setExportFiles([]);
+    try {
+      await api.startExport(projectId, [clipObj.id]);
+    } catch (e) {
+      alert(`Export failed: ${e.message}`);
+      setExporting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!exporting || !projectId) return;
+    const interval = setInterval(async () => {
+      try {
+        const p = await api.getExportProgress(projectId);
+        setExportProgress(p);
+        if (p.status === "completed" || p.status === "done") {
+          setExporting(false);
+          setExportFiles(p.files || []);
+          clearInterval(interval);
+        }
+        if (p.status === "error") {
+          setExporting(false);
+          alert(`Export failed: ${(p.errors || []).join(", ") || "unknown"}`);
+          clearInterval(interval);
+        }
+      } catch (e) { console.error("progress poll failed:", e); }
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [exporting, projectId]);
+
+  const reset = () => {
+    setProjectId(null);
+    setFilename("");
+    setVideoDuration(0);
+    setClipObj(null);
+    setSegments([]); setSelectedSegIdx(null); setThumbnails([]);
+    setOverlays([]); setSelectedOverlayIdx(null);
+    setAspectRatio("9:16");
+    setSubtitlesOn(false); setTranscribedRange(null); setSubWordCount(0);
+    setTranscriptWords([]);
+    setExporting(false); setExportFiles([]); setExportProgress({ current: 0, total: 0 });
+  };
+
+  // ─── RENDER ─────────────────────────────────────────────────────────────
+  // Upload screen
+  if (!projectId) {
+    return (
+      <div style={{ maxWidth: 720, margin: "40px auto", padding: 20 }}>
+        <h2 style={{ marginBottom: 8 }}>🎬 Editor</h2>
+        <p style={{ color: "var(--text-muted)", marginBottom: 24, fontSize: 14 }}>
+          Sube un video, recórtalo, agrégale subtítulos y exporta. Sin IA — todo manual.
+        </p>
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDraggingFile(true); }}
+          onDragLeave={() => setDraggingFile(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDraggingFile(false);
+            const f = e.dataTransfer.files[0];
+            if (f) handleFile(f);
+          }}
+          onClick={() => fileInputRef.current?.click()}
+          style={{
+            border: `2px dashed ${draggingFile ? "#6366f1" : "#333"}`,
+            borderRadius: 16, padding: "60px 20px",
+            textAlign: "center", cursor: "pointer",
+            background: draggingFile ? "rgba(99,102,241,0.05)" : "#0a0a0a",
+            transition: "all 0.15s",
+          }}
+        >
+          <div style={{ fontSize: 48, marginBottom: 12 }}>📁</div>
+          <p style={{ margin: 0, fontWeight: 600 }}>Arrastra un video aquí o clickea para elegir</p>
+          <p style={{ margin: "8px 0 0", color: "#666", fontSize: 12 }}>mp4, mov, mkv — cualquier duración</p>
+          <input
+            ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }}
+            onChange={(e) => handleFile(e.target.files[0])}
+          />
+        </div>
+        {uploadingProgress > 0 && uploadingProgress < 100 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ background: "#1a1a1a", borderRadius: 8, height: 8, overflow: "hidden" }}>
+              <div style={{ width: `${uploadingProgress}%`, background: "linear-gradient(90deg,#6366f1,#8b5cf6)", height: "100%", transition: "width 0.2s" }} />
+            </div>
+            <p style={{ fontSize: 12, color: "#888", marginTop: 6, textAlign: "center" }}>Subiendo... {uploadingProgress}%</p>
+          </div>
+        )}
+        {uploadError && (
+          <div style={{ marginTop: 16, padding: 12, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, color: "#ef4444", fontSize: 13 }}>
+            ❌ {uploadError}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Main editor screen
+  return (
+    <div style={{ maxWidth: 1280, margin: "20px auto", padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>🎬 Editor — <span style={{ color: "#888", fontWeight: 400, fontSize: 16 }}>{filename}</span></h2>
+        <button onClick={reset} className="btn btn-secondary" style={{ fontSize: 12, padding: "6px 12px" }}>
+          ✕ Nuevo video
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20 }}>
+        {/* ═══ LEFT: PREVIEW ═══ */}
+        <div>
+          {/* Video preview — raw HTML video with the live SubtitleOverlay
+              painted on top, so the user sees the actual subtitle styling in
+              real time while editing (no FFmpeg roundtrip per change). */}
+          <div ref={previewBoxRef} style={{
+            background: "#000", borderRadius: 12, overflow: "hidden",
+            aspectRatio: aspectRatio.replace(":", " / "), maxHeight: 640, margin: "0 auto",
+            position: "relative",
+            containerType: "size",  // enables `cqh` units in the overlay
+          }}>
+            {/* Blurred background fill — mirrors the export (fit mode = video
+                fills the width, blur behind fills the corners). */}
+            <video
+              ref={bgVideoRef}
+              src={rawVideoUrl}
+              muted
+              style={{
+                position: "absolute", inset: 0, width: "100%", height: "100%",
+                objectFit: "cover", filter: "blur(24px) brightness(0.5)",
+                transform: "scale(1.15)", pointerEvents: "none",
+                visibility: showingImageClip ? "hidden" : "visible",
+              }}
+            />
+            <video
+              ref={videoRef}
+              src={rawVideoUrl}
+              onTimeUpdate={onTimeUpdate}
+              onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = trimStart; }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                videoDragRef.current = { startX: e.clientX, startY: e.clientY, ox: vPanX, oy: vPanY };
+              }}
+              onWheel={(e) => {
+                const dz = -e.deltaY * 0.0015;
+                setVideoTransform({ edit_zoom: Math.max(0.3, Math.min(3, vZoom + dz)) });
+              }}
+              title="Arrastrá para mover · rueda del mouse para zoom"
+              style={{
+                position: "relative", zIndex: 1,
+                width: "100%", height: "100%", objectFit: "contain", background: "transparent",
+                transform: `translate(${vPanX}%, ${vPanY}%) scale(${vZoom})`,
+                transformOrigin: "center",
+                cursor: "grab",
+                visibility: showingImageClip ? "hidden" : "visible",
+              }}
+            />
+            {/* Image clip — shown full-screen over the video when the playhead
+                is on an image segment in the timeline. */}
+            {showingImageClip && currentSegment.url && (
+              <div style={{ position: "absolute", inset: 0, background: "#000", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}>
+                <img src={currentSegment.url} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+              </div>
+            )}
+            {/* Image overlays — show those whose time range covers the playhead.
+                The selected one is draggable + has a resize handle. */}
+            {overlays.map((ov, i) => {
+              const visible = outputTime >= ov.start - 0.01 && outputTime <= ov.end + 0.01;
+              const isSel = selectedOverlayIdx === i;
+              if (!visible && !isSel) return null;
+              return (
+                <div key={i}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setSelectedOverlayIdx(i);
+                    overlayDragRef.current = { mode: "move", idx: i, startX: e.clientX, startY: e.clientY, ox: ov.x, oy: ov.y };
+                  }}
+                  style={{
+                    position: "absolute",
+                    left: `${ov.x * 100}%`, top: `${ov.y * 100}%`,
+                    width: `${ov.scale * 100}%`,
+                    transform: "translate(-50%, -50%)",
+                    opacity: visible ? ov.opacity : 0.35,
+                    cursor: "move",
+                    outline: isSel ? "2px dashed #fbbf24" : "none",
+                    zIndex: 6,
+                  }}
+                >
+                  <img src={ov.url} alt="" draggable={false}
+                    style={{ width: "100%", height: "auto", display: "block", pointerEvents: "none" }} />
+                  {isSel && (
+                    <div
+                      onMouseDown={(e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        overlayDragRef.current = { mode: "resize", idx: i, startX: e.clientX, startY: e.clientY, oscale: ov.scale };
+                      }}
+                      style={{
+                        position: "absolute", right: -8, bottom: -8, width: 16, height: 16,
+                        background: "#fbbf24", borderRadius: "50%", cursor: "nwse-resize",
+                        border: "2px solid #000",
+                      }}
+                    />
+                  )}
+                </div>
+              );
+            })}
+            {subtitlesOn && transcriptWords.length > 0 && (
+              <SubtitleOverlay
+                words={transcriptWords}
+                currentTime={livePlayheadTime}
+                style={subStyle}
+                sizeScale={subSize}
+                yOffset={subY}
+              />
+            )}
+          </div>
+
+          {/* Play controls */}
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12 }}>
+            <button className="btn btn-secondary" onClick={() => seekOutput(0)} style={{ padding: "6px 12px" }}>⏮</button>
+            <button className="btn btn-primary" onClick={togglePlay} style={{ padding: "6px 24px", minWidth: 80 }}>
+              {playing ? "⏸ Pausa" : "▶ Play"}
+            </button>
+            <button className="btn btn-secondary" onClick={() => seekOutput(outputDuration - 0.1)} style={{ padding: "6px 12px" }}>⏭</button>
+          </div>
+
+          {/* Video transform hint + reset (mouse pan/zoom) */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 8, fontSize: 11, color: "#888" }}>
+            <span>🖐 Arrastrá el video para moverlo · rueda = zoom</span>
+            <span style={{ color: "var(--accent)", fontFamily: "monospace" }}>{vZoom.toFixed(2)}x</span>
+            {(vZoom !== 1 || vPanX !== 0 || vPanY !== 0) && (
+              <button className="btn btn-secondary" onClick={resetVideoTransform} style={{ padding: "2px 8px", fontSize: 10 }}>
+                ↺ Reset
+              </button>
+            )}
+          </div>
+
+          {/* ═══ TIMELINE EDITOR (compacted, reorderable) ═══ */}
+          <TimelineEditor
+            thumbnails={thumbnails}
+            segments={segments}
+            selectedIdx={selectedSegIdx}
+            outputTime={outputTime}
+            outputDuration={outputDuration}
+            onSeekOutput={seekOutput}
+            onSelectSegment={setSelectedSegIdx}
+            onSplit={splitAtPlayhead}
+            onDeleteSegment={deleteSelectedSegment}
+            onReorder={reorderSegments}
+            onResizeSegment={resizeSegment}
+            loadingThumbs={loadingThumbs}
+          />
+
+          {/* Timeline toolbar extras: insert image clip + selected block props */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+            <button className="btn btn-secondary" onClick={() => imageClipFileRef.current?.click()}
+              disabled={uploadingOverlay}
+              style={{ padding: "5px 12px", fontSize: 12 }}>
+              {uploadingOverlay ? "⏳..." : "🖼 Insertar imagen como clip"}
+            </button>
+            <input ref={imageClipFileRef} type="file" accept="image/*" style={{ display: "none" }}
+              onChange={(e) => { addImageClip(e.target.files[0]); e.target.value = ""; }} />
+
+            {/* Speed control for the selected VIDEO block */}
+            {selectedSegIdx !== null && segments[selectedSegIdx] && segments[selectedSegIdx].type !== "image" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 12, color: "#aaa" }}>⚡ Velocidad:</span>
+                {[0.25, 0.5, 1, 1.5, 2, 4].map((sp) => (
+                  <button key={sp}
+                    className={`btn ${(segments[selectedSegIdx].speed || 1) === sp ? "btn-primary" : "btn-secondary"}`}
+                    onClick={() => setSegmentSpeed(selectedSegIdx, sp)}
+                    style={{ padding: "3px 8px", fontSize: 11 }}>
+                    {sp}x
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Duration control for the selected IMAGE block */}
+            {selectedSegIdx !== null && segments[selectedSegIdx] && segments[selectedSegIdx].type === "image" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "#aaa" }}>🖼 Duración: <b style={{ color: "var(--accent)" }}>{(segments[selectedSegIdx].duration || 3).toFixed(1)}s</b></span>
+                <input type="range" min={0.5} max={30} step={0.5}
+                  value={segments[selectedSegIdx].duration || 3}
+                  onChange={(e) => setImageClipDuration(selectedSegIdx, parseFloat(e.target.value))}
+                  style={{ width: 160 }} />
+                <span style={{ fontSize: 10, color: "#666" }}>(arrastrá para estirar)</span>
+              </div>
+            )}
+          </div>
+
+          {subtitlesOn && (
+            <p style={{ fontSize: 11, color: "#666", margin: "12px 4px 0", textAlign: "center", lineHeight: 1.5 }}>
+              Vista previa en vivo — los subtítulos se renderizan sobre el video mientras editas.
+              El export final usa FFmpeg para máxima calidad.
+            </p>
+          )}
+        </div>
+
+        {/* ═══ RIGHT: CONTROLS ═══ */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Aspect ratio */}
+          <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 14 }}>
+            <h4 style={{ margin: "0 0 10px", fontSize: 14 }}>📐 Formato</h4>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {[
+                { v: "9:16", label: "9:16", desc: "TikTok" },
+                { v: "1:1", label: "1:1", desc: "Cuadrado" },
+                { v: "16:9", label: "16:9", desc: "YouTube" },
+                { v: "4:5", label: "4:5", desc: "IG Feed" },
+              ].map(({ v, label, desc }) => (
+                <button key={v}
+                  className={`btn ${aspectRatio === v ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => setAspectRatio(v)}
+                  style={{ padding: "6px 10px", fontSize: 12, flex: "1 0 auto", minWidth: 64 }}>
+                  <div style={{ fontWeight: 700 }}>{label}</div>
+                  <div style={{ fontSize: 9, opacity: 0.6 }}>{desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Keyframes button → opens existing modal */}
+          <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 14 }}>
+            <button
+              className="btn"
+              onClick={() => setShowKeyframesModal(true)}
+              style={{ width: "100%", padding: "10px 0", fontSize: 13,
+                background: (clipObj?.keyframes?.length > 0) ? "linear-gradient(135deg,#6366f1,#8b5cf6)" : "#222",
+                color: "#fff", border: "none", borderRadius: 8 }}
+            >
+              🎬 Keyframes {clipObj?.keyframes?.length > 0 ? `(${clipObj.keyframes.length})` : "(zoom/pan animado)"}
+            </button>
+          </div>
+
+          {/* Image overlays section */}
+          <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 14,
+            border: overlays.length ? "1px solid rgba(99,102,241,0.4)" : "1px solid transparent" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <h4 style={{ margin: 0, fontSize: 14 }}>🖼 Imágenes <span style={{ color: "#777", fontWeight: 400, fontSize: 11 }}>({overlays.length})</span></h4>
+              <button className="btn btn-primary" onClick={() => overlayFileRef.current?.click()}
+                disabled={uploadingOverlay}
+                style={{ padding: "4px 10px", fontSize: 12 }}>
+                {uploadingOverlay ? "⏳..." : "➕ Subir"}
+              </button>
+              <input ref={overlayFileRef} type="file" accept="image/*" style={{ display: "none" }}
+                onChange={(e) => { handleOverlayUpload(e.target.files[0]); e.target.value = ""; }} />
+            </div>
+
+            {overlays.length === 0 ? (
+              <p style={{ fontSize: 11, color: "#888", margin: 0 }}>
+                Subí una imagen (logo, captura, meme) para ponerla encima del video. La arrastrás y redimensionás en el preview.
+              </p>
+            ) : (
+              <>
+                {/* Overlay chips */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
+                  {overlays.map((ov, i) => (
+                    <button key={i} onClick={() => setSelectedOverlayIdx(i)}
+                      style={{
+                        padding: "3px 8px", fontSize: 11, borderRadius: 6,
+                        border: selectedOverlayIdx === i ? "1px solid #fbbf24" : "1px solid #333",
+                        background: selectedOverlayIdx === i ? "rgba(251,191,36,0.15)" : "#1a1a1a",
+                        color: selectedOverlayIdx === i ? "#fbbf24" : "#aaa", cursor: "pointer",
+                      }}>
+                      🖼 {i + 1}
+                    </button>
+                  ))}
+                </div>
+
+                {selectedOverlayIdx !== null && overlays[selectedOverlayIdx] && (() => {
+                  const ov = overlays[selectedOverlayIdx];
+                  const i = selectedOverlayIdx;
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <label style={{ fontSize: 12, color: "#aaa" }}>
+                        Aparece desde: <b style={{ color: "var(--accent)" }}>{ov.start.toFixed(1)}s</b>
+                      </label>
+                      <input type="range" min={0} max={Math.max(1, outputDuration)} step={0.1} value={ov.start}
+                        onChange={(e) => updateOverlay(i, { start: Math.min(parseFloat(e.target.value), ov.end - 0.2) })} />
+                      <label style={{ fontSize: 12, color: "#aaa" }}>
+                        Hasta: <b style={{ color: "var(--accent)" }}>{ov.end.toFixed(1)}s</b>
+                      </label>
+                      <input type="range" min={0} max={Math.max(1, outputDuration)} step={0.1} value={ov.end}
+                        onChange={(e) => updateOverlay(i, { end: Math.max(parseFloat(e.target.value), ov.start + 0.2) })} />
+                      <label style={{ fontSize: 12, color: "#aaa" }}>
+                        Opacidad: <b style={{ color: "var(--accent)" }}>{Math.round(ov.opacity * 100)}%</b>
+                      </label>
+                      <input type="range" min={0.1} max={1} step={0.05} value={ov.opacity}
+                        onChange={(e) => updateOverlay(i, { opacity: parseFloat(e.target.value) })} />
+                      <button className="btn btn-secondary" onClick={() => deleteOverlay(i)}
+                        style={{ padding: "5px 0", fontSize: 11 }}>
+                        🗑 Borrar imagen
+                      </button>
+                    </div>
+                  );
+                })()}
+                <p style={{ fontSize: 10, color: "#666", margin: "8px 0 0" }}>
+                  Arrastrá la imagen en el preview para moverla · esquina amarilla para redimensionar.
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* Subtitles section */}
+          <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 14,
+            border: subtitlesOn ? "1px solid rgba(34,197,94,0.4)" : "1px solid transparent" }}>
+            {!subtitlesOn ? (
+              <>
+                <button
+                  className="btn btn-primary"
+                  onClick={activateSubtitles}
+                  disabled={transcribing || trimDuration < 0.5}
+                  style={{ width: "100%", padding: "10px 0", fontSize: 13 }}
+                >
+                  {transcribing ? "⏳ Transcribiendo..." : `➕ Subtítulos (${formatT(trimDuration)} de audio)`}
+                </button>
+                {transcribeError && (
+                  <p style={{ color: "#ef4444", fontSize: 11, marginTop: 6, margin: "6px 0 0" }}>
+                    ❌ {transcribeError}
+                  </p>
+                )}
+                <p style={{ fontSize: 11, color: "#888", margin: "8px 0 0", lineHeight: 1.5 }}>
+                  Whisper corre solo sobre el trim actual. {trimDuration > 300
+                    ? `~${Math.round(trimDuration / 60 * 0.3)} min de espera.`
+                    : `~${Math.max(3, Math.round(trimDuration * 0.3))} segundos.`}
+                </p>
+              </>
+            ) : (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <h4 style={{ margin: 0, fontSize: 14, color: "#22c55e" }}>
+                    ✓ Subtítulos <span style={{ color: "#777", fontSize: 11, fontWeight: 400 }}>({subWordCount} palabras)</span>
+                  </h4>
+                  <button onClick={deactivateSubtitles} className="btn btn-secondary" style={{ padding: "3px 10px", fontSize: 11 }}>
+                    ✕ Quitar
+                  </button>
+                </div>
+
+                {subsStale && (
+                  <div style={{ background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.35)", padding: 8, borderRadius: 6, marginBottom: 10 }}>
+                    <p style={{ margin: 0, fontSize: 11, color: "#fbbf24" }}>
+                      ⚠️ Cambiaste el trim después de transcribir.
+                    </p>
+                    <button onClick={activateSubtitles} disabled={transcribing}
+                      className="btn btn-secondary" style={{ marginTop: 6, padding: "4px 10px", fontSize: 11, width: "100%" }}>
+                      {transcribing ? "⏳..." : "🔄 Re-transcribir"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Style picker */}
+                <label style={{ fontSize: 12, color: "#aaa", display: "block", marginBottom: 4 }}>Estilo</label>
+                <select
+                  value={subStyle}
+                  onChange={(e) => setSubStyle(e.target.value)}
+                  style={{ width: "100%", padding: 8, background: "#1a1a1a", color: "#fff", border: "1px solid #333", borderRadius: 6, fontSize: 12, marginBottom: 10 }}
+                >
+                  <option value="clean">📋 Limpio</option>
+                  <option value="karaoke">🎤 Karaoke</option>
+                  <option value="popup">💥 Pop-up</option>
+                  <option value="highlight">📦 Highlight Box</option>
+                  <option value="big_center">🔠 Big Center</option>
+                  <option value="twoword">2️⃣ Two-Word</option>
+                  <option value="bounce">🎢 Bounce</option>
+                  <option value="typewriter">⌨️ Typewriter</option>
+                </select>
+
+                <label style={{ fontSize: 12, color: "#aaa" }}>
+                  Tamaño: <b style={{ color: "var(--accent)" }}>{Math.round(subSize * 100)}%</b>
+                </label>
+                <input type="range" min={0.6} max={1.6} step={0.05}
+                  value={subSize} onChange={(e) => setSubSize(parseFloat(e.target.value))}
+                  style={{ width: "100%", marginBottom: 10 }} />
+
+                <label style={{ fontSize: 12, color: "#aaa" }}>
+                  Posición: <b style={{ color: "var(--accent)" }}>
+                    {subY === 0 ? "default" : subY > 0 ? `⬆ ${Math.round(subY * 100)}%` : `⬇ ${Math.round(-subY * 100)}%`}
+                  </b>
+                </label>
+                <input type="range" min={-0.5} max={0.5} step={0.02}
+                  value={subY} onChange={(e) => setSubY(parseFloat(e.target.value))}
+                  style={{ width: "100%" }} />
+              </>
+            )}
+          </div>
+
+          {/* Export */}
+          <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 14 }}>
+            {!exporting && exportFiles.length === 0 && (
+              <button onClick={handleExport} disabled={trimDuration < 0.5}
+                className="btn btn-primary"
+                style={{ width: "100%", padding: "12px 0", fontSize: 14, background: "linear-gradient(135deg,#22c55e,#16a34a)", border: "none" }}>
+                💾 Exportar ({formatT(trimDuration)})
+              </button>
+            )}
+            {exporting && (
+              <>
+                <p style={{ fontSize: 12, color: "#aaa", margin: "0 0 8px", textAlign: "center" }}>
+                  Renderizando... {exportProgress.current}/{exportProgress.total}
+                </p>
+                <div style={{ background: "#1a1a1a", borderRadius: 6, height: 8, overflow: "hidden" }}>
+                  <div style={{
+                    width: `${exportProgress.total > 0 ? (exportProgress.current / exportProgress.total) * 100 : 30}%`,
+                    background: "linear-gradient(90deg,#22c55e,#16a34a)", height: "100%", transition: "width 0.3s",
+                  }} />
+                </div>
+              </>
+            )}
+            {!exporting && exportFiles.length > 0 && (
+              <>
+                <p style={{ fontSize: 13, color: "#22c55e", margin: "0 0 8px", textAlign: "center", fontWeight: 600 }}>
+                  ✓ Exportado
+                </p>
+                {exportFiles.map((f) => (
+                  <a key={f} href={api.getDownloadUrl(projectId, f)} download
+                    className="btn btn-secondary"
+                    style={{ display: "block", textAlign: "center", padding: "8px 0", fontSize: 12, textDecoration: "none", marginBottom: 6 }}>
+                    ⬇ {f}
+                  </a>
+                ))}
+                <button onClick={() => { setExportFiles([]); setExportProgress({ current: 0, total: 0 }); }}
+                  className="btn btn-secondary" style={{ width: "100%", padding: "6px 0", fontSize: 11, marginTop: 4 }}>
+                  Exportar de nuevo
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Keyframes modal — reuses the existing ClipEditorModal */}
+      {showKeyframesModal && clipObj && (
+        <ClipEditorModal
+          projectId={projectId}
+          clip={clipObj}
+          fillMode="fit"
+          backgroundStyle="black"
+          onClose={() => setShowKeyframesModal(false)}
+          onSaved={(updated) => {
+            // Keep only the transform fields (zoom/pan/keyframes). In editor
+            // mode the timeline `segments` define the cut, not the modal's
+            // trim — so we don't touch segments here.
+            setClipObj((c) => ({ ...c, keyframes: updated.keyframes ?? c.keyframes,
+              edit_zoom: updated.edit_zoom ?? c.edit_zoom,
+              edit_pan_x: updated.edit_pan_x ?? c.edit_pan_x,
+              edit_pan_y: updated.edit_pan_y ?? c.edit_pan_y }));
+            // Re-save segments since the modal's editClipTransform overwrote
+            // start_time/end_time on the backend clip.
+            if (segments.length) {
+              api.saveEditorSegments(projectId, segments.map(segToPayload)).catch(() => {});
+            }
+            setShowKeyframesModal(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 function App() {
-  const [mode, setMode] = useState("video"); // "video" | "stream" | "meme" | "analyzer"
+  const [mode, setMode] = useState("video"); // "video" | "stream" | "meme" | "analyzer" | "editor"
   const [step, setStep] = useState(1);
   const [projectId, setProjectId] = useState(null);
   const [clips, setClips] = useState([]);
@@ -4408,6 +6274,16 @@ function App() {
   const handleEditCaption = (clipId, newCaption) => {
     setClips((prev) =>
       prev.map((c) => (c.id === clipId ? { ...c, viral_caption: newCaption } : c))
+    );
+  };
+
+  // Generic patcher used by the clip editor modal (zoom / pan / trim).
+  // Accepts a full clip object or a partial diff — either way the matching
+  // clip in the parent's clips array gets the new fields merged in so the
+  // user's edits survive navigating between steps.
+  const handleUpdateClip = (clipId, updated) => {
+    setClips((prev) =>
+      prev.map((c) => (c.id === clipId ? { ...c, ...updated } : c))
     );
   };
 
@@ -4450,6 +6326,7 @@ function App() {
               { key: "analyzer", icon: "🔍", label: "Analyzer",         active: "linear-gradient(135deg,#0891b2,#06b6d4)" },
               { key: "stream",   icon: "🔴", label: "Live Stream",      active: "linear-gradient(135deg,#dc2626,#ef4444)" },
               { key: "meme",     icon: "😂", label: "Meme Generator",   active: "linear-gradient(135deg,#d97706,#f59e0b)" },
+              { key: "editor",   icon: "🎬", label: "Editor",            active: "linear-gradient(135deg,#22c55e,#16a34a)" },
             ].map(({ key, icon, label, active }) => (
               <button
                 key={key}
@@ -4472,6 +6349,7 @@ function App() {
         {mode === "analyzer" && <AnalyzerStep />}
         {mode === "stream" && <LiveStreamStep />}
         {mode === "meme" && <MemeStep />}
+        {mode === "editor" && <EditorMode />}
 
         {mode === "video" && <>
           <div className="steps-bar" style={{ marginTop: 20 }}>
@@ -4493,6 +6371,7 @@ function App() {
               projectId={projectId}
               clips={clips}
               onEdit={handleEditCaption}
+              onUpdateClip={handleUpdateClip}
               onReorder={handleReorderClips}
               onNext={() => setStep(3)}
             />
@@ -4501,6 +6380,7 @@ function App() {
             <EditorStep
               projectId={projectId}
               clips={clips}
+              onUpdateClip={handleUpdateClip}
               onExportDone={handleReset}
             />
           )}

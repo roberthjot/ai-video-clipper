@@ -35,8 +35,44 @@ def export_clip_with_style(
     output_path: str,
     transcript: dict = None,
 ) -> str:
-    """Export clip with blur + rounded box + text + watermark + optional split-screen + subtitles."""
-    W, H = 1080, 1920
+    """Export clip with blur + rounded box + text + watermark + optional split-screen + subtitles.
+
+    Concat-first: if the clip has timeline segments (the user cut out middles),
+    we first concatenate the kept pieces into a temp mp4, then run the normal
+    single-range pipeline on that temp. This keeps the heavy filter graph below
+    untouched and makes subtitle/keyframe timing correct (they operate on the
+    already-cut video).
+    """
+    segments = getattr(clip, "segments", None) or []
+    if segments:
+        canvas = video_service.get_canvas_dimensions(getattr(style, 'aspect_ratio', '9:16'))
+        # Pass the full Segment objects so concat sees speed/type/image_path.
+        seg_dicts = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in segments]
+        tmp_dir = os.path.join(os.path.dirname(__file__), "temp")
+        os.makedirs(tmp_dir, exist_ok=True)
+        concat_path = os.path.join(tmp_dir, f"export_concat_{clip.id}_{os.getpid()}_{abs(hash(str(seg_dicts))) % 10**8}.mp4")
+        try:
+            total = video_service.concat_segments(video_path, seg_dicts, concat_path, canvas=canvas)
+            # Build a single-range copy pointing at the concatenated temp.
+            clip_copy = clip.model_copy(deep=True)
+            clip_copy.segments = []
+            clip_copy.start_time = 0.0
+            clip_copy.end_time = total
+            clip_copy.duration = total
+            # Remap the transcript from source time to concatenated time so the
+            # burned-in subtitles line up with the cut video (and words inside
+            # removed gaps disappear).
+            remapped_transcript = video_service.remap_transcript_to_segments(transcript, seg_dicts) if transcript else None
+            print(f"[Export] Clip {clip.id}: {len(seg_dicts)} segments concatenated -> {total:.1f}s, running pipeline on temp")
+            return export_clip_with_style(concat_path, clip_copy, style, output_path, remapped_transcript)
+        finally:
+            if os.path.exists(concat_path):
+                try:
+                    os.remove(concat_path)
+                except Exception:
+                    pass
+
+    W, H = video_service.get_canvas_dimensions(getattr(style, 'aspect_ratio', '9:16'))
     duration = clip.end_time - clip.start_time
 
     # Determine if split-screen is active
@@ -58,6 +94,19 @@ def export_clip_with_style(
     _pan_x_pct = float(getattr(clip, 'edit_pan_x', 0.0) or 0.0) / 100.0  # -0.5 to +0.5
     _pan_y_pct = float(getattr(clip, 'edit_pan_y', 0.0) or 0.0) / 100.0
 
+    # Global fill-mode multiplier from StyleConfig — fine-tune knob on top of
+    # the named presets (e.g. "Medium" but 1.2× bigger). Multiplies into _zoom
+    # so the rest of the math stays identical.
+    _fm_scale = max(0.5, min(1.5, float(getattr(style, 'fill_mode_scale', 1.0) or 1.0)))
+    _zoom = _zoom * _fm_scale
+
+    # Animated zoom/pan via keyframes — overrides the static edit_* values
+    # above when the clip has any keyframes set. We swap the fg stage to a
+    # zoompan filter and set the overlay to (0,0) since zoompan already
+    # outputs at canvas size.
+    clip_keyframes = getattr(clip, 'keyframes', None) or []
+    use_keyframes = len(clip_keyframes) > 0
+
     # Build fg_filter based on fill_mode and target height, multiplied by zoom
     fm = style.fill_mode
     base_height_pct = (
@@ -68,7 +117,11 @@ def export_clip_with_style(
         0.5  if fm == "mini"   else
         1.0  # fit (handled by width scale below)
     )
-    if fm == "fill":
+    if use_keyframes:
+        fg_filter = video_service.build_zoompan_filter(
+            clip_keyframes, duration, W, target_h, fps=30,
+        )
+    elif fm == "fill":
         # fill always covers the full canvas; zoom > 1 still uses cover
         scaled_h = int(target_h * _zoom)
         scaled_w = int(W * _zoom)
@@ -80,7 +133,9 @@ def export_clip_with_style(
         # medium / mini / small / zoom: height-based scaling
         fg_filter = f"scale=-2:{int(target_h * base_height_pct * _zoom)}"
 
-    if _zoom != 1.0 or _pan_x_pct != 0.0 or _pan_y_pct != 0.0:
+    if use_keyframes:
+        print(f"[Export] Clip {clip.id}: animated keyframes ({len(clip_keyframes)} pts) — using zoompan, fg covers full canvas")
+    elif _zoom != 1.0 or _pan_x_pct != 0.0 or _pan_y_pct != 0.0:
         print(f"[Export] Clip {clip.id}: editor transform zoom={_zoom:.2f} pan=({_pan_x_pct*100:.0f}%,{_pan_y_pct*100:.0f}%) — scales the box, not the content")
 
     input_index = 1
@@ -96,17 +151,27 @@ def export_clip_with_style(
             return base + ",colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0"
         return base + ",boxblur=12:2"
 
+    # Overlay position: keyframes mode → (0,0) since fg is already canvas-
+    # sized; static mode → carry the pan offset.
+    # IMPORTANT: build each overlay string INSIDE its branch — `video_h`
+    # only exists when `use_split` is True (defined in the if-split block above).
     if use_split:
+        _ov_split = "0:0" if use_keyframes else (
+            f"(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*{video_h}"
+        )
         filter_complex = (
             f"{_bg(video_h)}[bg];"
             f"[0:v]{fg_filter}[fg];"
-            f"[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*{video_h},format=yuv420p[video_part];"
+            f"[bg][fg]overlay={_ov_split},format=yuv420p[video_part];"
             f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
             f"[video_part][img_part]vstack=inputs=2[v]"
         )
         input_index = 2
     else:
-        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H[v]"
+        _ov_full = "0:0" if use_keyframes else (
+            f"(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H"
+        )
+        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay={_ov_full}[v]"
 
     current_label = "v"
     rounded_box_path = None
@@ -153,6 +218,35 @@ def export_clip_with_style(
         filter_complex += f";[{input_index}:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={style.watermark_opacity}[wm]"
         filter_complex += f";[{current_label}][wm]overlay={wx}-(overlay_w/2):{wy}-(overlay_h/2)[watermarked]"
         current_label = "watermarked"
+        input_index += 1
+
+    # Image overlays (editor mode) — each painted on top for its time range.
+    # These inputs are added to the cmd later (see overlay_inputs). Positions
+    # are relative to the full canvas; time range is in output seconds.
+    overlay_inputs = []  # list of (path, loop_dur) to append as -loop inputs
+    image_overlays = getattr(style, 'image_overlays', None) or []
+    for ov in image_overlays:
+        ov_path = getattr(ov, 'path', None)
+        if not ov_path or not os.path.exists(ov_path):
+            continue
+        ov_w = max(20, int(W * float(getattr(ov, 'scale', 0.4))))
+        ov_x = int(float(getattr(ov, 'x', 0.5)) * W)
+        ov_y = int(float(getattr(ov, 'y', 0.4)) * H)
+        ov_op = max(0.0, min(1.0, float(getattr(ov, 'opacity', 1.0))))
+        ov_start = float(getattr(ov, 'start', 0.0))
+        ov_end = float(getattr(ov, 'end', 99999.0))
+        idx = input_index
+        # Scale + apply opacity
+        filter_complex += f";[{idx}:v]scale={ov_w}:-1,format=rgba,colorchannelmixer=aa={ov_op}[ov{idx}]"
+        # Overlay centered at (ov_x, ov_y), only between start/end output secs
+        filter_complex += (
+            f";[{current_label}][ov{idx}]overlay="
+            f"{ov_x}-(overlay_w/2):{ov_y}-(overlay_h/2)"
+            f":enable='between(t,{ov_start},{ov_end})'[imgov{idx}]"
+        )
+        current_label = f"imgov{idx}"
+        overlay_inputs.append(ov_path)
+        input_index += 1
 
     # Anti-detect filters (optional, export only)
     extra_vf = []
@@ -192,6 +286,7 @@ def export_clip_with_style(
                 output_dir=temp_dir,
                 time_offset=_buffer,
                 size_scale=getattr(style, 'subtitle_size_scale', 1.0),
+                y_offset=getattr(style, 'subtitle_y', 0.0),
             )
             if ass_subtitle_path:
                 # Workaround Windows path issues with FFmpeg subtitles filter:
@@ -226,6 +321,11 @@ def export_clip_with_style(
 
     if has_watermark:
         cmd.extend(["-loop", "1", "-t", str(loop_dur), "-i", style.watermark_path])
+
+    # Image overlays — same loop-input pattern, in the same order they were
+    # assigned indices in the filter graph above.
+    for ov_path in overlay_inputs:
+        cmd.extend(["-loop", "1", "-t", str(loop_dur), "-i", ov_path])
 
     # Codec args picked at runtime — try Intel QSV first, fall back to libx264 on failure
     qsv_codec = video_service.get_video_codec_args(preset="fast", crf=23, prefer_qsv=True)

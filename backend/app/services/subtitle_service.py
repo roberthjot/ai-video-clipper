@@ -41,9 +41,11 @@ def _clean_word(word: str) -> str:
     return cleaned
 
 
-def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920, size_scale: float = 1.0) -> str:
+def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920, size_scale: float = 1.0, y_offset: float = 0.0) -> str:
     """Generate ASS header with the chosen visual style.
-    size_scale multiplies the base font_size (0.6 - 1.6 reasonable range)."""
+    size_scale multiplies the base font_size (0.6 - 1.6 reasonable range).
+    y_offset is a -0.5..+0.5 additive shift relative to the style's default
+    marginV (positive = up, negative = down). 0.0 = unchanged."""
     if style == "popup":
         font_size = 110
         outline = 8
@@ -81,6 +83,15 @@ def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920, size_scale
     scale = max(0.6, min(1.6, float(size_scale or 1.0)))
     font_size = max(20, int(font_size * scale))
     outline = max(2, int(outline * scale))
+
+    # Apply vertical offset. ASS marginV is distance from bottom (when
+    # Alignment=2, bottom-centred), so positive y_offset = bigger marginV =
+    # subtitles further from the bottom (i.e. UP on screen). Clamp the final
+    # margin to leave at least 40px of padding on either edge so the text
+    # never gets clipped against the canvas edges.
+    y_off = max(-0.5, min(0.5, float(y_offset or 0.0)))
+    marginV = int(marginV + video_h * y_off)
+    marginV = max(40, min(video_h - 40, marginV))
 
     return f"""[Script Info]
 ScriptType: v4.00+
@@ -346,6 +357,7 @@ def generate_ass_for_clip(
     output_dir: str,
     time_offset: float = 0.0,
     size_scale: float = 1.0,
+    y_offset: float = 0.0,
 ) -> str:
     """
     Generate an ASS subtitle file for a single clip.
@@ -359,6 +371,8 @@ def generate_ass_for_clip(
         time_offset: Seconds to add to all subtitle timestamps. Used by the
             export pipeline which fast-seeks 4s before the clip then trims —
             without this offset subtitles appear during the trimmed buffer.
+        y_offset: Vertical position offset for the subtitles, -0.5..+0.5.
+            Positive = up. 0.0 keeps the style's hardcoded default.
 
     Returns:
         Absolute path to the generated .ass file. Returns None if no words in range.
@@ -376,7 +390,7 @@ def generate_ass_for_clip(
             w["start"] += time_offset
             w["end"] += time_offset
 
-    header = _ass_header(style, size_scale=size_scale)
+    header = _ass_header(style, size_scale=size_scale, y_offset=y_offset)
 
     if style == "karaoke":
         body = _generate_karaoke(clip_words)

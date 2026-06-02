@@ -271,5 +271,20 @@ duration, transcript_snippet, match_confidence`.
 | Analyze orchestration / chunking loop | `routes/clips.py` |
 | Upload / project store / status | `routes/upload.py` |
 | Style save endpoint | `routes/export.py` |
-| All UI (3 modes, all steps) | `frontend/src/App.jsx` |
+| All UI (modes + Editor) | `frontend/src/App.jsx` |
 | API client | `frontend/src/services/api.js` |
+| Editor mode (upload/transcribe/segments/thumbnails/overlays) | `routes/editor.py` |
+| Multi-segment concat / speed / image-clip / thumbnails | `services/video_service.py` (`concat_segments`, `get_canvas_dimensions`, `build_zoompan_filter`, `remap_transcript_to_segments`) |
+| Editor UI (timeline, keyframes, overlays, ratio, speed) | `frontend/src/App.jsx` (`EditorMode`, `TimelineEditor`, `SubtitleOverlay`, `ClipEditorModal`) |
+
+### Editor mode (v9.6) — quick map
+- **Modes**: video / analyzer / stream / meme / **editor** (5th button).
+- Editor is manual (no Gemini). `ClipData` gained `segments` (cuts, in playback
+  order), `keyframes`, `edit_zoom/pan_*`. `Segment` has `speed` and a
+  `type: "video"|"image"`. `StyleConfig` gained `aspect_ratio`,
+  `image_overlays`, `subtitle_y`, `fill_mode_scale`.
+- **Export concat-first**: if `clip.segments` is non-empty, `export_clip_with_style`
+  concatenates the kept pieces to a temp mp4 first, then runs the normal
+  pipeline on it (so subtitles/keyframes/overlays timing is trivially correct).
+- Whisper for the editor runs **only on the current cut**, on demand
+  (`POST /api/editor/{id}/transcribe`), not the whole upload.

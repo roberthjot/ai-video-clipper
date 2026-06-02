@@ -2,6 +2,55 @@ from pydantic import BaseModel
 from typing import Optional
 
 
+class Segment(BaseModel):
+    """One kept piece of the source video, in ORIGINAL-video seconds.
+
+    A clip's final output is the concatenation of its segments in order.
+    Empty segments list on a ClipData means "single range" (legacy):
+    use start_time/end_time. Non-empty means the user cut the clip up in
+    the timeline editor and we concat the kept pieces.
+
+    A segment can also be an IMAGE clip (type="image"): a still shown
+    full-screen for `duration` output seconds, spliced into the timeline.
+    """
+    start: float
+    end: float
+    speed: float = 1.0                  # 0.25–4.0; 2.0 = 2x faster (video only)
+    type: str = "video"                # "video" | "image"
+    image_path: Optional[str] = None   # source image when type == "image"
+    duration: float = 0.0              # image clip length in output seconds
+
+
+class ImageOverlay(BaseModel):
+    """An image painted on top of the video for a time range (output seconds).
+
+    Positions are relative to the 1080×1920 canvas so they survive any preview
+    scaling. start/end are in the FINAL output timeline (after cuts).
+    """
+    path: str                  # server path to the uploaded image
+    x: float = 0.5             # center X, 0-1 of canvas width
+    y: float = 0.4             # center Y, 0-1 of canvas height
+    scale: float = 0.4         # width as fraction of canvas width
+    start: float = 0.0         # show from (output seconds)
+    end: float = 99999.0       # show until (output seconds)
+    opacity: float = 1.0       # 0-1
+
+
+class Keyframe(BaseModel):
+    """A single keyframe on the per-clip animation timeline.
+
+    Time is RELATIVE to the clip start (0 = first frame of the trimmed clip),
+    so keyframes survive trim changes without manual recomputation.
+    Values are the same shape as the static edit_* transform.
+    Linear interpolation between consecutive keyframes; the first/last value
+    is held outside the keyframe range.
+    """
+    time: float                    # seconds from clip start (0 = clip start)
+    zoom: float = 1.0              # 1.0–3.0 (keyframes use zoompan → no zoom-out below 1)
+    pan_x: float = 0.0             # -100 to +100 (% of available pan range)
+    pan_y: float = 0.0
+
+
 class ClipData(BaseModel):
     """A single clip identified by the AI."""
     id: int
@@ -21,10 +70,33 @@ class ClipData(BaseModel):
     edit_zoom: float = 1.0          # 1.0 = no zoom, 2.0 = 2x
     edit_pan_x: float = 0.0         # -50 to +50 (% of frame width)
     edit_pan_y: float = 0.0         # -50 to +50 (% of frame height)
+    # Keyframe animation — if non-empty, OVERRIDES the static edit_* values
+    # above. Empty list = static mode (current behaviour). Non-empty list =
+    # animated mode (FFmpeg uses zoompan with expressions built from these).
+    keyframes: list[Keyframe] = []
+
+    # Timeline editor cuts — if non-empty, the clip output is the concatenation
+    # of these segments (in original-video seconds). Empty = single range
+    # defined by start_time/end_time. Lets the user remove boring middles.
+    segments: list[Segment] = []
 
     def model_post_init(self, __context):
         if self.duration == 0.0:
             self.duration = self.end_time - self.start_time
+
+    def effective_segments(self) -> list[tuple]:
+        """Return the list of (start, end) pieces this clip exports, in order.
+
+        Single-range clips return one tuple from start_time/end_time so callers
+        can treat both modes uniformly.
+        """
+        if self.segments:
+            return [(s.start, s.end) for s in self.segments]
+        return [(self.start_time, self.end_time)]
+
+    def total_duration(self) -> float:
+        """Sum of all kept segments (the final output length)."""
+        return sum(max(0.0, e - s) for s, e in self.effective_segments())
 
 
 class StyleConfig(BaseModel):
@@ -38,8 +110,16 @@ class StyleConfig(BaseModel):
     text_stroke_color: str = "#000000"
     text_stroke_width: int = 5  # Thicker stroke for better visibility
 
+    # Output aspect ratio: "9:16" (default, TikTok), "1:1", "16:9", "4:5"
+    aspect_ratio: str = "9:16"
+
     # Video fill mode: "fit" = fill width (full video visible), "fill" = fill full frame (sides crop)
     fill_mode: str = "fit"
+
+    # Global multiplier on top of fill_mode (0.5–1.5, default 1.0 = no-op).
+    # Lets the user fine-tune the video size beyond the 6 named presets — e.g.
+    # "Medium but a little bigger". Applied in addition to per-clip edit_zoom.
+    fill_mode_scale: float = 1.0
 
     # IG-specific fill mode (independent from TikTok fill_mode)
     ig_fill_mode: str = "fit"
@@ -67,6 +147,11 @@ class StyleConfig(BaseModel):
     # Subtitle text size multiplier (0.6 - 1.6, default 1.0)
     subtitle_size_scale: float = 1.0
 
+    # Subtitle vertical offset — additive relative to the style's default
+    # marginV. Range -0.5 (down half the canvas) to +0.5 (up half the canvas).
+    # 0.0 = use the style's hardcoded default (clean=30% from bottom, etc.)
+    subtitle_y: float = 0.0
+
     # Cinematic visual filter: "none" | "cinematic" | "warm" | "vivid" | "moody" | "bw"
     visual_filter: str = "none"
 
@@ -82,6 +167,10 @@ class StyleConfig(BaseModel):
 
     # Caption font choice (key in video_service.FONT_MAP). Default keeps Calibri.
     caption_font: str = "calibri"
+
+    # Image overlays (editor mode) — images painted on top of the video for a
+    # time range. Empty by default. Burned in at export.
+    image_overlays: list[ImageOverlay] = []
 
     # Anti-detect / uniquify (export only, not applied to preview)
     strip_metadata: bool = False

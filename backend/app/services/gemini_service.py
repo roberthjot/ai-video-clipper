@@ -11,9 +11,14 @@ from ..config import settings
 from ..models.clip import ClipData
 
 
-# Video chunking thresholds (videos longer than this get split for analysis)
-CHUNK_THRESHOLD_SECONDS = 10 * 60   # 10 min
-CHUNK_DURATION_SECONDS = 10 * 60    # ~10 min per chunk
+# Video chunking thresholds (videos longer than this get split for analysis).
+# Gemini 2.5 Flash handles ~1M tokens of video context (≈45 min of video) in a
+# single call, so chunking is only needed for genuinely long content. Below
+# 30 min we ship single-shot — that avoids: dedup loss across chunk boundaries,
+# multiple API failure surfaces, FFmpeg re-encode time per chunk, and the
+# "asked for 9, got 5" symptom from a single failed chunk.
+CHUNK_THRESHOLD_SECONDS = 30 * 60   # 30 min — chunk only for genuinely long videos
+CHUNK_DURATION_SECONDS = 15 * 60    # ~15 min per chunk (bigger chunks = fewer boundaries)
 
 VIDEO_ANALYSIS_MODELS = {
     "gemini-3.5-flash",                  # paid only

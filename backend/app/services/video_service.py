@@ -47,6 +47,389 @@ def get_font_path(font_key: str) -> str:
 _QSV_AVAILABLE = None
 
 
+def get_canvas_dimensions(aspect_ratio: str = "9:16") -> tuple:
+    """Return (W, H) for the requested output aspect ratio. Even numbers
+    (required by H.264). Defaults to 9:16 vertical."""
+    ar = (aspect_ratio or "9:16").strip()
+    return {
+        "9:16": (1080, 1920),
+        "1:1":  (1080, 1080),
+        "16:9": (1920, 1080),
+        "4:5":  (1080, 1350),
+    }.get(ar, (1080, 1920))
+
+
+# ─── Multi-segment concat (timeline editor) ───────────────────────────────────
+#
+# The timeline editor lets the user cut a clip into kept pieces (removing
+# boring middles). We implement this "concat-first": before the heavy export
+# pipeline runs, we concatenate the kept segments into one temp mp4. The rest
+# of the pipeline (blur, caption, watermark, subtitles, keyframes) then runs
+# on that temp file as if it were a normal single-range video. This keeps the
+# complex export filter graph untouched and makes subtitle/keyframe timing
+# trivially correct (they operate on the already-cut video).
+
+def _atempo_chain(speed: float) -> str:
+    """Build an atempo filter chain for arbitrary speed. atempo only accepts
+    0.5–2.0, so out-of-range speeds are decomposed into a product of factors."""
+    s = max(0.25, min(4.0, float(speed)))
+    factors = []
+    while s > 2.0 + 1e-6:
+        factors.append(2.0); s /= 2.0
+    while s < 0.5 - 1e-6:
+        factors.append(0.5); s /= 0.5
+    factors.append(s)
+    return ",".join(f"atempo={f:.6f}" for f in factors)
+
+
+def _norm_segments(segments: list) -> list:
+    """Normalise mixed input (tuples or dicts) into a list of dicts with
+    start/end/speed/type/image_path/duration."""
+    out = []
+    for seg in segments:
+        if isinstance(seg, (tuple, list)):
+            s, e = float(seg[0]), float(seg[1])
+            sp = float(seg[2]) if len(seg) > 2 else 1.0
+            out.append({"start": s, "end": e, "speed": sp, "type": "video"})
+        elif isinstance(seg, dict):
+            out.append({
+                "start": float(seg.get("start", 0)), "end": float(seg.get("end", 0)),
+                "speed": max(0.25, min(4.0, float(seg.get("speed", 1.0) or 1.0))),
+                "type": seg.get("type", "video"),
+                "image_path": seg.get("image_path"),
+                "duration": float(seg.get("duration", 0) or 0),
+            })
+        else:  # pydantic Segment
+            out.append({
+                "start": float(getattr(seg, "start", 0)), "end": float(getattr(seg, "end", 0)),
+                "speed": max(0.25, min(4.0, float(getattr(seg, "speed", 1.0) or 1.0))),
+                "type": getattr(seg, "type", "video"),
+                "image_path": getattr(seg, "image_path", None),
+                "duration": float(getattr(seg, "duration", 0) or 0),
+            })
+    return out
+
+
+def _segment_output_duration(seg: dict) -> float:
+    """How long this segment lasts in the FINAL output."""
+    if seg["type"] == "image":
+        return max(0.1, seg.get("duration", 0) or 0)
+    return max(0.0, (seg["end"] - seg["start"]) / max(0.25, seg.get("speed", 1.0)))
+
+
+def concat_segments(source_video: str, segments: list, output_path: str,
+                    canvas: tuple = (1080, 1920)) -> float:
+    """Concatenate kept segments (video and/or image clips) into one mp4.
+
+    Each segment is a dict/tuple with start/end/speed (video) or
+    type="image"/image_path/duration (image clip). Video segments support
+    per-segment speed (setpts + atempo). Image clips become a still shown
+    full-screen for `duration` seconds with silent audio.
+
+    Mixed video+image is normalised to a common WxH (the canvas) so the
+    concat filter accepts all streams. Returns total output duration.
+    """
+    W, H = canvas
+    segs = [s for s in _norm_segments(segments)
+            if (s["type"] == "image" and s.get("image_path")) or (s["end"] - s["start"] > 0.05)]
+    if not segs:
+        raise RuntimeError("concat_segments: no valid segments")
+
+    has_image = any(s["type"] == "image" for s in segs)
+    has_speed = any(abs(s["speed"] - 1.0) > 1e-3 for s in segs if s["type"] == "video")
+
+    # Fast path: pure single video segment, normal speed → simple trim copy-ish
+    if len(segs) == 1 and segs[0]["type"] == "video" and not has_speed:
+        s, e = segs[0]["start"], segs[0]["end"]
+        dur = e - s
+        cmd = [FFMPEG_EXE, "-ss", str(max(0.0, s - 4.0)), "-i", source_video,
+               "-ss", str(min(4.0, s)), "-t", str(dur),
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+               "-c:a", "aac", "-y", "-loglevel", "error", output_path]
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        if r.returncode != 0:
+            raise RuntimeError(f"concat_segments (single) failed: {r.stderr[-400:]}")
+        return dur
+
+    # General path: build a filter graph. Image clips need extra inputs.
+    # Input [0] = source video. Image clips add inputs [1], [2], ...
+    inputs = [FFMPEG_EXE, "-i", source_video]
+    img_input_idx = {}
+    next_input = 1
+    for i, seg in enumerate(segs):
+        if seg["type"] == "image":
+            inputs += ["-loop", "1", "-t", str(_segment_output_duration(seg)), "-i", seg["image_path"]]
+            img_input_idx[i] = next_input
+            next_input += 1
+
+    parts = []
+    concat_inputs = ""
+    for i, seg in enumerate(segs):
+        if seg["type"] == "image":
+            inp = img_input_idx[i]
+            # Scale image to canvas (contain) on black, set fps/sar, + silent audio
+            parts.append(
+                f"[{inp}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[v{i}]"
+            )
+            parts.append(f"anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration={_segment_output_duration(seg)}[a{i}]")
+        else:
+            s, e, sp = seg["start"], seg["end"], seg["speed"]
+            # When mixing with images, normalise video size to canvas too
+            vchain = f"[0:v]trim=start={s}:end={e},setpts=(PTS-STARTPTS)/{sp}"
+            if has_image:
+                vchain += f",scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p"
+            parts.append(vchain + f"[v{i}]")
+            parts.append(f"[0:a]atrim=start={s}:end={e},asetpts=PTS-STARTPTS,{_atempo_chain(sp)}[a{i}]")
+        concat_inputs += f"[v{i}][a{i}]"
+
+    n = len(segs)
+    filtergraph = ";".join(parts) + f";{concat_inputs}concat=n={n}:v=1:a=1[outv][outa]"
+    cmd = inputs + ["-filter_complex", filtergraph, "-map", "[outv]", "-map", "[outa]",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                    "-c:a", "aac", "-y", "-loglevel", "error", output_path]
+    total = sum(_segment_output_duration(s) for s in segs)
+    print(f"[Concat] {n} segments (image={has_image}, speed={has_speed}) -> {total:.1f}s")
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    if r.returncode != 0:
+        # Retry video-only (source may have no audio stream)
+        print(f"[Concat] with-audio failed, retrying video-only. stderr: {r.stderr[-250:]}")
+        parts_v = []
+        concat_v = ""
+        for i, seg in enumerate(segs):
+            if seg["type"] == "image":
+                inp = img_input_idx[i]
+                parts_v.append(f"[{inp}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[v{i}]")
+            else:
+                s, e, sp = seg["start"], seg["end"], seg["speed"]
+                vchain = f"[0:v]trim=start={s}:end={e},setpts=(PTS-STARTPTS)/{sp}"
+                if has_image:
+                    vchain += f",scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p"
+                parts_v.append(vchain + f"[v{i}]")
+            concat_v += f"[v{i}]"
+        fg_v = ";".join(parts_v) + f";{concat_v}concat=n={n}:v=1:a=0[outv]"
+        cmd_v = inputs + ["-filter_complex", fg_v, "-map", "[outv]",
+                          "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                          "-y", "-loglevel", "error", output_path]
+        r = subprocess.run(cmd_v, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        if r.returncode != 0:
+            raise RuntimeError(f"concat_segments failed: {r.stderr[-400:]}")
+    return total
+
+
+def remap_transcript_to_segments(transcript: dict, segments: list) -> dict:
+    """Remap a transcript from SOURCE-video time to CONCATENATED time.
+
+    When segments [(5,10),(15,20)] are concatenated, a word at source t=17
+    (inside the second kept piece) lands at output t = (10-5) + (17-15) = 7.
+    Words inside removed gaps are dropped. Returns a new transcript dict whose
+    word timestamps are in the concatenated output timeline — which is what the
+    export's subtitle generator expects after concat-first.
+    """
+    if not transcript or not transcript.get("words"):
+        return transcript
+    segs = _norm_segments(segments)
+    if not segs:
+        return transcript
+
+    out_words = []
+    offset = 0.0
+    for seg in segs:
+        out_dur = _segment_output_duration(seg)
+        if seg["type"] == "image":
+            # Image clips carry no speech — just advance the output cursor.
+            offset += out_dur
+            continue
+        s, e, sp = seg["start"], seg["end"], max(0.25, seg.get("speed", 1.0))
+        for w in transcript["words"]:
+            ws, we = w.get("start", 0), w.get("end", 0)
+            if we <= s or ws >= e:
+                continue
+            # Clip to the segment, compress by speed, then shift into output time
+            new_start = (max(ws, s) - s) / sp + offset
+            new_end = (min(we, e) - s) / sp + offset
+            if new_end > new_start:
+                out_words.append({**w, "start": round(new_start, 3), "end": round(new_end, 3)})
+        offset += out_dur
+
+    out = dict(transcript)
+    out["words"] = out_words
+    return out
+
+
+def generate_thumbnails(source_video: str, output_dir: str, count: int = 30,
+                        duration: float = None, width: int = 160) -> list:
+    """Extract `count` evenly-spaced thumbnail JPEGs across the video.
+
+    Returns a list of dicts: [{"time": sec, "file": "thumb_03.jpg"}, ...].
+    Used by the timeline editor to paint the clip track. width keeps them
+    small (fast + light). Existing thumbs in output_dir are overwritten.
+    """
+    if duration is None:
+        duration = get_video_duration(source_video)
+    count = max(4, min(60, int(count)))
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Evenly spaced timestamps, biased slightly inward so the first/last frames
+    # aren't pure black intros/outros.
+    thumbs = []
+    for i in range(count):
+        frac = (i + 0.5) / count
+        t = max(0.0, min(duration - 0.1, frac * duration))
+        fname = f"thumb_{i:03d}.jpg"
+        fpath = os.path.join(output_dir, fname)
+        cmd = [
+            FFMPEG_EXE, "-ss", str(t), "-i", source_video,
+            "-frames:v", "1", "-vf", f"scale={width}:-2",
+            "-q:v", "5", "-y", "-loglevel", "error", fpath,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        if result.returncode == 0 and os.path.exists(fpath):
+            thumbs.append({"time": round(t, 2), "file": fname})
+    return thumbs
+
+
+# ─── Keyframe animation (zoompan expression generator) ────────────────────────
+#
+# Per-clip animated zoom/pan. The editor modal sends a list of keyframes,
+# each with {time (s relative to clip start), zoom, pan_x, pan_y}. We build
+# the FFmpeg `zoompan` filter expressions with linear interpolation between
+# consecutive keyframes and held values outside the range.
+#
+# Why zoompan (and not scale + eval=frame): scale's output dimensions can't
+# vary mid-stream in a way downstream filters accept. zoompan is designed
+# specifically for animated zoom into source content, evaluated per frame.
+#
+# Trade-off vs the static `_zoom` path: in keyframes mode the foreground is
+# always canvas-sized (zoompan output = `s=WxH`), so the bg-blur layer never
+# shows through. That's acceptable because keyframes are used for punch-in
+# / zoom-out effects where the source is meant to fill the frame anyway.
+
+def has_keyframes(clip) -> bool:
+    """True if the clip has keyframes that should drive an animated zoom."""
+    kfs = getattr(clip, "keyframes", None) or []
+    return len(kfs) > 0
+
+
+def interpolate_keyframes(keyframes: list, t: float) -> dict:
+    """Linearly interpolate keyframe values at time `t` (seconds from clip start).
+
+    Mirrors the JS interpolation used by the editor's live preview so the
+    static preview-frame thumbnail matches what the animated clip will show.
+    Hold first/last value outside the keyframe range. Returns
+    `{zoom, pan_x, pan_y}` or sensible defaults if `keyframes` is empty.
+    """
+    if not keyframes:
+        return {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0}
+
+    def _get(kf, name, default=0.0):
+        return float(getattr(kf, name, None) if hasattr(kf, name) else kf.get(name, default))
+
+    pts = sorted(
+        [(_get(k, "time", 0.0), _get(k, "zoom", 1.0), _get(k, "pan_x", 0.0), _get(k, "pan_y", 0.0))
+         for k in keyframes],
+        key=lambda p: p[0],
+    )
+    if t <= pts[0][0]:
+        return {"zoom": pts[0][1], "pan_x": pts[0][2], "pan_y": pts[0][3]}
+    if t >= pts[-1][0]:
+        return {"zoom": pts[-1][1], "pan_x": pts[-1][2], "pan_y": pts[-1][3]}
+    for i in range(len(pts) - 1):
+        t0, z0, px0, py0 = pts[i]
+        t1, z1, px1, py1 = pts[i + 1]
+        if t0 <= t < t1:
+            u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+            return {
+                "zoom":  z0 + (z1 - z0) * u,
+                "pan_x": px0 + (px1 - px0) * u,
+                "pan_y": py0 + (py1 - py0) * u,
+            }
+    return {"zoom": pts[-1][1], "pan_x": pts[-1][2], "pan_y": pts[-1][3]}
+
+
+def build_zoompan_filter(
+    keyframes: list,
+    clip_duration: float,
+    target_w: int,
+    target_h: int,
+    fps: int = 30,
+) -> str:
+    """Return a complete `zoompan=...` filter string for the foreground.
+
+    `keyframes` is a list of objects/dicts with `.time/.zoom/.pan_x/.pan_y`.
+    `clip_duration` is the trimmed clip length (seconds). zoompan emits
+    `fps`*duration frames at size `target_w`×`target_h`.
+
+    The returned string is the *body* of the zoompan filter — wrap it with
+    `[fg_input]<this>[fg_label]` in the parent filter chain.
+    """
+    if not keyframes:
+        # Caller should have checked has_keyframes() first.
+        return f"zoompan=z=1:x=0:y=0:d=1:s={target_w}x{target_h}:fps={fps}"
+
+    # Normalise to a list of (time, zoom, pan_x, pan_y) tuples sorted by time.
+    def _get(kf, name, default=0.0):
+        return float(getattr(kf, name, None) if hasattr(kf, name) else kf.get(name, default))
+
+    pts = []
+    for kf in keyframes:
+        pts.append((
+            _get(kf, "time", 0.0),
+            max(1.0, _get(kf, "zoom", 1.0)),
+            _get(kf, "pan_x", 0.0),
+            _get(kf, "pan_y", 0.0),
+        ))
+    pts.sort(key=lambda p: p[0])
+
+    # Pad: if first kf isn't at t=0, hold first values from start.
+    # If last kf isn't at end, hold last values to end.
+    if pts[0][0] > 0:
+        pts = [(0.0, pts[0][1], pts[0][2], pts[0][3])] + pts
+    if pts[-1][0] < clip_duration:
+        pts = pts + [(clip_duration, pts[-1][1], pts[-1][2], pts[-1][3])]
+
+    def _chain(idx: int) -> str:
+        """Build piecewise-linear expression for tuple field `idx` over `pts`."""
+        # Fallback for time beyond last segment = last value
+        last_val = pts[-1][idx]
+        expr = f"{last_val:.6f}"
+        # Walk backwards, wrap each segment in an `if(lt(it, t_end), interp, expr)`
+        for i in range(len(pts) - 1, 0, -1):
+            t0, _, _, _ = pts[i - 1]
+            t1, _, _, _ = pts[i]
+            v0 = pts[i - 1][idx]
+            v1 = pts[i][idx]
+            if t1 - t0 < 1e-6:
+                # Zero-length segment → step to v1
+                interp = f"{v1:.6f}"
+            else:
+                # v0 + (v1 - v0) * ((it - t0) / (t1 - t0))
+                slope = (v1 - v0) / (t1 - t0)
+                interp = f"({v0:.6f}+({slope:.6f})*(it-{t0:.6f}))"
+            expr = f"if(lt(it,{t1:.6f}),{interp},{expr})"
+        return expr
+
+    z_expr = _chain(1)
+    px_expr = _chain(2)
+    py_expr = _chain(3)
+
+    # x/y in zoompan are top-left of the source crop window, in SOURCE coords.
+    # Centred crop: (iw - iw/zoom)/2. Pan adds a fraction of the available
+    # pan range (iw - iw/zoom)/2 in each direction.
+    #   pan_x = +100 → fully right, -100 → fully left, 0 → centred.
+    x_expr = f"((iw-iw/zoom)/2)+(({px_expr})/100)*((iw-iw/zoom)/2)"
+    y_expr = f"((ih-ih/zoom)/2)+(({py_expr})/100)*((ih-ih/zoom)/2)"
+
+    # FFmpeg's filter graph parser uses ',' and ':' as delimiters at the top
+    # level — single-quote each expression so commas inside if(...) survive.
+    return (
+        f"zoompan=z='{z_expr}'"
+        f":x='{x_expr}'"
+        f":y='{y_expr}'"
+        f":d=1:s={target_w}x{target_h}:fps={fps}"
+    )
+
+
 def get_visual_filter_chain(filter_name: str) -> str:
     """Return an FFmpeg filter string for a cinematic look. Empty string = no filter."""
     f = (filter_name or "none").lower()
@@ -697,6 +1080,7 @@ def generate_preview_frame(
     edit_zoom: float = 1.0,
     edit_pan_x: float = 0.0,
     edit_pan_y: float = 0.0,
+    fill_mode_scale: float = 1.0,
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
@@ -713,8 +1097,11 @@ def generate_preview_frame(
     else:
         target_h = H
 
-    # Per-clip editor transform — scales the BOX size (not the content)
-    _zoom = max(0.3, float(edit_zoom or 1.0))
+    # Per-clip editor transform — scales the BOX size (not the content).
+    # fill_mode_scale is the global StyleConfig knob; multiply both so the
+    # rest of the formulas don't need to know about it.
+    _fm_scale = max(0.5, min(1.5, float(fill_mode_scale or 1.0)))
+    _zoom = max(0.3, float(edit_zoom or 1.0)) * _fm_scale
     _pan_x_pct = float(edit_pan_x or 0.0) / 100.0
     _pan_y_pct = float(edit_pan_y or 0.0) / 100.0
 
@@ -874,6 +1261,7 @@ def generate_preview_clip(
     transcript: dict = None,
     visual_filter: str = "none",
     subtitle_size_scale: float = 1.0,
+    subtitle_y: float = 0.0,
     background_style: str = "blur",
     no_text: bool = False,
     caption_font: str = "calibri",
@@ -881,6 +1269,8 @@ def generate_preview_clip(
     edit_zoom: float = 1.0,
     edit_pan_x: float = 0.0,
     edit_pan_y: float = 0.0,
+    fill_mode_scale: float = 1.0,
+    keyframes: list = None,         # list of Keyframe (or dicts) — animated zoom/pan
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -897,13 +1287,23 @@ def generate_preview_clip(
     else:
         target_h = H
 
-    # Per-clip editor transform — scales the BOX size (not the content)
-    _zoom = max(0.3, float(edit_zoom or 1.0))
+    # Per-clip editor transform — scales the BOX size (not the content).
+    # fill_mode_scale is the global StyleConfig knob; multiply both so the
+    # rest of the formulas don't need to know about it.
+    _fm_scale = max(0.5, min(1.5, float(fill_mode_scale or 1.0)))
+    _zoom = max(0.3, float(edit_zoom or 1.0)) * _fm_scale
     _pan_x_pct = float(edit_pan_x or 0.0) / 100.0
     _pan_y_pct = float(edit_pan_y or 0.0) / 100.0
 
-    # Build fg_filter based on fill_mode × zoom
-    if fill_mode == "fill":
+    # If keyframes are present, switch the foreground stage to a zoompan filter
+    # that animates zoom/pan over the clip duration. The fg becomes canvas-
+    # sized so the bg-blur is hidden (acceptable: keyframes are for punch-ins
+    # where the source should fill the frame anyway). Otherwise keep the
+    # existing static scale+overlay chain so single-mode behaviour is untouched.
+    use_keyframes = bool(keyframes) and len(keyframes) > 0
+    if use_keyframes:
+        fg_filter = build_zoompan_filter(keyframes, clip_duration, W, target_h, fps=30)
+    elif fill_mode == "fill":
         scaled_h = int(target_h * _zoom)
         scaled_w = int(W * _zoom)
         fg_filter = f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=increase,crop={scaled_w}:{scaled_h}"
@@ -929,17 +1329,27 @@ def generate_preview_clip(
             return base + ",colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0"
         return base + ",boxblur=12:2"
 
+    # In keyframes mode the fg is already canvas-sized — overlay at (0,0).
+    # In static mode the overlay carries the pan offset (as before).
+    # IMPORTANT: build each overlay string INSIDE its branch — `video_h`
+    # only exists when `use_split` is True (defined in the if-split block above).
     if use_split:
+        _overlay_xy_split = "0:0" if use_keyframes else (
+            f"(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*{video_h}"
+        )
         filter_complex = (
             f"{_bg(video_h)}[bg];"
             f"[0:v]{fg_filter}[fg];"
-            f"[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*{video_h},format=yuv420p[video_part];"
+            f"[bg][fg]overlay={_overlay_xy_split},format=yuv420p[video_part];"
             f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
             f"[video_part][img_part]vstack=inputs=2[v]"
         )
         input_index = 2
     else:
-        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H[v]"
+        _overlay_xy_full = "0:0" if use_keyframes else (
+            f"(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H"
+        )
+        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay={_overlay_xy_full}[v]"
 
     last_label = "v"
     rounded_box_path = None
@@ -999,6 +1409,7 @@ def generate_preview_clip(
                 style=subtitle_style,
                 output_dir=temp_dir,
                 size_scale=subtitle_size_scale,
+                y_offset=subtitle_y,
             )
             if ass_subtitle_path:
                 # FFmpeg subtitles filter is fragile with Windows paths.
@@ -1049,11 +1460,18 @@ def generate_preview_clip(
     cmd_qsv = cmd + qsv_codec + base_args
     cmd_cpu = cmd + cpu_codec + base_args
 
-    print(f"[Preview] Generating {clip_duration}s clip with {len(lines) if caption_text else 0} text lines, split={use_split}, qsv={_qsv_supported()}")
+    print(f"[Preview] Generating {clip_duration}s clip — keyframes={'YES('+str(len(keyframes))+')' if use_keyframes else 'no'}, caption_lines={len(lines) if caption_text else 0}, subtitle={subtitle_style}, visual_filter={visual_filter}, split={use_split}, qsv={_qsv_supported()}")
+    print(f"[Preview] filter_complex (last 400 chars): ...{filter_complex[-400:]}")
     result = subprocess.run(cmd_qsv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     if result.returncode != 0 and _qsv_supported():
-        print(f"[Preview] QSV failed, retrying with libx264. stderr: {result.stderr[-200:]}")
+        print(f"[Preview] QSV failed (rc={result.returncode}), retrying with libx264. stderr tail: {result.stderr[-400:]}")
         result = subprocess.run(cmd_cpu, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    if result.returncode != 0:
+        # Print the full FFmpeg cmd + last 1KB of stderr so we can see the
+        # exact filter graph parse error or codec failure.
+        print(f"[Preview] FAILED rc={result.returncode}")
+        print(f"[Preview] cmd: {' '.join(cmd_cpu)}")
+        print(f"[Preview] stderr tail: {result.stderr[-1000:]}")
 
     if rounded_box_path and os.path.exists(rounded_box_path):
         try:

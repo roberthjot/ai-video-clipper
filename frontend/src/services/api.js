@@ -375,3 +375,95 @@ export async function getMemeIgDescription(batchId, index) {
     if (!res.ok) throw new Error("Description not found");
     return res.text();
 }
+
+
+// ─── Editor mode (standalone editor: upload → trim → subtitles → export) ─────
+
+export function uploadForEditor(file, onProgress) {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append("video", file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${API_BASE}/editor/upload`);
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && onProgress) {
+                onProgress(Math.round((e.loaded / e.total) * 100));
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText));
+            else {
+                let detail = "Upload failed";
+                try { detail = JSON.parse(xhr.responseText).detail || detail; } catch {}
+                reject(new Error(detail));
+            }
+        };
+        xhr.onerror = () => reject(new Error("Upload failed (network error)"));
+        xhr.send(formData);
+    });
+}
+
+export async function editorTranscribeTrim(projectId) {
+    const res = await fetch(`${API_BASE}/editor/${projectId}/transcribe`, {
+        method: "POST",
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Transcription failed");
+    }
+    return res.json();
+}
+
+export async function getEditorSession(projectId) {
+    const res = await fetch(`${API_BASE}/editor/${projectId}`);
+    if (!res.ok) throw new Error("Editor session not found");
+    return res.json();
+}
+
+export async function getEditorThumbnails(projectId, count = 30) {
+    const res = await fetch(`${API_BASE}/editor/${projectId}/thumbnails?count=${count}`, {
+        method: "POST",
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Thumbnail generation failed");
+    }
+    const data = await res.json();
+    // Prefix relative URLs with the API origin so <img> can load them
+    const origin = API_BASE.replace(/\/api$/, "");
+    data.thumbnails = (data.thumbnails || []).map((t) => ({ ...t, url: origin + t.url }));
+    return data;
+}
+
+export async function uploadOverlayImage(projectId, file) {
+    const formData = new FormData();
+    formData.append("image", file);
+    const res = await fetch(`${API_BASE}/editor/${projectId}/overlay-image`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Overlay upload failed");
+    }
+    const data = await res.json();
+    const origin = API_BASE.replace(/\/api$/, "");
+    data.url = origin + data.url;  // absolute URL for <img>
+    return data;
+}
+
+export async function saveEditorSegments(projectId, segments) {
+    const res = await fetch(`${API_BASE}/editor/${projectId}/segments`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segments }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to save segments");
+    }
+    return res.json();
+}

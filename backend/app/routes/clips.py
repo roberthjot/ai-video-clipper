@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from ..services import gemini_service, video_service, whisper_service
+from ..models.clip import Keyframe
 from .upload import get_project_store
 
 router = APIRouter(prefix="/api/clips", tags=["clips"])
@@ -28,13 +29,30 @@ class ModelHealthRequest(BaseModel):
     models: list[str] | None = None
 
 
+class KeyframeInput(BaseModel):
+    """Wire format for a single keyframe coming from the editor modal."""
+    time: float          # seconds from clip start
+    zoom: float = 1.0
+    pan_x: float = 0.0
+    pan_y: float = 0.0
+
+
 class EditTransformRequest(BaseModel):
-    """Per-clip edit set by the editor modal (zoom + pan + trim)."""
+    """Per-clip edit set by the editor modal (zoom + pan + trim + keyframes).
+
+    `keyframes` semantics:
+      - None  → leave clip.keyframes unchanged
+      - []    → clear keyframes (revert to static mode)
+      - [...] → replace keyframes wholesale
+    Trim (start_time/end_time) is independent of keyframes and applies in both
+    static and animated modes.
+    """
     edit_zoom: float = 1.0
     edit_pan_x: float = 0.0
     edit_pan_y: float = 0.0
-    start_time: float | None = None  # optional trim — None = leave unchanged
+    start_time: float | None = None
     end_time: float | None = None
+    keyframes: list[KeyframeInput] | None = None
 
 
 @router.post("/analyze")
@@ -134,18 +152,41 @@ async def analyze_video(req: AnalyzeRequest):
             active_file = None
             clips = await _analyze_in_chunks(project, duration, transcript, video_for_analysis)
         else:
-            clips = await asyncio.to_thread(
-                gemini_service.analyze_video,
-                active_file,
-                duration,
-                project.clip_count,
-                project.min_duration,
-                project.custom_prompt,
-                0,
-                transcript,
-                project.gemini_model,
-                getattr(project, 'creator_name', ''),
-            )
+            # Single-shot (videos under the chunked threshold). Wrap in the
+            # same retry policy as _analyze_in_chunks so a transient Gemini
+            # blip ("empty response") doesn't return 0 clips and force the
+            # user to re-upload — most empty-response failures clear within
+            # a few seconds when Google's load shifts.
+            async def _single_shot_with_retry(max_attempts=3):
+                last_err = None
+                for attempt in range(1, max_attempts + 1):
+                    try:
+                        return await asyncio.to_thread(
+                            gemini_service.analyze_video,
+                            active_file,
+                            duration,
+                            project.clip_count,
+                            project.min_duration,
+                            project.custom_prompt,
+                            0,
+                            transcript,
+                            project.gemini_model,
+                            getattr(project, 'creator_name', ''),
+                        )
+                    except Exception as e:
+                        last_err = e
+                        msg = str(e).lower()
+                        # Permanent failures — don't burn retries.
+                        if any(p in msg for p in ("quota", "permission", "invalid", "not found", "400 ", "403 ", "404 ")):
+                            raise
+                        if attempt < max_attempts:
+                            delay = 5 if attempt == 1 else 15
+                            print(f"[Analyze] single-shot attempt {attempt} failed ({e}) — retrying in {delay}s")
+                            await asyncio.sleep(delay)
+                raise last_err
+
+            clips = await _single_shot_with_retry()
+            print(f"[Analyze] single-shot got {len(clips)}/{project.clip_count} clips")
 
         # Shift BOTH clips and transcript to the ORIGINAL video timeline if we
         # analyzed a sub-range. After this, all timestamps refer to the original
@@ -218,19 +259,59 @@ async def _analyze_in_chunks(project, duration: float, transcript: dict, video_p
     source_video = video_path or project.video_path
     ranges = gemini_service.build_chunk_ranges(duration, gemini_service.CHUNK_DURATION_SECONDS)
     n_chunks = len(ranges)
-    clips_per_chunk = max(1, math.ceil(project.clip_count / n_chunks))
-    print(f"[Chunked] {n_chunks} chunks, ~{clips_per_chunk} clips each")
+    # Ask for 1 extra clip per chunk to compensate for dedup at merge time.
+    # Without this, asking for 9 with 2 chunks (5+5 = 10 candidates) often
+    # ends up at 7-8 after dedup. With +1 per chunk (6+6 = 12 candidates) the
+    # dedup hits less often leave us short of the target.
+    clips_per_chunk = max(1, math.ceil(project.clip_count / n_chunks) + 1)
+    print(f"[Chunked] {n_chunks} chunks, ~{clips_per_chunk} clips each (target {project.clip_count} after dedup)")
 
     temp_dir = os.path.join(os.path.dirname(__file__), "..", "services", "temp")
     os.makedirs(temp_dir, exist_ok=True)
 
+    # Retry helper: most "empty response" failures from Gemini are transient
+    # (server capacity, rate-limit edge cases). We retry the analyze step
+    # specifically — extraction/upload rarely fails so they stay one-shot.
+    async def _analyze_with_retry(chunk_file, chunk_duration, chunk_transcript, label, max_attempts=3):
+        last_err = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await asyncio.to_thread(
+                    gemini_service.analyze_video,
+                    chunk_file,
+                    chunk_duration,
+                    clips_per_chunk,
+                    project.min_duration,
+                    project.custom_prompt,
+                    0,
+                    chunk_transcript,
+                    project.gemini_model,
+                    getattr(project, 'creator_name', ''),
+                )
+            except Exception as e:
+                last_err = e
+                msg = str(e).lower()
+                # Bail out immediately on permanent failures so we don't burn
+                # quota retrying something that can't succeed.
+                if any(p in msg for p in ("quota", "permission", "invalid", "not found", "400 ", "403 ", "404 ")):
+                    raise
+                if attempt < max_attempts:
+                    # Exponential-ish backoff: 5s, 15s. Most empty-response
+                    # blips clear within seconds when Google's load shifts.
+                    delay = 5 if attempt == 1 else 15
+                    print(f"[Chunked] {label} attempt {attempt} failed ({e}) — retrying in {delay}s")
+                    await asyncio.sleep(delay)
+        raise last_err
+
     all_clips = []
+    failed_chunks = []
     for idx, (chunk_start, chunk_end) in enumerate(ranges):
         chunk_duration = chunk_end - chunk_start
         chunk_path = os.path.join(temp_dir, f"chunk_{uuid.uuid4().hex}.mp4")
         chunk_file = None
+        label = f"Chunk {idx+1}/{n_chunks}"
         try:
-            print(f"[Chunked] Extracting chunk {idx+1}/{n_chunks}: {chunk_start:.0f}s-{chunk_end:.0f}s")
+            print(f"[Chunked] Extracting {label}: {chunk_start:.0f}s-{chunk_end:.0f}s")
             # accurate=True so chunk timestamps line up with the audio
             # (no keyframe-snap drift across chunk boundaries).
             await asyncio.to_thread(
@@ -244,27 +325,17 @@ async def _analyze_in_chunks(project, duration: float, transcript: dict, video_p
                 transcript, chunk_start, chunk_end
             ) if transcript else None
 
-            chunk_clips = await asyncio.to_thread(
-                gemini_service.analyze_video,
-                chunk_file,
-                chunk_duration,
-                clips_per_chunk,
-                project.min_duration,
-                project.custom_prompt,
-                0,
-                chunk_transcript,
-                project.gemini_model,
-                getattr(project, 'creator_name', ''),
-            )
+            chunk_clips = await _analyze_with_retry(chunk_file, chunk_duration, chunk_transcript, label)
 
             # Shift chunk-local timestamps to global video time
             for c in chunk_clips:
                 c.start_time = round(c.start_time + chunk_start, 2)
                 c.end_time = round(c.end_time + chunk_start, 2)
             all_clips.extend(chunk_clips)
-            print(f"[Chunked] Chunk {idx+1}/{n_chunks} done — {len(chunk_clips)} clips")
+            print(f"[Chunked] {label} done — {len(chunk_clips)} clips")
         except Exception as e:
-            print(f"[Chunked] Chunk {idx+1} failed (skipping): {e}")
+            failed_chunks.append((idx + 1, str(e)))
+            print(f"[Chunked] {label} FAILED after retries: {e}")
         finally:
             if chunk_file is not None:
                 try:
@@ -282,11 +353,27 @@ async def _analyze_in_chunks(project, duration: float, transcript: dict, video_p
     for i, c in enumerate(all_clips):
         c.id = i + 1
 
+    candidate_count = len(all_clips)
+
     # Truncate to user-requested total
     if len(all_clips) > project.clip_count:
         all_clips = all_clips[:project.clip_count]
         for i, c in enumerate(all_clips):
             c.id = i + 1
+
+    # Loud summary so we always know whether the user got what they asked for.
+    print(
+        f"[Chunked] DONE — got {len(all_clips)}/{project.clip_count} clips "
+        f"(candidates: {candidate_count}, failed chunks: {len(failed_chunks)}/{n_chunks})"
+    )
+    if failed_chunks:
+        print(f"[Chunked] Failures: {failed_chunks}")
+    if len(all_clips) < project.clip_count:
+        deficit = project.clip_count - len(all_clips)
+        print(
+            f"[Chunked] WARNING: short by {deficit} clip(s). "
+            f"Likely cause: {'failed chunks (Gemini empty response or rate-limit)' if failed_chunks else 'aggressive dedup'}."
+        )
 
     return all_clips
 
@@ -383,6 +470,22 @@ async def edit_clip_transform(project_id: str, clip_id: int, req: EditTransformR
             if req.end_time is not None:
                 clip.end_time = max(clip.start_time + 1.0, float(req.end_time))
             clip.duration = clip.end_time - clip.start_time
+            # Keyframes replace wholesale. None = no change, [] = clear.
+            if req.keyframes is not None:
+                clip_dur = clip.duration
+                normalised: list[Keyframe] = []
+                for kf in req.keyframes:
+                    # Clamp time into [0, clip_duration] so keyframes can't
+                    # land outside the trimmed range (would make the FFmpeg
+                    # expression evaluate constants past clip end).
+                    t = max(0.0, min(clip_dur, float(kf.time)))
+                    # zoompan can't zoom out below 1.0, so clamp to [1, 3].
+                    z = max(1.0, min(3.0, float(kf.zoom)))
+                    px = max(-100.0, min(100.0, float(kf.pan_x)))
+                    py = max(-100.0, min(100.0, float(kf.pan_y)))
+                    normalised.append(Keyframe(time=t, zoom=z, pan_x=px, pan_y=py))
+                normalised.sort(key=lambda k: k.time)
+                clip.keyframes = normalised
             return {"status": "updated", "clip": clip.model_dump()}
     raise HTTPException(status_code=404, detail="Clip not found")
 
@@ -426,6 +529,23 @@ async def preview_clip_frame(project_id: str, clip_id: int):
 
     style = project.style
 
+    # Keyframes mode: the single-frame preview can't run the full zoompan
+    # animation, so we interpolate the keyframes at the clip midpoint and
+    # feed those values to the static preview path. The pan ranges differ
+    # slightly between overlay-shift (static) and source-crop (zoompan), but
+    # for a thumbnail this is close enough — the user sees the real animation
+    # via the Play button.
+    _kfs = getattr(clip, 'keyframes', []) or []
+    if _kfs:
+        _interp = video_service.interpolate_keyframes(_kfs, clip.duration / 2)
+        _ez = _interp["zoom"]
+        _epx = max(-50.0, min(50.0, _interp["pan_x"] / 2))   # halve to roughly match overlay semantics
+        _epy = max(-50.0, min(50.0, _interp["pan_y"] / 2))
+    else:
+        _ez = getattr(clip, 'edit_zoom', 1.0)
+        _epx = getattr(clip, 'edit_pan_x', 0.0)
+        _epy = getattr(clip, 'edit_pan_y', 0.0)
+
     try:
         await asyncio.to_thread(
             video_service.generate_preview_frame,
@@ -455,9 +575,10 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             no_text=getattr(style, 'no_text', False),
             caption_font=getattr(style, 'caption_font', 'calibri'),
             no_emojis=getattr(style, 'no_emojis', False),
-            edit_zoom=getattr(clip, 'edit_zoom', 1.0),
-            edit_pan_x=getattr(clip, 'edit_pan_x', 0.0),
-            edit_pan_y=getattr(clip, 'edit_pan_y', 0.0),
+            edit_zoom=_ez,
+            edit_pan_x=_epx,
+            edit_pan_y=_epy,
+            fill_mode_scale=getattr(style, 'fill_mode_scale', 1.0),
         )
     except Exception as e:
         import traceback
@@ -522,6 +643,7 @@ async def preview_clip_video(project_id: str, clip_id: int):
             transcript=getattr(project, 'transcript', None),
             visual_filter=getattr(style, 'visual_filter', 'none'),
             subtitle_size_scale=getattr(style, 'subtitle_size_scale', 1.0),
+            subtitle_y=getattr(style, 'subtitle_y', 0.0),
             background_style=getattr(style, 'background_style', 'blur'),
             no_text=getattr(style, 'no_text', False),
             caption_font=getattr(style, 'caption_font', 'calibri'),
@@ -529,8 +651,15 @@ async def preview_clip_video(project_id: str, clip_id: int):
             edit_zoom=getattr(clip, 'edit_zoom', 1.0),
             edit_pan_x=getattr(clip, 'edit_pan_x', 0.0),
             edit_pan_y=getattr(clip, 'edit_pan_y', 0.0),
+            fill_mode_scale=getattr(style, 'fill_mode_scale', 1.0),
+            keyframes=getattr(clip, 'keyframes', []) or [],
         )
     except Exception as e:
+        # Print the full traceback so the actual cause is visible in the
+        # backend console (without this, the route just returns 500 and the
+        # underlying Python/FFmpeg error is lost).
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Video preview failed: {str(e)}")
 
     if not os.path.exists(video_preview_path):

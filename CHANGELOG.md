@@ -2,6 +2,74 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🎬 Editor mode + manual editing session (v9.6)
+
+A whole new **standalone Editor** (5th mode button) plus per-clip editing in
+the Video Clipper. No AI clip detection — fully manual editing.
+
+### New mode: 🎬 Editor (`routes/editor.py`, `EditorMode` in App.jsx)
+- Upload a video → cut it on a CapCut-style timeline → add subtitles → export.
+- `POST /api/editor/upload`, `POST /api/editor/{id}/transcribe` (Whisper runs
+  only on the current cut, not the whole video), `PUT /api/editor/{id}/segments`,
+  `POST /api/editor/{id}/thumbnails`, `POST /api/editor/{id}/overlay-image`,
+  plus static serve routes for thumbs/overlays.
+
+### Timeline editor (compacted, reorderable — CapCut model)
+- `ClipData.segments: list[Segment]` — kept pieces in playback order.
+- Thumbnail strip, ruler for scrubbing, blocks below.
+- **Cut** (split at playhead), **delete**, **reorder** (drag blocks),
+  **resize** (drag right edge to stretch).
+- Playback plays segments in array order, skipping removed gaps.
+- Export uses **concat-first**: kept pieces are concatenated to a temp mp4
+  (`video_service.concat_segments`), then the normal export pipeline runs on it.
+  Transcript is remapped to the cut timeline (`remap_transcript_to_segments`).
+
+### Keyframes (animated zoom/pan)
+- `ClipData.keyframes: list[Keyframe]` → FFmpeg `zoompan` expression
+  (`build_zoompan_filter`) with linear interpolation. Live JS interpolation in
+  the editor modal preview.
+
+### Per-segment speed
+- `Segment.speed` (0.25x–4x). Video: `setpts` + `atempo` chain. Audio pitch
+  preserved. Output duration recomputed per segment.
+
+### Image as a clip
+- `Segment.type == "image"` — a still spliced into the timeline (full-screen,
+  silent, configurable duration). Normalised to canvas size in concat.
+
+### Image overlays
+- `StyleConfig.image_overlays` — images burned on top of the video for a time
+  range, draggable + resizable in the preview, `enable='between(t,a,b)'`.
+
+### Aspect ratio
+- `StyleConfig.aspect_ratio`: 9:16 / 1:1 / 16:9 / 4:5
+  (`video_service.get_canvas_dimensions`). Export + preview adapt.
+
+### Subtitle vertical position
+- `StyleConfig.subtitle_y` (-0.5..+0.5) offsets the ASS `marginV`. Slider in
+  the editor. Live word-by-word overlay (`SubtitleOverlay`) renders all 8
+  styles in CSS so the user sees subtitles on the video while editing.
+
+### Mouse pan/zoom in preview
+- Drag the video to reposition, wheel to zoom → writes `edit_zoom/pan_x/pan_y`.
+
+### Fill-mode fine-tune
+- `StyleConfig.fill_mode_scale` (0.5–1.5) multiplies the chosen fill preset.
+
+### Bug fixes
+- **`video_preview` 500 (UnboundLocal `video_h`)** — overlay-XY was built
+  outside the `if use_split` block. Now built inside each branch.
+- **`no_text` hid subtitles in editor** — that flag also disables burned-in
+  subtitles; editor now sends `no_text:false` (AI caption is empty anyway).
+- **Chunked analysis**: threshold raised 10min → 30min (15-min chunks); failed
+  chunks now retry 2×; single-shot also retries. Fixes "asked 9, got 5".
+- **Timeline reorder drag** conflicted with click-to-seek → split into a ruler
+  (scrub) + manual drag with movement threshold.
+- **Playhead** now moves via RAF while playing (was stuck at start).
+- Exposed real tracebacks in the `video-preview` route + FFmpeg cmd/stderr logs.
+
+---
+
 ## Latest session additions
 
 ### Cinematic visual filters
