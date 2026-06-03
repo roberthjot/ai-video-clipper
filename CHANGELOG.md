@@ -45,6 +45,19 @@ logic are unchanged — this is purely the visual layer + theming.**
 - Sidebar and the editor inspectors use `clamp()` widths so narrow windows don't
   crush the preview/content.
 
+### Global model selection
+- New `ModelContext.jsx` (localStorage-persisted) — the chosen Gemini model is a
+  single source of truth shared by the sidebar chip, **Ajustes** (now a real
+  dropdown), and the Upload/Analyzer model pickers. Change it anywhere and the
+  sidebar chip updates live. (API Key stays read-only — it loads from the server
+  `.env`.)
+
+### Visual Editor centering guides
+- Center guide lines (vertical + horizontal) in the Paso 3 preview, toggled by a
+  **Guías** button. The draggable caption now also works while a preview is
+  showing, **snaps** to the center on each axis (~2.5% threshold), and the
+  matching guide turns gold when snapped.
+
 ## 🎬 Editor mode + manual editing session (v9.6)
 
 A whole new **standalone Editor** (5th mode button) plus per-clip editing in

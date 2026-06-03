@@ -2,13 +2,17 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import "./App.css";
 import * as api from "./services/api";
 import { useTheme } from "./ThemeContext.jsx";
+import { useModel } from "./ModelContext.jsx";
 import { StSection, StChip, StSlider, StToggle, StFieldRow, StRow, StSegmented } from "./components/studio.jsx";
+
+// Human label for a model value (falls back to the raw value).
+const modelLabel = (val) => (GEMINI_VIDEO_MODELS.find((m) => m.val === val) || {}).label || val;
 import {
   Sun, Moon, Scissors, Film, Upload, Download, Image as ImageIcon,
   Radio, Sparkles, Settings, ChevronDown, ChevronRight, Search,
   List, LayoutGrid, Clock, GripVertical, Check, Play, Pencil, RefreshCw,
   ZoomIn, Type, Wand2, SkipBack, SkipForward, Pause,
-  Copy, AlertCircle, Loader2, X, Plus, Square, CheckCircle2,
+  Copy, AlertCircle, Loader2, X, Plus, Square, CheckCircle2, Crosshair,
 } from "lucide-react";
 
 // Monochrome confidence dot (match=solid, mismatch=ring, no_audio=half)
@@ -79,6 +83,7 @@ function NavItem({ icon, label, active, badge, disabled, onClick }) {
 // ── Studio left sidebar (replaces the old top tabs) ──
 function Sidebar({ active, filename, clipCount, hasProject, onNav }) {
   const { theme, toggle } = useTheme();
+  const { model } = useModel();
   const group = { display: "flex", flexDirection: "column", gap: 2 };
   const eyebrow = {
     fontFamily: "var(--st-ui)", fontSize: 10.5, fontWeight: 700, letterSpacing: ".09em",
@@ -133,7 +138,7 @@ function Sidebar({ active, filename, clipCount, hasProject, onNav }) {
       <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", borderRadius: 9, background: "var(--st-soft)", border: "1px solid var(--st-line)" }}>
           <Sparkles size={14} style={{ color: "var(--st-muted)" }} />
-          <span style={{ fontFamily: "var(--st-ui)", fontSize: 12, color: "var(--st-muted)", flex: 1 }}>Gemini 2.5 Flash</span>
+          <span style={{ fontFamily: "var(--st-ui)", fontSize: 12, color: "var(--st-muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Gemini {modelLabel(model)}</span>
           <span style={{ width: 7, height: 7, borderRadius: 99, background: "var(--st-ok)" }} />
         </div>
         <NavItem icon={<Settings size={17} />} label="Ajustes" active={active === "settings"} onClick={() => onNav("settings")} />
@@ -231,7 +236,7 @@ function UploadStep({ onComplete }) {
   const [minDuration, setMinDuration] = useState(15);
   const [customPrompt, setCustomPrompt] = useState("");
   const [contentType, setContentType] = useState("drama"); // "drama" | "motivational"
-  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash"); // which API model
+  const { model: geminiModel, setModel: setGeminiModel } = useModel(); // global model (synced w/ sidebar + Ajustes)
   const [creatorName, setCreatorName] = useState(""); // creator name(s) for captions
   // Analyze a sub-range only (mm:ss format, blank = whole video)
   const [analyzeStartStr, setAnalyzeStartStr] = useState("");
@@ -1797,6 +1802,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
 
   // Dragging state
   const [dragging, setDragging] = useState(null);
+  const [showGuides, setShowGuides] = useState(true);  // center guide lines on/off
   const canvasRef = useRef(null);
 
   const handleWatermarkUpload = async (e) => {
@@ -1890,7 +1896,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis]);
+  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis]);
 
   // Poll progress
   useEffect(() => {
@@ -1949,8 +1955,11 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     (e) => {
       if (!dragging || !canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
-      const x = Math.max(0.05, Math.min(0.95, (e.clientX - rect.left) / rect.width));
-      const y = Math.max(0.05, Math.min(0.95, (e.clientY - rect.top) / rect.height));
+      let x = Math.max(0.05, Math.min(0.95, (e.clientX - rect.left) / rect.width));
+      let y = Math.max(0.05, Math.min(0.95, (e.clientY - rect.top) / rect.height));
+      // Snap to the center guide lines when within ~2.5%.
+      if (Math.abs(x - 0.5) < 0.025) x = 0.5;
+      if (Math.abs(y - 0.5) < 0.025) y = 0.5;
       setStyle((prev) => ({
         ...prev,
         [`${dragging}_x`]: x,
@@ -2133,21 +2142,37 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                   </div>
                 )}
 
-                {/* Draggable caption indicator */}
-                {selectedClip && !previewUrl && !videoPreviewUrl && (
-                  <div
-                    className={`draggable-text ${dragging === "text" ? "dragging" : ""}`}
-                    style={{ left: `${style.text_x * 100}%`, top: `${style.text_y * 100}%`, transform: "translate(-50%, -50%)", whiteSpace: "nowrap" }}
-                    onMouseDown={handleMouseDown("text")}
-                  >
-                    T caption
-                  </div>
-                )}
+                {/* Center guide lines (toggle with the Guías button). Each turns
+                    gold + solid when the caption is snapped to that axis. */}
+                {selectedClip && showGuides && (() => {
+                  const cX = Math.abs((style.text_x ?? 0.5) - 0.5) < 0.012;
+                  const cY = Math.abs((style.text_y ?? 0.5) - 0.5) < 0.012;
+                  const dashV = "repeating-linear-gradient(to bottom, rgba(255,255,255,0.45) 0px, rgba(255,255,255,0.45) 6px, transparent 6px, transparent 12px)";
+                  const dashH = "repeating-linear-gradient(to right, rgba(255,255,255,0.45) 0px, rgba(255,255,255,0.45) 6px, transparent 6px, transparent 12px)";
+                  return (
+                    <>
+                      <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: cX ? 2 : 1, transform: "translateX(-50%)", pointerEvents: "none", zIndex: 1, background: cX ? "var(--st-gold)" : dashV, opacity: cX ? 0.95 : 0.4 }} />
+                      <div style={{ position: "absolute", top: "50%", left: 0, right: 0, height: cY ? 2 : 1, transform: "translateY(-50%)", pointerEvents: "none", zIndex: 1, background: cY ? "var(--st-gold)" : dashH, opacity: cY ? 0.95 : 0.4 }} />
+                    </>
+                  );
+                })()}
 
-                {/* Center guide */}
-                {watermarkPreview && !previewUrl && !videoPreviewUrl && (
-                  <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "repeating-linear-gradient(to bottom, rgba(255,255,255,0.7) 0px, rgba(255,255,255,0.7) 6px, transparent 6px, transparent 12px)", transform: "translateX(-50%)", pointerEvents: "none", zIndex: 1 }} />
-                )}
+                {/* Draggable caption — movable even while a preview is showing.
+                    Snaps to the center line; gold dashed border when centered. */}
+                {selectedClip && (() => {
+                  const centered = Math.abs((style.text_x ?? 0.5) - 0.5) < 0.012;
+                  const overPreview = !!(previewUrl || videoPreviewUrl);
+                  return (
+                    <div
+                      className={`draggable-text ${dragging === "text" ? "dragging" : ""}`}
+                      style={{ left: `${style.text_x * 100}%`, top: `${style.text_y * 100}%`, transform: "translate(-50%, -50%)", whiteSpace: "nowrap", opacity: overPreview ? 0.85 : 1, border: centered ? "1.5px dashed var(--st-gold)" : undefined, zIndex: 10 }}
+                      onMouseDown={handleMouseDown("text")}
+                      title="Arrastrá para mover · se centra solo cerca de la línea"
+                    >
+                      T caption
+                    </div>
+                  );
+                })()}
 
                 {/* Draggable watermark */}
                 {watermarkPreview && !previewUrl && !videoPreviewUrl && (
@@ -2179,6 +2204,14 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             </button>
             <button onClick={() => selectedClip && setEditorClip(selectedClip)} disabled={!selectedClip} className="st-btn st-btn--ghost" style={{ padding: "7px 12px" }} title="Zoom, posición y trim del clip">
               <ZoomIn size={14} /> Editar encuadre
+            </button>
+            <button onClick={() => setShowGuides((v) => !v)} className="st-btn st-btn--ghost"
+              title={showGuides ? "Ocultar guías de centrado" : "Mostrar guías de centrado"}
+              style={{ padding: "7px 12px",
+                border: `1px solid ${showGuides ? "var(--st-accent)" : "var(--st-border)"}`,
+                background: showGuides ? "var(--st-soft)" : "transparent",
+                color: showGuides ? "var(--st-text)" : "var(--st-muted)" }}>
+              <Crosshair size={14} /> Guías
             </button>
           </div>
         </div>
@@ -3404,7 +3437,7 @@ function AnalyzerStep() {
   const [copied, setCopied] = useState(null);
   const [copiedAll, setCopiedAll] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [analyzerModel, setAnalyzerModel] = useState("gemini-2.5-flash");
+  const { model: analyzerModel, setModel: setAnalyzerModel } = useModel(); // global model (synced w/ sidebar + Ajustes)
   const [sortByScore, setSortByScore] = useState(false);
   const [modelHealth, setModelHealth] = useState({});
   const [checkingModels, setCheckingModels] = useState(false);
@@ -5292,6 +5325,7 @@ function EditorMode({ onExit }) {
 // ─── Settings (Ajustes) ─────────────────────────────────────────────────────
 function SettingsStep() {
   const { theme, toggle } = useTheme();
+  const { model, setModel } = useModel();
   const [defaultClips, setDefaultClips] = useState(25);
   const [autoSubs, setAutoSubs] = useState(true);
   const [exportQuality, setExportQuality] = useState("1080p");
@@ -5307,11 +5341,11 @@ function SettingsStep() {
 
         <div className="st-eyebrow" style={{ marginBottom: 6 }}>Modelo</div>
         <div style={{ marginBottom: 28 }}>
-          <Row label="Modelo de IA" desc="Gemini analiza el video y genera captions." control={
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 13px", borderRadius: 9, border: "1px solid var(--st-border)", background: "var(--st-surface)" }}>
-              <span style={{ fontFamily: "var(--st-mono)", fontSize: 12.5 }}>2.5 Flash</span>
-              <ChevronDown size={14} style={{ color: "var(--st-faint)" }} />
-            </div>
+          <Row label="Modelo de IA" desc={`Gemini analiza el video y genera captions. ${(GEMINI_VIDEO_MODELS.find(m => m.val === model) || {}).sub || ""}`} control={
+            <select value={model} onChange={(e) => setModel(e.target.value)} className="st-select"
+              style={{ width: 180, fontFamily: "var(--st-mono)", fontSize: 12.5 }}>
+              {GEMINI_VIDEO_MODELS.map((m) => (<option key={m.val} value={m.val}>{m.label}</option>))}
+            </select>
           } />
           <Row label="API Key" desc="Tu clave de Google AI Studio. Se carga desde el .env del servidor." control={
             <div style={{ padding: "8px 13px", borderRadius: 9, border: "1px solid var(--st-border)", background: "var(--st-surface)", fontFamily: "var(--st-mono)", fontSize: 12.5, color: "var(--st-muted)" }}>AIza··········7Qk</div>
