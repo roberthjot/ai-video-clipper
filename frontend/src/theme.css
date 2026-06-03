@@ -127,6 +127,21 @@
 /* Range sliders themed to the accent */
 .st-root input[type="range"] { accent-color: var(--st-accent); }
 
+/* Spinner keyframe (Studio loaders) */
+@keyframes st-spin { to { transform: rotate(360deg); } }
+
+/* Pulse keyframe (live recording dot) */
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+/* Expandable inspector rows (native <details>) — Studio */
+.st-row { border-top: 1px solid var(--st-line); }
+.st-row > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 9px; padding: 13px 2px; }
+.st-row > summary::-webkit-details-marker { display: none; }
+.st-row > summary::marker { content: ""; }
+.st-row .st-row-chev { transition: transform .15s; color: var(--st-faint); margin-left: auto; flex-shrink: 0; }
+.st-row[open] .st-row-chev { transform: rotate(180deg); }
+.st-row-body { padding: 2px 2px 16px; }
+
 /* Thin scrollbars in the studio */
 .st-root ::-webkit-scrollbar { width: 10px; height: 10px; }
 .st-root ::-webkit-scrollbar-thumb { background: var(--st-border); border-radius: 99px; }

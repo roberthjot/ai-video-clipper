@@ -2,6 +2,49 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🎨 "Studio" frontend redesign (light/dark)
+
+Full visual redesign of the React UI to a minimal, Notion-like **Studio** look
+(off-white / near-black, no gradients, no emojis), faithful to the handoff in
+`design_handoff_clipper_studio/` (README + `screenshots/`). **Backend and all app
+logic are unchanged — this is purely the visual layer + theming.**
+
+### Design tokens & theming
+- `frontend/src/theme.css`: `--st-*` CSS variables for **light and dark**
+  (bg/surface/alt/soft/border/line/text/muted/faint/accent/on-accent + semantic
+  ok/live/gold), font families (Bricolage Grotesque / Hanken Grotesk / JetBrains
+  Mono), shared classes (`.st-btn`, `.st-card`, `.st-input`, `.st-select`,
+  `.st-textarea`, `.st-iconbtn`, `.st-eyebrow`, `.st-row` for `<details>`),
+  `@keyframes st-spin` + `pulse`. Theme via `data-theme` + `ThemeContext`.
+- App wrapped in `.st-root`; dark mode toggled from the sidebar and Ajustes.
+
+### Shared UI module (`frontend/src/components/studio.jsx`)
+- `StSection`, `StChip`, `StSlider`, `StToggle`, `StFieldRow`, `StRow`
+  (collapsible), `StSegmented` — single source of truth for the building blocks.
+  De-duplicated the two slider components (EditorMode `FrameSlider` is now a thin
+  adapter over `StSlider`) and the Settings toggle/row.
+
+### Screens migrated
+- **Sidebar** (left nav, project selector, Gemini chip, Ajustes + theme toggle).
+- **Subir video** (`UploadStep`) — clean dropzone + config card; emoji-free
+  content-type chips with line icons; **Modelo de IA** and **Analizar un rango**
+  collapsed into expandable rows; model labels de-emojified.
+- **Clips detectados** (`ClipsStep`, `ScoreBadge`, `ConfDot`).
+- **Visual Editor / Paso 3** (`EditorStep`) — header (TikTok/Instagram segmented
+  + Exportar todos) + preview (caption/watermark drag preserved) + 360px inspector
+  with always-open sections and collapsible rows (Text Overlay, Watermark, Split
+  Screen, Formato IG, Opciones de texto, Anti-Detect, Clips a exportar).
+- **Editor** (`EditorMode`) — full-screen studio layout (60px tool rail replaces
+  the sidebar) + preview/transport + 312px inspector + bottom timeline.
+- **Analyzer**, **Live Stream**, **Meme Generator / Music Vibe**, the **Analizando**
+  flow (stepper + SVG progress ring), the **Exportando / Export completado** flows,
+  and a new **Ajustes** screen (only the dark-mode toggle is wired; other settings
+  are display/local-state placeholders — no settings store yet).
+
+### Responsive
+- Sidebar and the editor inspectors use `clamp()` widths so narrow windows don't
+  crush the preview/content.
+
 ## 🎬 Editor mode + manual editing session (v9.6)
 
 A whole new **standalone Editor** (5th mode button) plus per-clip editing in
