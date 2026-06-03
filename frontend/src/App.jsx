@@ -4,8 +4,34 @@ import * as api from "./services/api";
 import { useTheme } from "./ThemeContext.jsx";
 import {
   Sun, Moon, Scissors, Film, Upload, Download, Image as ImageIcon,
-  Radio, Sparkles, Settings, ChevronDown,
+  Radio, Sparkles, Settings, ChevronDown, ChevronRight, Search,
+  List, LayoutGrid, Clock, GripVertical, Check, Play, Pencil, RefreshCw,
 } from "lucide-react";
+
+// Monochrome confidence dot (match=solid, mismatch=ring, no_audio=half)
+function ConfDot({ conf }) {
+  const sz = 8;
+  if (conf === "match") return <span style={{ width: sz, height: sz, borderRadius: 99, background: "var(--st-text)", display: "inline-block", flexShrink: 0 }} />;
+  if (conf === "mismatch") return <span style={{ width: sz, height: sz, borderRadius: 99, border: "1.6px solid var(--st-faint)", display: "inline-block", boxSizing: "border-box", flexShrink: 0 }} />;
+  if (conf === "no_audio") return <span style={{ width: sz, height: sz, borderRadius: 99, background: "linear-gradient(90deg, var(--st-text) 50%, transparent 50%)", border: "1.4px solid var(--st-faint)", display: "inline-block", boxSizing: "border-box", flexShrink: 0 }} />;
+  return <span style={{ width: sz, height: sz, borderRadius: 99, border: "1.4px solid var(--st-line)", display: "inline-block", boxSizing: "border-box", flexShrink: 0 }} />;
+}
+
+// Studio score badge (>=8 solid accent w/ sparkle, else outline muted)
+function ScoreBadge({ score }) {
+  const hot = (score || 0) >= 8;
+  return (
+    <span style={{
+      fontFamily: "var(--st-mono)", fontSize: 11, fontWeight: 600, letterSpacing: ".02em",
+      padding: "3px 8px", borderRadius: 7, display: "inline-flex", alignItems: "center", gap: 4,
+      background: hot ? "var(--st-accent)" : "transparent",
+      color: hot ? "var(--st-on-accent)" : "var(--st-muted)",
+      border: hot ? "1px solid var(--st-accent)" : "1px solid var(--st-border)",
+    }}>
+      {hot && <Sparkles size={11} />}{score}/10
+    </span>
+  );
+}
 
 // Small light/dark toggle for the header (Studio redesign)
 function ThemeToggle() {
@@ -1422,131 +1448,79 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   };
 
   return (
-    <div>
-      <h2 className="section-title">📋 Detected Clips ({clips.length})</h2>
-      <p className="section-subtitle">
-        Review clips, edit captions, play previews, then style & export.
-      </p>
-
-      {/* Sort + Filter toolbar */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Ordenar:</span>
-        {[
-          { val: "default", label: "Original" },
-          { val: "score_desc", label: "🔥 Mayor score" },
-          { val: "score_asc", label: "⬇ Menor score" },
-        ].map(({ val, label }) => (
-          <button key={val} className={`btn ${sortBy === val ? "btn-primary" : "btn-secondary"}`}
-            style={{ padding: "5px 12px", fontSize: 12 }}
-            onClick={() => setSortBy(val)}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Filter by duration */}
-      <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "14px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
-          ⏱ Filtrar por duración:
-        </span>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Mín</span>
-          <input type="range" min={0} max={maxDuration} value={filterMin}
-            onChange={e => setFilterMin(Math.min(Number(e.target.value), filterMax - 1))}
-            style={{ flex: 1, minWidth: 80 }} />
-          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)", minWidth: 28 }}>{filterMin}s</span>
-          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Máx</span>
-          <input type="range" min={0} max={maxDuration} value={filterMax}
-            onChange={e => setFilterMax(Math.max(Number(e.target.value), filterMin + 1))}
-            style={{ flex: 1, minWidth: 80 }} />
-          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)", minWidth: 28 }}>{filterMax}s</span>
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {/* ═══ Studio header ═══ */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "18px 28px", borderBottom: "1px solid var(--st-line)" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "var(--st-mono)", fontSize: 11, color: "var(--st-faint)", marginBottom: 5 }}>
+            <span>proyecto</span><ChevronRight size={12} /><span style={{ color: "var(--st-muted)" }}>Clips</span>
+          </div>
+          <h1 style={{ margin: 0, fontFamily: "var(--st-display)", fontSize: 24, fontWeight: 600, letterSpacing: "-.02em", color: "var(--st-text)" }}>
+            Clips detectados <span style={{ color: "var(--st-faint)", fontWeight: 500 }}>{clips.length}</span>
+          </h1>
         </div>
-        {(filterMin > 0 || filterMax < maxDuration) && (
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            {filteredClips.length}/{clips.length} clips
-          </span>
-        )}
-        {(filterMin > 0 || filterMax < maxDuration) && (
-          <button className="btn btn-secondary" style={{ padding: "4px 10px", fontSize: 12 }}
-            onClick={() => { setFilterMin(0); setFilterMax(maxDuration); }}>
-            Reset
-          </button>
-        )}
+        <button className="btn btn-primary" onClick={onNext}>
+          <Download size={15} /> Exportar selección
+        </button>
       </div>
 
-      {/* Confidence filter */}
-      {(confidenceCounts.match + confidenceCounts.mismatch + confidenceCounts.no_audio) > 0 && (
-        <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "12px 18px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
-            🎯 Confianza:
-          </span>
+      {/* ═══ Toolbar ═══ */}
+      <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "13px 28px", borderBottom: "1px solid var(--st-line)", flexWrap: "wrap" }}>
+        {/* Ordenar */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, color: "var(--st-muted)" }}>Ordenar</span>
+          <div style={{ display: "flex", background: "var(--st-alt)", borderRadius: 8, padding: 3, gap: 2 }}>
+            {[{ v: "default", l: "Original" }, { v: "score_desc", l: "Score" }].map(({ v, l }) => (
+              <span key={v} onClick={() => setSortBy(v)} style={{
+                fontSize: 12, fontWeight: sortBy === v ? 600 : 500, padding: "5px 11px", borderRadius: 6, cursor: "pointer",
+                background: sortBy === v ? "var(--st-surface)" : "transparent",
+                color: sortBy === v ? "var(--st-text)" : "var(--st-muted)",
+                boxShadow: sortBy === v ? "var(--st-shadow)" : "none",
+              }}>{l}</span>
+            ))}
+          </div>
+        </div>
+        <div style={{ width: 1, height: 22, background: "var(--st-line)" }} />
+        {/* Confianza */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: "var(--st-muted)" }}>Confianza</span>
           {[
-            { val: "all",      label: `Todos (${clips.length})`,           color: "#888" },
-            { val: "match",    label: `🟢 OK (${confidenceCounts.match})`,    color: "#22c55e" },
-            { val: "mismatch", label: `🔴 Mal (${confidenceCounts.mismatch})`, color: "#ef4444" },
-            { val: "no_audio", label: `🟡 Sin audio (${confidenceCounts.no_audio})`, color: "#eab308" },
-          ].map(({ val, label, color }) => (
-            <button
-              key={val}
-              onClick={() => setConfidenceFilter(val)}
-              style={{
-                padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700,
-                cursor: "pointer", transition: "all 0.2s",
-                background: confidenceFilter === val ? color : "#111",
-                color: confidenceFilter === val ? "#fff" : "#aaa",
-                border: confidenceFilter === val ? `1px solid ${color}` : "1px solid #333",
-              }}
-            >
-              {label}
-            </button>
+            { v: "all", l: "Todos", c: null },
+            { v: "match", l: "OK", c: "match" },
+            { v: "no_audio", l: "Sin audio", c: "no_audio" },
+            { v: "mismatch", l: "Revisar", c: "mismatch" },
+          ].map(({ v, l, c }) => (
+            <span key={v} onClick={() => setConfidenceFilter(v)} style={{
+              display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500,
+              padding: "5px 10px", borderRadius: 7, cursor: "pointer",
+              border: `1px solid ${confidenceFilter === v ? "var(--st-text)" : "var(--st-border)"}`,
+              color: confidenceFilter === v ? "var(--st-text)" : "var(--st-muted)",
+            }}>
+              {c && <ConfDot conf={c} />}{l}
+            </span>
           ))}
-          <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
-            🟢 caption coincide · 🔴 puede estar mal · 🟡 clip sin diálogo
-          </span>
         </div>
-      )}
-
-      {/* Model selector for re-analysis (also persists choice to backend) */}
-      <div style={{ background: "var(--bg-secondary)", borderRadius: 12, padding: "12px 18px", marginBottom: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
-          🧠 Modelo para reanalizar
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7, fontFamily: "var(--st-mono)", fontSize: 11, color: "var(--st-faint)" }}>
+          <Clock size={13} /> 9:16 · TikTok / Reels
         </div>
-        <ModelSelector
-          value={reanalyzeModel}
-          disabled={switchingModel}
-          onChange={async (val) => {
-            setSwitchingModel(true);
-            try {
-              await api.updateProjectModel(projectId, val);
-              setReanalyzeModel(val);
-            } catch (e) {
-              alert(`No se pudo cambiar el modelo: ${e.message}`);
-            } finally {
-              setSwitchingModel(false);
-            }
-          }}
-          health={modelHealth}
-          checking={checkingModels}
-          onCheck={handleCheckModels}
-        />
       </div>
 
-      {/* Batch re-analyze bar */}
+      {/* batch + model bar (only when clips selected) */}
       {selectedClips.size > 0 && (
-        <div style={{ marginBottom: 14, padding: "12px 16px", background: "var(--bg-secondary)", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 14, color: "var(--text-secondary)" }}>
-            {selectedClips.size} clip{selectedClips.size > 1 ? "s" : ""} seleccionado{selectedClips.size > 1 ? "s" : ""}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 28px", borderBottom: "1px solid var(--st-line)", flexWrap: "wrap", background: "var(--st-soft)" }}>
+          <span style={{ fontSize: 13, color: "var(--st-muted)" }}>
+            {selectedClips.size} seleccionado{selectedClips.size > 1 ? "s" : ""}
           </span>
           {reanalyzingBatch ? (
-            <span style={{ fontSize: 13, color: "var(--accent)" }}>
-              ⏳ Analizando clip {batchProgress.current}/{batchProgress.total} (ID {batchProgress.currentId})...
+            <span style={{ fontSize: 12.5, color: "var(--st-text)", fontFamily: "var(--st-mono)" }}>
+              Analizando {batchProgress.current}/{batchProgress.total}…
             </span>
           ) : (
             <>
-              <button className="btn btn-primary" style={{ padding: "6px 14px", fontSize: 13 }} onClick={handleReanalyzeBatch}>
-                🔄 Re-analizar seleccionados
+              <button className="btn btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={handleReanalyzeBatch}>
+                <RefreshCw size={13} /> Re-analizar
               </button>
-              <button className="btn btn-secondary" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => setSelectedClips(new Set())}>
+              <button className="btn btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => setSelectedClips(new Set())}>
                 Deseleccionar
               </button>
             </>
@@ -1554,130 +1528,76 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
         </div>
       )}
 
-      <div className="clips-list">
-        {filteredClips.map((clip) => {
+      {/* ═══ Clip rows ═══ */}
+      <div style={{ padding: "8px 16px" }}>
+        {filteredClips.map((clip, i) => {
           const isSelected = selectedClips.has(clip.id);
           const isBeingAnalyzed = reanalyzingBatch && batchProgress.currentId === clip.id;
-          const isDragging = draggedId === clip.id;
           const isDragOver = dragOverId === clip.id;
+          const isDragging = draggedId === clip.id;
           return (
             <div
-              className="clip-card"
               key={clip.id}
               draggable
               onDragStart={(e) => handleDragStart(e, clip.id)}
               onDragOver={(e) => handleDragOver(e, clip.id)}
               onDrop={(e) => handleDrop(e, clip.id)}
               onDragEnd={handleDragEnd}
-              style={{
-                outline: isSelected ? "2px solid var(--accent)" : isDragOver ? "2px dashed #888" : undefined,
-                opacity: isDragging ? 0.4 : 1,
-                cursor: "grab",
-                transition: "opacity 0.15s, outline 0.15s",
-              }}
               onClick={() => toggleSelect(clip.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 16, padding: "14px 12px",
+                borderBottom: i < filteredClips.length - 1 ? "1px solid var(--st-line)" : "none",
+                borderRadius: 10, cursor: "pointer",
+                background: isSelected ? "var(--st-soft)" : isDragOver ? "var(--st-alt)" : "transparent",
+                opacity: isDragging ? 0.4 : 1, transition: "background .12s, opacity .12s",
+              }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 16, color: "#444", cursor: "grab", userSelect: "none" }}>⠿</span>
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => toggleSelect(clip.id)}
-                  onClick={e => e.stopPropagation()}
-                  style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)" }}
-                />
-                <div className="clip-number">{clip.id}</div>
+              <span style={{ color: "var(--st-faint)", display: "grid", cursor: "grab" }}><GripVertical size={16} /></span>
+              <div style={{
+                width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                border: `1.5px solid ${isSelected ? "var(--st-accent)" : "var(--st-border)"}`,
+                background: isSelected ? "var(--st-accent)" : "transparent",
+                display: "grid", placeItems: "center",
+              }}>{isSelected && <Check size={13} style={{ color: "var(--st-on-accent)" }} />}</div>
+              <span style={{ fontFamily: "var(--st-mono)", fontSize: 12, color: "var(--st-faint)", width: 20, flexShrink: 0 }}>{String(clip.id).padStart(2, "0")}</span>
+              {/* thumbnail */}
+              <div style={{ width: 38, height: 38 * 16 / 9, borderRadius: 7, background: "var(--st-alt)", border: "1px solid var(--st-border)", flexShrink: 0, display: "grid", placeItems: "center", position: "relative" }}>
+                <Play size={13} style={{ color: "var(--st-faint)" }} />
               </div>
-              <div className="clip-info">
-                <h4>
-                  {clip.match_confidence === "match" && (
-                    <span title="Caption coincide con lo que se dice en el clip" style={{ marginRight: 6 }}>🟢</span>
-                  )}
-                  {clip.match_confidence === "mismatch" && (
-                    <span title="Las palabras del caption no aparecen en el audio del clip" style={{ marginRight: 6 }}>🔴</span>
-                  )}
-                  {clip.match_confidence === "no_audio" && (
-                    <span title="No se detectó audio/diálogo — revisión manual recomendada" style={{ marginRight: 6 }}>🟡</span>
-                  )}
-                  {clip.description}
-                </h4>
-                <p className="caption">
-                  {isBeingAnalyzed ? "⏳ Re-analizando..." : `"${clip.viral_caption}"`}
-                </p>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 4 }}>
+                  <ConfDot conf={clip.match_confidence} />
+                  <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--st-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{clip.description}</span>
+                </div>
+                <div style={{ fontSize: 13.5, color: "var(--st-muted)", fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {isBeingAnalyzed ? "Re-analizando…" : `“${clip.viral_caption}”`}
+                </div>
               </div>
-              <div className="clip-meta">
-                <span className="tag">⏱ {clip.duration.toFixed(0)}s</span>
-                <span className="tag">
-                  📍 {formatTime(clip.start_time)} — {formatTime(clip.end_time)}
-                </span>
-                {/* Editor badge — appears when zoom/pan has been modified.
-                    Trims are already reflected in the duration tag above. */}
-                {((clip.edit_zoom ?? 1) !== 1 || (clip.edit_pan_x ?? 0) !== 0 || (clip.edit_pan_y ?? 0) !== 0) && (
-                  <span
-                    className="tag"
-                    title={`zoom ${(clip.edit_zoom ?? 1).toFixed(2)}x · pan ${(clip.edit_pan_x ?? 0).toFixed(0)},${(clip.edit_pan_y ?? 0).toFixed(0)}`}
-                    style={{ background: "rgba(99,102,241,0.18)", color: "#a5b4fc", borderColor: "rgba(99,102,241,0.45)" }}
-                  >
-                    🎬 editado
+              <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+                <span style={{ fontFamily: "var(--st-mono)", fontSize: 11.5, color: "var(--st-muted)" }}>{clip.duration.toFixed(0)}s</span>
+                <span style={{ fontFamily: "var(--st-mono)", fontSize: 11.5, color: "var(--st-faint)" }}>{formatTime(clip.start_time)}–{formatTime(clip.end_time)}</span>
+                {clip.viral_score != null && <ScoreBadge score={clip.viral_score} />}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                {[
+                  { ic: <Play size={16} />, title: "Reproducir", fn: () => handlePlayClip(clip) },
+                  { ic: <Scissors size={16} />, title: "Editar (zoom/trim)", fn: () => setEditorClip(clip) },
+                  { ic: <Pencil size={16} />, title: "Editar caption", fn: () => { setEditingClip(clip); setEditText(clip.viral_caption); } },
+                  { ic: <RefreshCw size={16} />, title: "Re-analizar", fn: () => handleReanalyze(clip) },
+                ].map((a, k) => (
+                  <span key={k} title={a.title} onClick={a.fn}
+                    style={{ width: 30, height: 30, display: "grid", placeItems: "center", borderRadius: 8, color: "var(--st-muted)", cursor: "pointer" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--st-alt)"; e.currentTarget.style.color = "var(--st-text)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--st-muted)"; }}>
+                    {a.ic}
                   </span>
-                )}
-                {clip.viral_score && (
-                  <span style={{
-                    padding: "2px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700,
-                    background: clip.viral_score >= 8 ? "#dc2626" : clip.viral_score >= 6 ? "#d97706" : "#374151",
-                    color: "#fff",
-                  }}>
-                    {clip.viral_score >= 8 ? "🔥" : clip.viral_score >= 6 ? "⚡" : "·"} {clip.viral_score}/10
-                    {clip.viral_score_reason ? ` · ${clip.viral_score_reason}` : ""}
-                  </span>
-                )}
-              </div>
-              <div className="clip-actions" onClick={e => e.stopPropagation()}>
-                <button onClick={() => handleImagePreview(clip)} title="Preview rápido (imagen)">🖼 Preview</button>
-                <button onClick={() => handlePlayClip(clip)}>▶ Play</button>
-                <button
-                  onClick={() => setScriptViewClip(clip)}
-                  disabled={!clip.transcript_snippet}
-                  title={clip.transcript_snippet
-                    ? "Ver lo que se dice en este clip (Whisper)"
-                    : "Sin diálogo detectado"}
-                  style={{ opacity: clip.transcript_snippet ? 1 : 0.4 }}
-                >
-                  📄 Guión
-                </button>
-                <button
-                  onClick={() => setEditorClip(clip)}
-                  title="Editor: zoom, posición y trim del clip"
-                >
-                  🎬 Editar
-                </button>
-                <button
-                  onClick={() => {
-                    setEditingClip(clip);
-                    setEditText(clip.viral_caption);
-                  }}
-                >
-                  ✏️ Edit
-                </button>
-                <button
-                  onClick={() => handleReanalyze(clip)}
-                  disabled={reanalyzingClip === clip.id || reanalyzingBatch}
-                  title="Re-analizar con IA este clip específico"
-                  style={{ opacity: reanalyzingClip === clip.id ? 0.6 : 1 }}
-                >
-                  {reanalyzingClip === clip.id ? "⏳..." : "🔄"}
-                </button>
+                ))}
               </div>
             </div>
           );
         })}
       </div>
 
-      <div className="btn-group">
-        <button className="btn btn-primary" onClick={onNext}>
-          🎨 Style & Export →
-        </button>
-      </div>
 
       {/* Image Preview Modal */}
       {imagePreviewClip && (
