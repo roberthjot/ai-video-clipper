@@ -2,7 +2,10 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import "./App.css";
 import * as api from "./services/api";
 import { useTheme } from "./ThemeContext.jsx";
-import { Sun, Moon } from "lucide-react";
+import {
+  Sun, Moon, Scissors, Film, Upload, Download, Image as ImageIcon,
+  Radio, Sparkles, Settings, ChevronDown,
+} from "lucide-react";
 
 // Small light/dark toggle for the header (Studio redesign)
 function ThemeToggle() {
@@ -16,6 +19,101 @@ function ThemeToggle() {
     >
       {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
     </button>
+  );
+}
+
+// ── Studio sidebar nav item ──
+function NavItem({ icon, label, active, badge, disabled, onClick }) {
+  return (
+    <div
+      onClick={disabled ? undefined : onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+        borderRadius: 9, cursor: disabled ? "default" : "pointer",
+        fontFamily: "var(--st-ui)", fontSize: 13.5, fontWeight: active ? 600 : 500,
+        color: disabled ? "var(--st-faint)" : active ? "var(--st-text)" : "var(--st-muted)",
+        background: active ? "var(--st-alt)" : "transparent",
+        opacity: disabled ? 0.5 : 1, transition: "all .12s", userSelect: "none",
+      }}
+      onMouseEnter={(e) => { if (!active && !disabled) e.currentTarget.style.background = "var(--st-soft)"; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
+    >
+      <span style={{ color: active ? "var(--st-text)" : "var(--st-faint)", display: "grid" }}>{icon}</span>
+      <span style={{ flex: 1 }}>{label}</span>
+      {badge != null && (
+        <span style={{ fontFamily: "var(--st-mono)", fontSize: 10.5, color: "var(--st-faint)" }}>{badge}</span>
+      )}
+    </div>
+  );
+}
+
+// ── Studio left sidebar (replaces the old top tabs) ──
+function Sidebar({ active, filename, clipCount, hasProject, onNav }) {
+  const { theme, toggle } = useTheme();
+  const group = { display: "flex", flexDirection: "column", gap: 2 };
+  const eyebrow = {
+    fontFamily: "var(--st-ui)", fontSize: 10.5, fontWeight: 700, letterSpacing: ".09em",
+    color: "var(--st-faint)", textTransform: "uppercase", padding: "0 10px 7px",
+  };
+  return (
+    <div style={{
+      width: 232, flexShrink: 0, background: "var(--st-surface)",
+      borderRight: "1px solid var(--st-line)", padding: "20px 14px",
+      display: "flex", flexDirection: "column", gap: 22, height: "100vh",
+      position: "sticky", top: 0,
+    }}>
+      {/* wordmark */}
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px" }}>
+        <div style={{ width: 26, height: 26, borderRadius: 8, background: "var(--st-accent)", display: "grid", placeItems: "center" }}>
+          <Scissors size={15} style={{ color: "var(--st-on-accent)" }} />
+        </div>
+        <span style={{ fontFamily: "var(--st-display)", fontWeight: 700, fontSize: 18, color: "var(--st-text)", letterSpacing: "-.02em" }}>Clipper</span>
+        <span style={{ fontFamily: "var(--st-mono)", fontSize: 9.5, color: "var(--st-faint)", marginLeft: "auto" }}>v9.6</span>
+      </div>
+
+      {/* project selector */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 9, padding: "9px 11px",
+        borderRadius: 10, border: "1px solid var(--st-border)", background: "var(--st-soft)",
+      }}>
+        <Film size={15} style={{ color: "var(--st-muted)" }} />
+        <span style={{ fontFamily: "var(--st-mono)", fontSize: 11.5, color: "var(--st-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {filename || "sin proyecto"}
+        </span>
+        <ChevronDown size={14} style={{ color: "var(--st-faint)" }} />
+      </div>
+
+      {/* PROYECTO */}
+      <div style={group}>
+        <div style={eyebrow}>Proyecto</div>
+        <NavItem icon={<Upload size={17} />} label="Subir video" active={active === "upload"} onClick={() => onNav("upload")} />
+        <NavItem icon={<Film size={17} />} label="Clips" active={active === "clips"} badge={clipCount || null} disabled={!hasProject} onClick={() => onNav("clips")} />
+        <NavItem icon={<Scissors size={17} />} label="Editor" active={active === "editor"} onClick={() => onNav("editor")} />
+        <NavItem icon={<Download size={17} />} label="Exportar" active={active === "export"} disabled={!hasProject} onClick={() => onNav("export")} />
+      </div>
+
+      {/* HERRAMIENTAS */}
+      <div style={group}>
+        <div style={eyebrow}>Herramientas</div>
+        <NavItem icon={<ImageIcon size={17} />} label="Memes" active={active === "meme"} onClick={() => onNav("meme")} />
+        <NavItem icon={<Radio size={17} />} label="Live Stream" active={active === "live"} onClick={() => onNav("live")} />
+        <NavItem icon={<Sparkles size={17} />} label="Analyzer" active={active === "analyzer"} onClick={() => onNav("analyzer")} />
+      </div>
+
+      {/* footer */}
+      <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", borderRadius: 9, background: "var(--st-soft)", border: "1px solid var(--st-line)" }}>
+          <Sparkles size={14} style={{ color: "var(--st-muted)" }} />
+          <span style={{ fontFamily: "var(--st-ui)", fontSize: 12, color: "var(--st-muted)", flex: 1 }}>Gemini 2.5 Flash</span>
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: "var(--st-ok)" }} />
+        </div>
+        <NavItem
+          icon={theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+          label={theme === "dark" ? "Tema claro" : "Tema oscuro"}
+          onClick={toggle}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -323,50 +421,41 @@ function UploadStep({ onComplete }) {
   }
 
   return (
-    <div style={{ maxWidth: 660, margin: "0 auto" }}>
-      {/* Header */}
-      <div style={{
-        background: "var(--st-surface)",
-        borderRadius: 14, padding: "20px 24px", marginBottom: 18,
-        border: "1px solid var(--st-line)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 26 }}>🎬</div>
-          <div>
-            <h2 style={{ margin: 0, fontFamily: "var(--st-display)", fontSize: 19, fontWeight: 600, color: "var(--st-text)", letterSpacing: "-0.02em" }}>Subir video</h2>
-            <p style={{ margin: 0, color: "var(--st-muted)", fontSize: 13 }}>
-              Gemini mira tu video y encuentra los momentos más virales automáticamente
-            </p>
-          </div>
-        </div>
-      </div>
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: "30px 32px" }}>
+      {/* Title */}
+      <h1 style={{ margin: "0 0 6px", fontFamily: "var(--st-display)", fontSize: 28, fontWeight: 600, letterSpacing: "-0.025em", color: "var(--st-text)" }}>
+        Subir video
+      </h1>
+      <p style={{ margin: "0 0 26px", fontSize: 14.5, color: "var(--st-muted)", lineHeight: 1.5 }}>
+        Gemini revisa el video completo y encuentra los momentos más virales automáticamente.
+      </p>
 
-      {/* Upload zone */}
+      {/* Dropzone */}
       <div
-        className={`upload-zone ${dragover ? "dragover" : ""}`}
         onDragOver={(e) => { e.preventDefault(); setDragover(true); }}
         onDragLeave={() => setDragover(false)}
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
         style={{
-          borderRadius: 14, marginBottom: 18,
-          background: file ? "var(--st-soft)" : "var(--st-soft)",
-          border: file ? "1.5px solid var(--st-ok)" : "1.5px dashed var(--st-border)",
-          transition: "all 0.15s",
+          border: file ? "1.5px solid var(--st-ok)" : `1.5px dashed ${dragover ? "var(--st-accent)" : "var(--st-border)"}`,
+          borderRadius: 14, padding: "42px 24px", textAlign: "center",
+          background: "var(--st-soft)", marginBottom: 24, cursor: "pointer", transition: "all 0.15s",
         }}
       >
         <input ref={inputRef} type="file" accept="video/*" hidden
           onChange={(e) => setFile(e.target.files[0])} />
-        <div className="icon">{file ? "✅" : "📁"}</div>
+        <div style={{ width: 48, height: 48, borderRadius: 12, background: "var(--st-surface)", border: "1px solid var(--st-border)", display: "grid", placeItems: "center", margin: "0 auto 14px" }}>
+          <Upload size={22} style={{ color: file ? "var(--st-ok)" : "var(--st-muted)" }} />
+        </div>
         {file ? (
-          <div>
-            <p style={{ fontWeight: 700, fontSize: 15, color: "var(--st-ok)", margin: "0 0 4px" }}>{file.name}</p>
-            <p style={{ color: "var(--st-faint)", fontFamily: "var(--st-mono)", fontSize: 12, margin: 0 }}>{(file.size / 1024 / 1024).toFixed(1)} MB · click para cambiar</p>
-          </div>
+          <>
+            <div style={{ fontSize: 15.5, fontWeight: 600, marginBottom: 5, color: "var(--st-ok)" }}>{file.name}</div>
+            <div style={{ fontSize: 12.5, color: "var(--st-faint)", fontFamily: "var(--st-mono)" }}>{(file.size / 1024 / 1024).toFixed(1)} MB · click para cambiar</div>
+          </>
         ) : (
           <>
-            <h3 style={{ margin: "0 0 6px", color: "var(--st-text)" }}>Arrastra tu video aquí</h3>
-            <p style={{ color: "var(--st-faint)", fontFamily: "var(--st-mono)", fontSize: 12, margin: 0 }}>o clic para elegir (MP4, MOV, AVI)</p>
+            <div style={{ fontSize: 15.5, fontWeight: 600, marginBottom: 5, color: "var(--st-text)" }}>Arrastra tu video aquí</div>
+            <div style={{ fontSize: 13, color: "var(--st-faint)", fontFamily: "var(--st-mono)" }}>MP4 · MOV · AVI</div>
           </>
         )}
       </div>
@@ -511,14 +600,16 @@ function UploadStep({ onComplete }) {
         </div>
       </div>
 
-      <button
-        className="btn btn-primary"
-        style={{ width: "100%", fontSize: 14, padding: "13px 0", borderRadius: 11 }}
-        disabled={!file}
-        onClick={handleSubmit}
-      >
-        Analizar video
-      </button>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
+        <button
+          className="btn btn-primary"
+          style={{ fontSize: 14, padding: "11px 20px" }}
+          disabled={!file}
+          onClick={handleSubmit}
+        >
+          <Sparkles size={15} /> Analizar video
+        </button>
+      </div>
     </div>
   );
 }
@@ -6268,91 +6359,64 @@ function App() {
     { num: 3, label: "Style & Export" },
   ];
 
+  // Which sidebar item is active, derived from mode + step
+  const activeNav =
+    mode === "editor" ? "editor" :
+    mode === "meme" ? "meme" :
+    mode === "stream" ? "live" :
+    mode === "analyzer" ? "analyzer" :
+    step === 2 ? "clips" : step === 3 ? "export" : "upload";
+
+  const handleNav = (target) => {
+    if (target === "upload") { setMode("video"); setStep(1); }
+    else if (target === "clips") { setMode("video"); setStep(2); }
+    else if (target === "export") { setMode("video"); setStep(3); }
+    else if (target === "editor") setMode("editor");
+    else if (target === "meme") setMode("meme");
+    else if (target === "live") setMode("stream");
+    else if (target === "analyzer") setMode("analyzer");
+  };
+
   return (
-    <>
-      <header className="app-header">
-        <div className="app-logo">
-          <span className="icon">🎬</span>
-          AI Video Clipper
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span className="app-version">v9.6</span>
-          <ThemeToggle />
-        </div>
-      </header>
-
-      <main className="app-main">
-        {/* Mode toggle — Studio segmented control (monochrome) */}
-        <div style={{ padding: "20px 16px 0", display: "flex", justifyContent: "center" }}>
-          <div style={{
-            display: "inline-flex", gap: 4, background: "var(--st-alt)", borderRadius: 12,
-            padding: 4, border: "1px solid var(--st-line)",
-          }}>
-            {[
-              { key: "video",    icon: "📹", label: "Video Clipper" },
-              { key: "analyzer", icon: "🔍", label: "Analyzer" },
-              { key: "stream",   icon: "🔴", label: "Live Stream" },
-              { key: "meme",     icon: "😂", label: "Meme Generator" },
-              { key: "editor",   icon: "🎬", label: "Editor" },
-            ].map(({ key, icon, label }) => (
-              <button
-                key={key}
-                onClick={() => setMode(key)}
-                style={{
-                  padding: "9px 18px", borderRadius: 9, border: "1px solid transparent", cursor: "pointer",
-                  background: mode === key ? "var(--st-accent)" : "transparent",
-                  color: mode === key ? "var(--st-on-accent)" : "var(--st-muted)",
-                  fontFamily: "var(--st-ui)", fontWeight: 600, fontSize: 13.5, transition: "all 0.15s",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {icon} {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
+    <div className="st-root" style={{ display: "flex", minHeight: "100vh" }}>
+      <Sidebar
+        active={activeNav}
+        filename={filename}
+        clipCount={clips.length}
+        hasProject={!!projectId}
+        onNav={handleNav}
+      />
+      <main style={{ flex: 1, minWidth: 0, background: "var(--st-bg)" }}>
         {mode === "analyzer" && <AnalyzerStep />}
         {mode === "stream" && <LiveStreamStep />}
         {mode === "meme" && <MemeStep />}
         {mode === "editor" && <EditorMode />}
 
-        {mode === "video" && <>
-          <div className="steps-bar" style={{ marginTop: 20 }}>
-            {steps.map((s) => (
-              <div
-                key={s.num}
-                className={`step ${step === s.num ? "active" : ""} ${step > s.num ? "completed" : ""}`}
-                onClick={() => { if (s.num < step) setStep(s.num); }}
-              >
-                <div className="step-number">{step > s.num ? "✓" : s.num}</div>
-                <span className="step-label">{s.label}</span>
-              </div>
-            ))}
-          </div>
-
-          {step === 1 && <UploadStep onComplete={handleUploadComplete} />}
-          {step === 2 && (
-            <ClipsStep
-              projectId={projectId}
-              clips={clips}
-              onEdit={handleEditCaption}
-              onUpdateClip={handleUpdateClip}
-              onReorder={handleReorderClips}
-              onNext={() => setStep(3)}
-            />
-          )}
-          {step === 3 && (
-            <EditorStep
-              projectId={projectId}
-              clips={clips}
-              onUpdateClip={handleUpdateClip}
-              onExportDone={handleReset}
-            />
-          )}
-        </>}
+        {mode === "video" && (
+          <>
+            {step === 1 && <UploadStep onComplete={handleUploadComplete} />}
+            {step === 2 && (
+              <ClipsStep
+                projectId={projectId}
+                clips={clips}
+                onEdit={handleEditCaption}
+                onUpdateClip={handleUpdateClip}
+                onReorder={handleReorderClips}
+                onNext={() => setStep(3)}
+              />
+            )}
+            {step === 3 && (
+              <EditorStep
+                projectId={projectId}
+                clips={clips}
+                onUpdateClip={handleUpdateClip}
+                onExportDone={handleReset}
+              />
+            )}
+          </>
+        )}
       </main>
-    </>
+    </div>
   );
 }
 
