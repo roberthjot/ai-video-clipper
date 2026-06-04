@@ -2,6 +2,36 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## ⚙️ Per-clip styles, editable prompts, editable API key
+
+### Per-clip style overrides — "Aplicar a: Todos / Este clip / Varios"
+- A scope selector at the top of the Visual Editor (Paso 3) decides where style
+  edits go: the whole project (`project.style`, default), only the selected clip,
+  or all the clips checked in "Clips a exportar".
+- `ClipData.style_override` (per-clip `StyleConfig`); `PUT/DELETE
+  /api/export/style/{project}/{clip}`. Preview + export use
+  `clip.style_override or project.style`. "Usar estilo general" clears a clip's
+  override. Frontend keeps overrides in sync and only writes a real edit (never a
+  spurious override on mere scope/clip switching).
+
+### Editable prompts (Ajustes → Prompts)
+- New `services/prompts.py` registry: every Gemini prompt (analysis, timestamp
+  verification, alternates, per-clip reanalyze, meme text/crop, music artist/vibe,
+  IG descriptions) lives there as a default template with `{{TOKEN}}` markers.
+  `gemini_service`, `meme_service` and `clips.py` now render from the registry.
+- Overrides are persisted to `prompts.json` (gitignored) and survive restart.
+  `GET/PUT/POST-reset /api/prompts`. The UI lists every prompt with its tokens,
+  an editable textarea, and Guardar / Restablecer.
+
+### Editable Gemini API key (Ajustes)
+- The API key can be changed from the UI: `gemini_service.set_api_key()` recreates
+  the client and persists to `runtime_config.json` (gitignored); on boot it uses
+  that file if present, else `.env`. `GET /api/settings/api-key` returns only a
+  masked preview; `PUT` swaps it. `meme_service` now uses the live client.
+
+### Misc
+- Browser tab: title "Clipper" + scissors favicon (`public/clipper.svg`).
+
 ## 🎨 "Studio" frontend redesign (light/dark)
 
 Full visual redesign of the React UI to a minimal, Notion-like **Studio** look

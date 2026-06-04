@@ -5,7 +5,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from ..services import gemini_service, video_service, whisper_service
+from ..services import gemini_service, video_service, whisper_service, prompts
 from ..models.clip import Keyframe
 from .upload import get_project_store
 
@@ -527,7 +527,7 @@ async def preview_clip_frame(project_id: str, clip_id: int):
     preview_path = os.path.join(project.output_dir, f"preview_clip_{clip_id}.jpg")
     timestamp = clip.start_time + (clip.duration / 2)
 
-    style = project.style
+    style = clip.style_override or project.style
 
     # Keyframes mode: the single-frame preview can't run the full zoompan
     # animation, so we interpolate the keyframes at the clip midpoint and
@@ -611,7 +611,7 @@ async def preview_clip_video(project_id: str, clip_id: int):
     os.makedirs(project.output_dir, exist_ok=True)
     video_preview_path = os.path.join(project.output_dir, f"preview_clip_{clip_id}.mp4")
 
-    style = project.style
+    style = clip.style_override or project.style
 
     try:
         await asyncio.to_thread(
@@ -688,7 +688,7 @@ async def preview_clip_instagram_frame(project_id: str, clip_id: int):
     os.makedirs(project.output_dir, exist_ok=True)
     ig_frame_path = os.path.join(project.output_dir, f"ig_preview_clip_{clip_id}.jpg")
     timestamp = clip.start_time + (clip.duration / 2)
-    style = project.style
+    style = clip.style_override or project.style
 
     try:
         await asyncio.to_thread(
@@ -771,15 +771,7 @@ async def reanalyze_clip(project_id: str, clip_id: int):
             model=active_model,
             contents=[_types.Content(role="user", parts=[
                 _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
-                _types.Part.from_text(text=(
-                    "Watch this short video clip carefully. "
-                    "Write a new viral caption that accurately describes what is ACTUALLY happening in this clip. "
-                    "Rules: English only. Maximum 10 words. Third person only (no I/me/my). "
-                    "No punctuation except apostrophes. All lowercase except first letter. "
-                    "End with EXACTLY ONE emoji from this list (and no other): "
-                    "💀 😂 🥺 ✨ 🔥 ❤️ 💪 👀 🤔 ❤️‍🩹 😱 😭 💔 🤯. "
-                    "Return ONLY the caption text — nothing else."
-                )),
+                _types.Part.from_text(text=prompts.render("reanalyze_clip")),
             ])],
             config=_types.GenerateContentConfig(temperature=0.5),
         )
@@ -848,7 +840,7 @@ async def preview_clip_instagram(project_id: str, clip_id: int):
     os.makedirs(project.output_dir, exist_ok=True)
     ig_preview_path = os.path.join(project.output_dir, f"ig_preview_clip_{clip_id}.mp4")
 
-    style = project.style
+    style = clip.style_override or project.style
 
     try:
         await asyncio.to_thread(

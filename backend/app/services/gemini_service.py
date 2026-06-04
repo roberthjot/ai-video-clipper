@@ -9,6 +9,7 @@ from google import genai
 from google.genai import types
 from ..config import settings
 from ..models.clip import ClipData
+from . import prompts
 
 
 # Video chunking thresholds (videos longer than this get split for analysis).
@@ -31,8 +32,51 @@ VIDEO_ANALYSIS_MODELS = {
 }
 
 
+# ── Gemini API key (editable at runtime from Ajustes) ──────────────────────
+# The key comes from .env by default, but can be overridden from the UI; the
+# override is persisted to runtime_config.json (gitignored) and survives restart.
+_RUNTIME_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "runtime_config.json")
+
+
+def _load_api_key() -> str:
+    try:
+        if os.path.exists(_RUNTIME_FILE):
+            with open(_RUNTIME_FILE, encoding="utf-8") as f:
+                k = (json.load(f) or {}).get("api_key")
+                if k and k.strip():
+                    return k.strip()
+    except Exception as e:
+        print(f"[gemini] failed to read runtime key: {e}")
+    return settings.GOOGLE_API_KEY
+
+
+current_api_key = _load_api_key()
+
 # Initialize Gemini client
-client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+client = genai.Client(api_key=current_api_key)
+
+
+def set_api_key(key: str) -> None:
+    """Swap the Gemini API key at runtime (recreates the client) and persist it."""
+    global client, current_api_key
+    key = (key or "").strip()
+    if not key:
+        raise ValueError("Empty API key")
+    current_api_key = key
+    client = genai.Client(api_key=key)
+    try:
+        with open(_RUNTIME_FILE, "w", encoding="utf-8") as f:
+            json.dump({"api_key": key}, f)
+    except Exception as e:
+        print(f"[gemini] failed to persist runtime key: {e}")
+
+
+def masked_api_key() -> str:
+    """A safe, masked preview of the active key (never expose the full key)."""
+    k = current_api_key or ""
+    if len(k) <= 8:
+        return "·" * len(k)
+    return f"{k[:4]}{'·' * 10}{k[-3:]}"
 
 
 def upload_video(file_path: str):
@@ -346,145 +390,45 @@ def analyze_video(
     if custom_prompt.strip():
         instruction = custom_prompt.strip()
     else:
-        instruction = (
-            "Scan the ENTIRE video from start to finish — every second. Pick the moments that will make someone stop scrolling instantly. "
-            "Prioritize: shocking reveals, explosive arguments, emotional breakdowns, unexpected plot twists, "
-            "hilarious reactions, jaw-dropping confessions, and intense confrontations. "
-            "Skip boring transitions, slow dialogue, or anything that wouldn't hook someone in the first 2 seconds. "
-            "Each clip must start at the PEAK of the moment — not before it builds up."
-        )
+        instruction = prompts.get_text("default_instruction")
 
     # Build the creator-name guidance block (only if a name was provided)
     if creator_name and creator_name.strip():
         names = [n.strip() for n in creator_name.split(",") if n.strip()]
         names_list = ", ".join(names)
-        creator_section = f"""
-    CREATOR NAME RULES (IMPORTANT):
-    The person(s) featured in this video: {names_list}.
-    - Weave the name into the caption where it flows MOST naturally — it can be
-      at the start, middle, or end, whatever sounds best. Do NOT force it the
-      same way every time.
-    - If MULTIPLE names are listed, identify who appears in THIS specific clip
-      using on-screen text, spoken names, usernames, or context. Use the name
-      of the person actually featured in that clip. If you genuinely cannot tell
-      who it is, use the most prominent / first-listed name.
-    - Use the name in roughly 60-70% of captions, not every single one — variety
-      keeps it from looking auto-generated.
-    - ALWAYS use the name naturally in the "description" field too.
-    - Keep the name's exact capitalization as given (e.g. "Sophie Rain").
-    """
+        creator_section = prompts.render("creator_section", NAMES_LIST=names_list)
     else:
         creator_section = ""
-
-    system_prompt = f"""
-    You are the #1 viral video editor on TikTok with 10 years of experience creating content that gets hundreds of millions of views.
-    Your job is to watch this video and extract the {target_clips} most explosive, attention-grabbing clips that will go viral on TikTok, Reels, and Shorts.
-
-    Target Audience: USA (English speakers).
-    Platform: TikTok / Instagram Reels / YouTube Shorts.
-
-    YOUR GOAL: Find exactly {target_clips} clips. Each clip MUST be at least {min_duration} seconds long.
-    Scan the ENTIRE video from start to finish — do not miss moments in the second half.
-
-    DISTRIBUTION RULE (CRITICAL): Your {target_clips} clips MUST be spread across the full {video_duration/60:.1f} minutes.
-    - First third (0s to {video_duration/3:.0f}s): find clips here
-    - Middle third ({video_duration/3:.0f}s to {video_duration*2/3:.0f}s): find clips here
-    - Last third ({video_duration*2/3:.0f}s to {video_duration:.0f}s): find clips here
-    Do NOT return more than 40% of clips from the first third alone.
-
-    WHAT MAKES A CLIP GO VIRAL:
-    - Hooks viewers in the first 2 seconds — starts at the peak of the action
-    - Creates an emotional reaction: shock, laughter, tears, anger, or disbelief
-    - Has a clear story arc even in a short clip
-    - Makes people want to comment, share, or watch again
-    - Feels like something people have never seen before
-
-    WHAT TO AVOID:
-    - Slow build-ups or boring introductions
-    - Clips that need context from earlier in the video
-    - Dead air, silence, or transitions
-
-    INSTRUCTION: {instruction}
-    {creator_section}
-    CAPTION RULES (CRITICAL):
-    - Write in THIRD PERSON only (e.g. "She finally told the truth" not "I told the truth")
-    - NO first person: no "I", "me", "my", "we"
-    - Maximum 15 words — short, punchy, scroll-stopping
-    - Write like a fan account teasing the drama
-    - NO punctuation of any kind: no periods, no commas, no exclamation marks, no question marks
-    - Apostrophes in contractions ARE allowed: he's, she's, don't, can't, won't, it's, that's, they're — use them naturally
-    - All lowercase EXCEPT the very first letter of the caption
-    - END with EXACTLY ONE emoji that matches the emotion of the moment (TikTok style).
-      You MUST pick the emoji from THIS EXACT LIST — no other emojis are allowed:
-        💀 😂 🥺 ✨ 🔥 ❤️ 💪 👀 🤔 ❤️‍🩹 😱 😭 💔 🤯
-      Match the emoji to the moment's emotion:
-        * Drama / shock / mind-blown → 😱 🤯 💀 👀
-        * Funny / "I'm dead" → 😂 💀
-        * Motivational / "fire" / strong → 🔥 💪 ✨
-        * Sad / crying / heartbreak → 😭 💔 🥺 ❤️‍🩹
-        * Love / wholesome → ❤️ ✨
-        * Suspicious / thinking / watching → 👀 🤔
-      Place the emoji at the very end after a space. ONLY ONE emoji per caption.
-      DO NOT use any emoji that is not in the list above.
-
-    Output Format:
-    Return ONLY a raw JSON list. No markdown, no ```json, no explanation — just the JSON array.
-    Each object must have:
-    - "start_time": (float) Start time in seconds.
-    - "end_time": (float) End time in seconds.
-    - "description": (string) 3-5 word label for the clip (English).
-    - "viral_caption": (string) Short punchy overlay text. MAX 15 words. No punctuation.
-    - "viral_reason": (string) One sentence explaining the viral potential.
-    - "viral_score": (int) A score from 1 to 10 rating the viral potential of this clip. 10 = guaranteed viral, 1 = boring. Be honest and vary the scores.
-    - "viral_score_reason": (string) One short phrase (max 6 words) explaining the score. Examples: "Strong emotional hook", "Slow build-up", "Unexpected twist ending", "Weak payoff".
-    - "ig_description": (string) A long Instagram post caption for this clip. Follow these rules:
-        * First, try to identify the creator's name from audio, text on screen, or context in the video. If identified, use their real name naturally throughout.
-        * Write 3-4 paragraphs in English. Start with a hook sentence about this specific moment.
-        * Paragraph 1: Describe what happens in this clip and why it's a standout moment.
-        * Paragraph 2: Provide context about the creator — who they are, what they're known for, what makes them interesting.
-        * Paragraph 3: Why this moment resonates with fans / what the audience reaction will be.
-        * End with 12-15 highly relevant hashtags on a new line (mix of niche and broad tags).
-        * Tone: enthusiastic fan account, third person, admiring but not over-the-top. No emojis.
-
-    TIMESTAMP RULES (CRITICAL):
-    1. Use simple decimal numbers only (e.g. 10.5). NO leading zeros.
-    2. Clip duration MUST be between {min_duration} and 60 seconds. Vary the durations — not all clips the same length.
-    3. The video is EXACTLY {video_duration} seconds long ({video_duration/60:.1f} minutes).
-       - "start_time" MUST be less than {video_duration - min_duration}.
-       - "end_time" MUST be less than or equal to {video_duration}.
-       - Clips beyond {video_duration} seconds DO NOT EXIST and will be rejected.
-
-    TIMESTAMP ACCURACY (EXTREMELY IMPORTANT):
-    Before writing each clip's start_time and end_time, STOP and ask yourself:
-    - "If I seek to exactly this second in the video, will I see THIS specific moment?"
-    - "Am I 100% sure this timestamp is NOT from a different topic or segment?"
-    - "Does the viral_caption describe EXACTLY what happens at these seconds — not what happens elsewhere?"
-    A caption about person X MUST have timestamps where person X actually appears.
-    A caption about topic Y MUST have timestamps where topic Y is actually discussed.
-    NEVER assign a caption from one moment to the timestamps of a different moment.
-    When in doubt about a timestamp, skip that clip entirely.
-    __TRANSCRIPT_SECTION__
-    """
 
     # Build transcript section if available
     if transcript and transcript.get("words"):
         words_summary = " ".join(
             f"{w['word']}[{w['start']:.1f}s]" for w in transcript["words"]
         )
-        transcript_section = f"""
-    AUDIO TRANSCRIPT WITH EXACT TIMESTAMPS (USE THESE FOR ACCURACY):
-    Language detected: {transcript.get('language', 'unknown')}
-    Full text: {transcript.get('text', '')}
-    Word-level timestamps: {words_summary[:3000]}{"..." if len(words_summary) > 3000 else ""}
-
-    CRITICAL: The word timestamps above are 100% accurate. When you identify a viral moment,
-    use the word timestamps to set start_time and end_time precisely.
-    Start the clip 0.2s BEFORE the first relevant word. End it 0.3s AFTER the last relevant word.
-    """
+        words_summary = words_summary[:3000] + ("..." if len(words_summary) > 3000 else "")
+        transcript_section = prompts.render(
+            "transcript_section",
+            LANGUAGE=transcript.get("language", "unknown"),
+            FULL_TEXT=transcript.get("text", ""),
+            WORDS_SUMMARY=words_summary,
+        )
     else:
         transcript_section = ""
 
-    system_prompt = system_prompt.replace("__TRANSCRIPT_SECTION__", transcript_section)
+    system_prompt = prompts.render(
+        "analysis_system",
+        TARGET_CLIPS=target_clips,
+        MIN_DURATION=min_duration,
+        VIDEO_DURATION=video_duration,
+        DUR_MIN=f"{video_duration/60:.1f}",
+        THIRD1=f"{video_duration/3:.0f}",
+        THIRD2=f"{video_duration*2/3:.0f}",
+        VIDEO_DURATION_INT=f"{video_duration:.0f}",
+        START_MAX=(video_duration - min_duration),
+        INSTRUCTION=instruction,
+        CREATOR_SECTION=creator_section,
+        TRANSCRIPT_SECTION=transcript_section,
+    )
 
     active_model = model or settings.GEMINI_MODEL
     print(f"[Gemini] Analyzing video: model={active_model}, duration={video_duration:.1f}s, target={target_clips} clips, min_duration={min_duration}s, transcript={'yes' if transcript else 'no'}")
@@ -741,19 +685,10 @@ def _verify_clip_timestamps(file_obj, clips: list, video_duration: float, min_du
             model=settings.GEMINI_MODEL,
             contents=[types.Content(role="user", parts=[
                 types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-                types.Part.from_text(text=(
-                    f"You previously identified these clips from this video:\n[\n{clips_info}\n]\n\n"
-                    f"For EACH clip, seek to its start_time and verify:\n"
-                    f"1. Does the video content at that timestamp actually match the caption and description?\n"
-                    f"2. If NOT, find the CORRECT start_time and end_time where that caption/description actually occurs.\n"
-                    f"3. If the content described in the caption does NOT exist anywhere in the video, mark it invalid.\n\n"
-                    f"Return ONLY a raw JSON array. Each object must have:\n"
-                    f"- \"id\": (int) the clip id\n"
-                    f"- \"valid\": (bool) true if content matches OR was corrected, false if content doesn't exist in video\n"
-                    f"- \"start_time\": (float) correct start time in seconds\n"
-                    f"- \"end_time\": (float) correct end time in seconds\n"
-                    f"- \"corrected\": (bool) true if you changed the timestamps\n"
-                    f"The video is {video_duration:.1f} seconds long. All timestamps must be within this range."
+                types.Part.from_text(text=prompts.render(
+                    "verify_timestamps",
+                    CLIPS_INFO=clips_info,
+                    VIDEO_DURATION=f"{video_duration:.1f}",
                 )),
             ])],
             config=types.GenerateContentConfig(
@@ -823,16 +758,8 @@ def _fill_with_alternates(file_obj, clips: list, needed: int, system_prompt: str
             model=settings.GEMINI_MODEL,
             contents=[types.Content(role="user", parts=[
                 types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-                types.Part.from_text(text=(
-                    f"For each clip listed below, write ONE alternative viral caption that approaches "
-                    f"the moment from a DIFFERENT angle than the current caption.\n"
-                    f"Each new caption must feel fresh — different wording, different emotion, different hook.\n\n"
-                    f"{clips_info}\n\n"
-                    f"Return ONLY a raw JSON array where each object has:\n"
-                    f"- \"start_time\": (float) same start time as the clip\n"
-                    f"- \"viral_caption\": (string) NEW caption, max 10 words, no punctuation except apostrophes, "
-                    f"all lowercase except first letter\n"
-                    f"Return exactly {needed} objects."
+                types.Part.from_text(text=prompts.render(
+                    "alternate_captions", CLIPS_INFO=clips_info, NEEDED=needed,
                 )),
             ])],
             config=types.GenerateContentConfig(

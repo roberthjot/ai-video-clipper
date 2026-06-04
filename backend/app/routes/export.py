@@ -65,6 +65,42 @@ async def update_style(project_id: str, style: StyleConfig):
     return {"status": "updated", "style": style.model_dump()}
 
 
+@router.put("/style/{project_id}/{clip_id}")
+async def update_clip_style(project_id: str, clip_id: int, style: StyleConfig):
+    """Set a per-clip style override (editor 'Aplicar a: Este clip / Varios').
+    Pass clear=true to remove the override and inherit the project style again."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+    clip = next((c for c in project.clips if c.id == clip_id), None)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    # Inherit project-level asset paths if the override didn't carry them.
+    if style.watermark_path is None and project.style.watermark_path:
+        style.watermark_path = project.style.watermark_path
+    if style.split_image_path is None and project.style.split_image_path:
+        style.split_image_path = project.style.split_image_path
+
+    clip.style_override = style
+    return {"status": "updated", "clip_id": clip_id}
+
+
+@router.delete("/style/{project_id}/{clip_id}")
+async def clear_clip_style(project_id: str, clip_id: int):
+    """Remove a clip's style override so it inherits the project style again."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+    clip = next((c for c in project.clips if c.id == clip_id), None)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    clip.style_override = None
+    return {"status": "cleared", "clip_id": clip_id}
+
+
 @router.post("/render/{project_id}")
 async def render_clips(project_id: str, clip_ids: list[int] = Query(default=None)):
     """Start exporting clips in background. Optionally pass clip_ids to export only selected."""

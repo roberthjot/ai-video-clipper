@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse as FastFileResponse
 import os
 from .config import settings
-from .routes import upload, clips, export, stream, meme, editor
+from .routes import upload, clips, export, stream, meme, editor, prompts, settings as settings_routes
 from .routes.upload import get_project_store
 
 # Validate settings on startup
@@ -33,6 +33,8 @@ app.include_router(export.router)
 app.include_router(stream.router, prefix="/api/stream", tags=["stream"])
 app.include_router(meme.router, prefix="/api/meme", tags=["meme"])
 app.include_router(editor.router)
+app.include_router(prompts.router)
+app.include_router(settings_routes.router)
 
 
 @app.get("/api/health")

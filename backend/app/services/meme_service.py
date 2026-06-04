@@ -6,7 +6,8 @@ import subprocess
 from PIL import Image, ImageDraw, ImageFont
 
 from ..config import settings
-from .gemini_service import upload_video, wait_for_processing, delete_file, client
+from .gemini_service import upload_video, wait_for_processing, delete_file
+from . import gemini_service, prompts
 from google.genai import types
 
 FFMPEG_EXE = "ffmpeg"
@@ -44,21 +45,11 @@ def detect_crop_boundaries(frame_path: str) -> dict:
     with open(frame_path, "rb") as f:
         img_bytes = f.read()
 
-    response = client.models.generate_content(
+    response = gemini_service.client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[types.Content(role="user", parts=[
             types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
-            types.Part.from_text(text=(
-                "This is a frame from an Instagram meme video. "
-                "The actual video content is displayed INSIDE a rectangular frame or box. "
-                "Around this box there are borders/padding on all four sides (top, bottom, left, right) "
-                "that may be white, black, or a solid color. "
-                "Your job: detect the percentage to crop from each side to remove the border/frame "
-                "and keep only the inner video content. "
-                "Return ONLY this format, no explanation:\n"
-                "TOP:X BOTTOM:Y LEFT:Z RIGHT:W\n"
-                "X, Y, Z, W are integers 0-50. Use 0 if there is no border on that side."
-            )),
+            types.Part.from_text(text=prompts.render("meme_crop")),
         ])],
         config=types.GenerateContentConfig(temperature=0.0),
     )
@@ -119,24 +110,11 @@ def crop_video_pct(video_path: str, output_path: str,
 
 def generate_meme_text(file_obj) -> str:
     """Ask Gemini to generate meme text for this video."""
-    response = client.models.generate_content(
+    response = gemini_service.client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-            types.Part.from_text(text=(
-                "Watch this short video carefully. "
-                "Write a Gen Z meme caption that perfectly matches what's happening. "
-                "Use any format that fits naturally — for example: "
-                "'When [situation]', 'POV: [scenario]', 'Me [doing something]', "
-                "'Nobody: / Me:', 'That one [thing]', '[setup line] / [punchline]', "
-                "'The [thing]: [reaction]', 'Us [doing X] vs [reality]', or any other "
-                "meme format that makes it instantly funny and relatable. "
-                "Rules: English only. Maximum 15 words total. No hashtags. No emojis. "
-                "No punctuation except apostrophes and colons. "
-                "Use a newline to separate setup from punchline when needed. "
-                "Make it feel natural, punchy, and shareable for a young audience. "
-                "Return ONLY the meme text — nothing else, no explanations, no labels."
-            )),
+            types.Part.from_text(text=prompts.render("meme_text")),
         ])],
         config=types.GenerateContentConfig(temperature=1.0),
     )
@@ -148,21 +126,11 @@ def generate_meme_text(file_obj) -> str:
 
 def detect_music_artist(file_obj) -> dict:
     """Ask Gemini to identify the artist in the music video. Returns dict with artist/instagram or empty strings."""
-    response = client.models.generate_content(
+    response = gemini_service.client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-            types.Part.from_text(text=(
-                "Listen and watch this music video carefully. "
-                "Try to identify the music artist or singer. "
-                "Only answer if you are highly confident — do NOT guess or make up names. "
-                "If you recognize the artist, respond in this exact format:\n"
-                "ARTIST: [full artist name]\n"
-                "INSTAGRAM: [@instagram_handle]\n\n"
-                "If you cannot identify the artist with high confidence, respond exactly:\n"
-                "ARTIST: NONE\n"
-                "Return ONLY these lines, nothing else."
-            )),
+            types.Part.from_text(text=prompts.render("music_artist")),
         ])],
         config=types.GenerateContentConfig(temperature=0.1),
     )
@@ -184,25 +152,11 @@ def detect_music_artist(file_obj) -> dict:
 
 def generate_music_vibe(file_obj) -> str:
     """Ask Gemini to generate an emotion-driven vibe phrase for a music video."""
-    response = client.models.generate_content(
+    response = gemini_service.client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-            types.Part.from_text(text=(
-                "Watch this music clip carefully and identify the PRIMARY emotion it triggers in the listener. "
-                "Then write a short, punchy phrase designed to make people on Instagram stop scrolling, "
-                "comment, tag a friend, or repost it. "
-                "Base the phrase on the emotion you detected:\n"
-                "- Nostalgia → make them think of a person or memory ('That song that takes you right back')\n"
-                "- Awe/talent → make them feel they witnessed something rare ('I was NOT ready for those vocals')\n"
-                "- Cultural pride → celebrate the sound or roots ('This is what [genre] is supposed to sound like')\n"
-                "- Euphoria/energy → capture the electricity ('The energy in this room is unreal')\n"
-                "- Sadness/longing → make them feel understood ('The song that hits when you least expect it')\n"
-                "- Discovery → make them feel like insiders ('How does this artist not have millions of followers')\n"
-                "Rules: English only. Maximum 12 words. No hashtags. No emojis. "
-                "No punctuation except apostrophes and commas. "
-                "Return ONLY the phrase — nothing else."
-            )),
+            types.Part.from_text(text=prompts.render("music_vibe")),
         ])],
         config=types.GenerateContentConfig(temperature=1.0),
     )
@@ -215,29 +169,10 @@ def generate_music_vibe(file_obj) -> str:
 def generate_ig_description(file_obj, meme_text: str, content_type: str = "meme") -> str:
     """Ask Gemini to generate a long Instagram caption for the video."""
     if content_type == "music":
-        prompt = (
-            f'This music clip\'s vibe phrase is: "{meme_text}"\n\n'
-            "Write a long Instagram post caption for this music clip. "
-            "Write it as an engaging music fan account post in English. "
-            "Talk about the feeling, energy, and mood of the song. "
-            "Use 3-4 short paragraphs (1-3 sentences each). "
-            "Max 2 emojis total. "
-            "At the very end, after all the text, include EXACTLY 3 relevant music hashtags. "
-            "The hashtags must be the absolute last thing in the caption, on their own line. "
-            "Return ONLY the caption — no labels, no extra words."
-        )
+        prompt = prompts.render("ig_description_music", MEME_TEXT=meme_text)
     else:
-        prompt = (
-            f'This video\'s meme caption is: "{meme_text}"\n\n'
-            "Write a long Instagram post caption for this meme video. "
-            "Write it as a funny, relatable Gen Z meme account post in English. "
-            "Use 3-4 short paragraphs (1-3 sentences each). "
-            "Max 2 emojis total. "
-            "At the very end, after all the text, include EXACTLY 3 relevant hashtags. "
-            "The hashtags must be the absolute last thing in the caption, on their own line. "
-            "Return ONLY the caption — no labels, no extra words."
-        )
-    response = client.models.generate_content(
+        prompt = prompts.render("ig_description_meme", MEME_TEXT=meme_text)
+    response = gemini_service.client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),

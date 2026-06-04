@@ -1800,6 +1800,60 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
   const selectAll = () => setSelectedClipIds(new Set(clips.map(c => c.id)));
   const selectNone = () => setSelectedClipIds(new Set());
 
+  // ─── "Aplicar a" scope: where style edits go ───────────────────────────────
+  // "all" = project.style (every clip) · "clip" = the selected clip's override ·
+  // "selected" = the override of every checked clip. Per-clip overrides are kept
+  // client-side in clipStyleMap and persisted to the backend per clip.
+  const [applyScope, setApplyScope] = useState("all");
+  const [clipStyleMap, setClipStyleMap] = useState({}); // { [clipId]: StyleConfig }
+  const baseStyleRef = useRef(style);       // last known project-wide style
+  const loadedStyleRef = useRef(style);     // style last loaded into the panel (to detect real edits)
+  // Live mirrors so persistStyle (called from a debounced effect) never reads a
+  // stale scope/selection via closure.
+  const applyScopeRef = useRef(applyScope); applyScopeRef.current = applyScope;
+  const clipStyleMapRef = useRef(clipStyleMap); clipStyleMapRef.current = clipStyleMap;
+  const selectedClipRef = useRef(selectedClip); selectedClipRef.current = selectedClip;
+  const selectedClipIdsRef = useRef(selectedClipIds); selectedClipIdsRef.current = selectedClipIds;
+
+  // Save the working style to the right place(s) based on the active scope.
+  const persistStyle = async (s) => {
+    if (applyScopeRef.current === "all") {
+      baseStyleRef.current = s;
+      await api.updateStyle(projectId, s);
+    } else {
+      const ids = applyScopeRef.current === "clip"
+        ? (selectedClipRef.current ? [selectedClipRef.current.id] : [])
+        : Array.from(selectedClipIdsRef.current);
+      if (ids.length) {
+        setClipStyleMap((prev) => { const n = { ...prev }; ids.forEach((id) => { n[id] = s; }); return n; });
+        await Promise.all(ids.map((id) => api.updateClipStyle(projectId, id, s).catch(() => {})));
+      }
+    }
+  };
+
+  // Drop the selected clip's override → it inherits the project style again.
+  const clearOverride = async () => {
+    if (!selectedClip) return;
+    try { await api.clearClipStyle(projectId, selectedClip.id); } catch {}
+    setClipStyleMap((prev) => { const n = { ...prev }; delete n[selectedClip.id]; return n; });
+    loadedStyleRef.current = { ...baseStyleRef.current };
+    setStyle({ ...baseStyleRef.current });
+  };
+
+  // When the scope or the selected clip changes, load the style that scope edits
+  // into the panel (project base, or the clip's override if it has one).
+  // loadedStyleRef remembers it so the persist effect only saves REAL edits —
+  // merely switching never creates a spurious override.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    let target;
+    if (applyScope === "all") target = baseStyleRef.current;
+    else if (selectedClip) target = clipStyleMap[selectedClip.id] || baseStyleRef.current;
+    else target = baseStyleRef.current;
+    loadedStyleRef.current = target;
+    setStyle({ ...target });
+  }, [applyScope, selectedClip?.id]);
+
   // Dragging state
   const [dragging, setDragging] = useState(null);
   const [showGuides, setShowGuides] = useState(true);  // center guide lines on/off
@@ -1843,7 +1897,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     setVideoPreviewUrl(null);
     try {
       console.log("Updating style for project:", projectId);
-      await api.updateStyle(projectId, style);
+      await persistStyle(style);
       console.log("Generating preview for clip:", selectedClip.id);
       setPreviewUrl(api.getPreviewUrl(projectId, selectedClip.id));
     } catch (err) {
@@ -1857,6 +1911,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     if (!selectedClip) return;
     setLoadingVideo(true);
     setPreviewUrl(null);
+    await persistStyle(style);
     setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
     // loadingVideo stays true until onCanPlay fires on the video element
   };
@@ -1866,7 +1921,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     setLoadingPreview(true);
     setVideoPreviewUrl(null);
     try {
-      await api.updateStyle(projectId, style);
+      await persistStyle(style);
       setPreviewUrl(api.getInstagramPreviewUrl(projectId, selectedClip.id));
     } catch (err) {
       alert("Failed to generate IG preview: " + err.message);
@@ -1874,14 +1929,19 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     setLoadingPreview(false);
   };
 
-  // Auto-refresh preview when style changes
+  // Persist style on change (debounced) + refresh any active preview. Saving
+  // runs regardless of whether a preview is open so per-clip overrides are kept
+  // even when you tweak without previewing.
   useEffect(() => {
     if (!selectedClip) return;
-    const hasPreview = previewUrl || videoPreviewUrl;
-    if (!hasPreview) return;
     const timer = setTimeout(async () => {
       try {
-        await api.updateStyle(projectId, style);
+        // Only save when the style actually changed since it was loaded — so
+        // switching scope/clip never writes a spurious override.
+        if (JSON.stringify(style) !== JSON.stringify(loadedStyleRef.current)) {
+          await persistStyle(style);
+          loadedStyleRef.current = style;
+        }
         if (videoPreviewUrl) {
           setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
         }
@@ -1932,7 +1992,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     setExportStatus("exporting");
     setProgress({ current: 0, total: idsToExport.length, current_file: "Starting...", status: "exporting" });
     try {
-      await api.updateStyle(projectId, style);
+      await persistStyle(style);
       if (mode === "instagram") {
         await api.startInstagramExport(projectId, idsToExport);
       } else {
@@ -2219,6 +2279,27 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
         {/* ── Inspector ── */}
         <div style={{ width: "clamp(280px, 30vw, 360px)", flexShrink: 0, borderLeft: "1px solid var(--st-line)", background: "var(--st-surface)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <div style={{ flex: 1, overflowY: "auto", padding: 18 }}>
+            {/* Aplicar a — scope of style edits */}
+            <StSection icon={<Crosshair size={14} />}>Aplicar cambios a</StSection>
+            <StSegmented
+              options={[["all", "Todos"], ["clip", "Este clip"], ["selected", `Varios (${selectedClipIds.size})`]]}
+              value={applyScope}
+              onChange={setApplyScope}
+            />
+            {applyScope === "clip" && selectedClip && clipStyleMap[selectedClip.id] && (
+              <button onClick={clearOverride} className="st-btn st-btn--quiet" style={{ marginTop: 8, padding: "5px 10px", fontSize: 11.5 }}>
+                <RefreshCw size={12} /> Usar estilo general
+              </button>
+            )}
+            <p style={{ fontSize: 11, color: "var(--st-faint)", margin: "8px 0 0", lineHeight: 1.5 }}>
+              {applyScope === "all"
+                ? "Los cambios afectan a TODOS los clips."
+                : applyScope === "clip"
+                  ? "Los cambios afectan solo al clip seleccionado."
+                  : `Los cambios afectan a los ${selectedClipIds.size} clips marcados en “Clips a exportar”.`}
+            </p>
+            <div style={{ height: 1, background: "var(--st-line)", margin: "18px 0" }} />
+
             {/* Clip seleccionado */}
             <StSection icon={<Film size={14} />}>Clip seleccionado</StSection>
             <select className="st-select" value={selectedClip?.id || ""}
@@ -5323,12 +5404,24 @@ function EditorMode({ onExit }) {
 
 
 // ─── Settings (Ajustes) ─────────────────────────────────────────────────────
-function SettingsStep() {
+function SettingsStep({ onOpenPrompts }) {
   const { theme, toggle } = useTheme();
   const { model, setModel } = useModel();
   const [defaultClips, setDefaultClips] = useState(25);
   const [autoSubs, setAutoSubs] = useState(true);
   const [exportQuality, setExportQuality] = useState("1080p");
+  // Editable Gemini API key (masked preview from the server + a new-value input)
+  const [apiMasked, setApiMasked] = useState("");
+  const [apiInput, setApiInput] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  useEffect(() => { api.getApiKey().then((d) => setApiMasked(d.masked || "")).catch(() => {}); }, []);
+  const saveApiKey = async () => {
+    if (!apiInput.trim()) return;
+    setSavingKey(true);
+    try { const d = await api.setApiKey(apiInput.trim()); setApiMasked(d.masked || ""); setApiInput(""); }
+    catch (e) { alert(e.message); }
+    finally { setSavingKey(false); }
+  };
 
   // Shared primitives (single source of truth in components/studio.jsx)
   const Toggle = StToggle;
@@ -5347,8 +5440,20 @@ function SettingsStep() {
               {GEMINI_VIDEO_MODELS.map((m) => (<option key={m.val} value={m.val}>{m.label}</option>))}
             </select>
           } />
-          <Row label="API Key" desc="Tu clave de Google AI Studio. Se carga desde el .env del servidor." control={
-            <div style={{ padding: "8px 13px", borderRadius: 9, border: "1px solid var(--st-border)", background: "var(--st-surface)", fontFamily: "var(--st-mono)", fontSize: 12.5, color: "var(--st-muted)" }}>AIza··········7Qk</div>
+          <Row label="API Key" desc="Tu clave de Google AI Studio. Se guarda en el servidor y reemplaza la del .env." control={
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="password" value={apiInput} onChange={(e) => setApiInput(e.target.value)}
+                placeholder={apiMasked || "AIza…"} spellCheck={false}
+                className="st-input" style={{ width: 190, fontFamily: "var(--st-mono)", fontSize: 12.5 }} />
+              <button onClick={saveApiKey} disabled={!apiInput.trim() || savingKey} className="st-btn st-btn--primary" style={{ padding: "8px 13px" }}>
+                {savingKey ? "…" : "Guardar"}
+              </button>
+            </div>
+          } />
+          <Row label="Prompts de la IA" desc="Editá lo que se le pide a Gemini en cada paso (análisis, captions, memes…)." control={
+            <button onClick={onOpenPrompts} className="st-btn st-btn--ghost" style={{ padding: "8px 13px" }}>
+              <Type size={14} /> Editar prompts
+            </button>
           } />
         </div>
 
@@ -5377,6 +5482,99 @@ function SettingsStep() {
           <span style={{ fontSize: 13, color: "var(--st-muted)", flex: 1 }}>Servidor local conectado</span>
           <span style={{ fontFamily: "var(--st-mono)", fontSize: 11.5, color: "var(--st-faint)" }}>localhost:8000</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Prompts editor (Ajustes → Prompts) ────────────────────────────────────
+function PromptsStep({ onExit }) {
+  const [items, setItems] = useState([]);
+  const [drafts, setDrafts] = useState({});   // { key: text }
+  const [loading, setLoading] = useState(true);
+  const [busyKey, setBusyKey] = useState(null);
+  const [err, setErr] = useState("");
+
+  const load = async () => {
+    try {
+      const d = await api.listPrompts();
+      const ps = d.prompts || [];
+      setItems(ps);
+      setDrafts(Object.fromEntries(ps.map((p) => [p.key, p.current])));
+      setErr("");
+    } catch (e) { setErr(e.message || "No se pudieron cargar los prompts"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const save = async (key) => {
+    setBusyKey(key);
+    try { await api.updatePrompt(key, drafts[key]); await load(); }
+    catch (e) { alert(e.message); }
+    finally { setBusyKey(null); }
+  };
+  const resetOne = async (key) => {
+    setBusyKey(key);
+    try { await api.resetPrompt(key); await load(); }
+    catch (e) { alert(e.message); }
+    finally { setBusyKey(null); }
+  };
+
+  return (
+    <div style={{ height: "100vh", overflowY: "auto", padding: "30px 0" }}>
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 32px" }}>
+        <button onClick={onExit} className="st-btn st-btn--quiet" style={{ padding: "6px 10px", marginBottom: 16, marginLeft: -10 }}>
+          <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /> Ajustes
+        </button>
+        <h1 style={{ margin: "0 0 6px", fontFamily: "var(--st-display)", fontSize: 28, fontWeight: 600, letterSpacing: "-.025em" }}>Prompts de la IA</h1>
+        <p style={{ margin: "0 0 24px", fontSize: 13.5, color: "var(--st-muted)", lineHeight: 1.5 }}>
+          Editá lo que se le pide a Gemini en cada paso. Los <span style={{ fontFamily: "var(--st-mono)" }}>{"{{TOKENS}}"}</span> se reemplazan
+          solos al ejecutarse — dejalos tal cual. <b>Restablecer</b> vuelve al original.
+        </p>
+
+        {err && <div style={{ color: "var(--st-live)", fontSize: 13, marginBottom: 14 }}>{err}</div>}
+        {loading ? (
+          <div style={{ color: "var(--st-muted)", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+            <Loader2 size={16} style={{ animation: "st-spin 1s linear infinite" }} /> Cargando prompts…
+          </div>
+        ) : (
+          <div>
+            {items.map((p) => {
+              const dirty = drafts[p.key] !== p.current;
+              return (
+                <StRow key={p.key} icon={<Type size={15} />} label={p.label}
+                  summary={p.overridden ? "modificado" : null}>
+                  <p style={{ fontSize: 12.5, color: "var(--st-muted)", margin: "0 0 10px", lineHeight: 1.5 }}>{p.description}</p>
+                  {p.tokens && p.tokens.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                      {p.tokens.map((t) => (
+                        <span key={t} style={{ fontFamily: "var(--st-mono)", fontSize: 10.5, padding: "2px 7px", borderRadius: 6, background: "var(--st-alt)", color: "var(--st-muted)" }}>{t}</span>
+                      ))}
+                    </div>
+                  )}
+                  <textarea
+                    value={drafts[p.key] ?? ""}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [p.key]: e.target.value }))}
+                    spellCheck={false}
+                    className="st-textarea"
+                    style={{ minHeight: 160, fontFamily: "var(--st-mono)", fontSize: 12, lineHeight: 1.5, resize: "vertical" }}
+                  />
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button onClick={() => save(p.key)} disabled={!dirty || busyKey === p.key}
+                      className="st-btn st-btn--primary" style={{ padding: "7px 14px" }}>
+                      {busyKey === p.key ? "Guardando…" : "Guardar"}
+                    </button>
+                    <button onClick={() => resetOne(p.key)} disabled={!p.overridden || busyKey === p.key}
+                      className="st-btn st-btn--ghost" style={{ padding: "7px 14px" }}>
+                      <RefreshCw size={13} /> Restablecer
+                    </button>
+                    {dirty && <span style={{ alignSelf: "center", fontSize: 11.5, color: "var(--st-faint)" }}>cambios sin guardar</span>}
+                  </div>
+                </StRow>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -5433,7 +5631,7 @@ function App() {
 
   // Which sidebar item is active, derived from mode + step
   const activeNav =
-    mode === "settings" ? "settings" :
+    mode === "settings" || mode === "prompts" ? "settings" :
     mode === "editor" ? "editor" :
     mode === "meme" ? "meme" :
     mode === "stream" ? "live" :
@@ -5473,7 +5671,8 @@ function App() {
         {mode === "analyzer" && <AnalyzerStep />}
         {mode === "stream" && <LiveStreamStep />}
         {mode === "meme" && <MemeStep />}
-        {mode === "settings" && <SettingsStep />}
+        {mode === "settings" && <SettingsStep onOpenPrompts={() => setMode("prompts")} />}
+        {mode === "prompts" && <PromptsStep onExit={() => setMode("settings")} />}
 
         {mode === "video" && (
           <>

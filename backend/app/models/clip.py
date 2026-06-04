@@ -80,6 +80,11 @@ class ClipData(BaseModel):
     # defined by start_time/end_time. Lets the user remove boring middles.
     segments: list[Segment] = []
 
+    # Per-clip style override (editor "Aplicar a: Este clip / Varios"). When
+    # present, preview + export use THIS instead of the project-wide style.
+    # None = inherit the project style (default).
+    style_override: Optional["StyleConfig"] = None
+
     def model_post_init(self, __context):
         if self.duration == 0.0:
             self.duration = self.end_time - self.start_time
@@ -177,6 +182,10 @@ class StyleConfig(BaseModel):
     flip_horizontal: bool = False
     zoom_uniquify: bool = False   # zoom +2% to break fingerprint
     boost_contrast: bool = False  # subtle eq boost
+
+
+# Resolve ClipData's forward reference to StyleConfig (defined above this line).
+ClipData.model_rebuild()
 
 
 class ProjectConfig(BaseModel):

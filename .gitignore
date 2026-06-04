@@ -42,6 +42,14 @@ test_*.py
 backend/app/services/temp/
 *.ass
 
+# User-edited prompt overrides (from Ajustes → Prompts)
+prompts.json
+backend/prompts.json
+
+# Runtime config (contains the editable Gemini API key)
+runtime_config.json
+backend/runtime_config.json
+
 # Claude Code local config
 .claude/
 

@@ -410,7 +410,8 @@ def export_all_clips_background(
                 export_progress[project_id]["current"] = i + 1
                 export_progress[project_id]["current_file"] = filename
 
-                export_clip_with_style(video_path, clip, style, filepath, transcript=transcript)
+                eff_style = getattr(clip, "style_override", None) or style
+                export_clip_with_style(video_path, clip, eff_style, filepath, transcript=transcript)
                 export_progress[project_id]["files"].append(filename)
 
             except Exception as e:
@@ -602,7 +603,8 @@ def export_all_instagram_clips_background(
                 instagram_export_progress[project_id]["current"] = i + 1
                 instagram_export_progress[project_id]["current_file"] = filename
 
-                export_instagram_clip(video_path, clip, style, filepath)
+                eff_style = getattr(clip, "style_override", None) or style
+                export_instagram_clip(video_path, clip, eff_style, filepath)
                 instagram_export_progress[project_id]["files"].append(filename)
 
             except Exception as e:

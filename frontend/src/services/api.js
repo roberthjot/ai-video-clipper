@@ -155,6 +155,67 @@ export async function updateStyle(projectId, style) {
     return res.json();
 }
 
+// Per-clip style override (editor "Aplicar a: Este clip / Varios").
+export async function updateClipStyle(projectId, clipId, style) {
+    const res = await fetch(`${API_BASE}/export/style/${projectId}/${clipId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(style),
+    });
+    if (!res.ok) throw new Error("Failed to update clip style");
+    return res.json();
+}
+
+export async function clearClipStyle(projectId, clipId) {
+    const res = await fetch(`${API_BASE}/export/style/${projectId}/${clipId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Failed to clear clip style");
+    return res.json();
+}
+
+// ── Editable prompts ──────────────────────────────────────────────────────
+export async function listPrompts() {
+    const res = await fetch(`${API_BASE}/prompts`);
+    if (!res.ok) throw new Error("Failed to load prompts");
+    return res.json();  // { prompts: [...] }
+}
+
+export async function updatePrompt(key, text) {
+    const res = await fetch(`${API_BASE}/prompts/${key}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error("Failed to save prompt");
+    return res.json();
+}
+
+export async function resetPrompt(key) {
+    const res = await fetch(`${API_BASE}/prompts/${key}/reset`, { method: "POST" });
+    if (!res.ok) throw new Error("Failed to reset prompt");
+    return res.json();
+}
+
+// ── API key (editable from Ajustes) ───────────────────────────────────────
+export async function getApiKey() {
+    const res = await fetch(`${API_BASE}/settings/api-key`);
+    if (!res.ok) throw new Error("Failed to load API key");
+    return res.json();  // { masked, has_key }
+}
+
+export async function setApiKey(apiKey) {
+    const res = await fetch(`${API_BASE}/settings/api-key`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey }),
+    });
+    if (!res.ok) {
+        let msg = "Failed to save API key";
+        try { msg = (await res.json()).detail || msg; } catch {}
+        throw new Error(msg);
+    }
+    return res.json();  // { status, masked }
+}
+
 export async function startExport(projectId, selectedClipIds = null) {
     let url = `${API_BASE}/export/render/${projectId}`;
     if (selectedClipIds && selectedClipIds.length > 0) {
