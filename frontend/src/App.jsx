@@ -1238,10 +1238,20 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentId: null });
-  const [reanalyzeModel, setReanalyzeModel] = useState("gemini-2.5-flash");
+  const { model: reanalyzeModel, setModel: setReanalyzeModel } = useModel(); // global model (synced w/ sidebar + Ajustes)
   const [switchingModel, setSwitchingModel] = useState(false);
   const [modelHealth, setModelHealth] = useState({});
   const [checkingModels, setCheckingModels] = useState(false);
+  const [showModels, setShowModels] = useState(false);
+
+  // Change the model used for (re)analysis — updates the global model AND the
+  // backend project model so the 🔄 reanalyze buttons use it.
+  const handleModelChange = async (val) => {
+    setReanalyzeModel(val);
+    setSwitchingModel(true);
+    try { await api.updateProjectModel(projectId, val); } catch (_) {}
+    finally { setSwitchingModel(false); }
+  };
   // Image preview
   const [imagePreviewClip, setImagePreviewClip] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
@@ -1453,10 +1463,37 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
             </span>
           ))}
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7, fontFamily: "var(--st-mono)", fontSize: 11, color: "var(--st-faint)" }}>
-          <Clock size={13} /> 9:16 · TikTok / Reels
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => setShowModels((v) => !v)} className="st-btn st-btn--ghost"
+            title="Ver / cambiar el modelo de Gemini y chequear disponibilidad"
+            style={{ padding: "6px 11px", fontSize: 12,
+              border: `1px solid ${showModels ? "var(--st-accent)" : "var(--st-border)"}`,
+              background: showModels ? "var(--st-soft)" : "transparent" }}>
+            <Sparkles size={13} /> Modelo: {modelLabel(reanalyzeModel)}
+            <ChevronDown size={13} style={{ transform: showModels ? "rotate(180deg)" : "none", transition: "transform .15s", color: "var(--st-faint)" }} />
+          </button>
+          <span style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "var(--st-mono)", fontSize: 11, color: "var(--st-faint)" }}>
+            <Clock size={13} /> 9:16 · TikTok / Reels
+          </span>
         </div>
       </div>
+
+      {/* ═══ Model panel (toggled) — which Gemini model + availability check ═══ */}
+      {showModels && (
+        <div style={{ padding: "14px 28px", borderBottom: "1px solid var(--st-line)", background: "var(--st-soft)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+            <span className="st-eyebrow">Modelo de Gemini {switchingModel && <span style={{ fontFamily: "var(--st-mono)", color: "var(--st-faint)", textTransform: "none", letterSpacing: 0 }}>· cambiando…</span>}</span>
+            <span style={{ fontSize: 11.5, color: "var(--st-muted)" }}>Se usa para analizar y re-analizar. “Check modelos” pinta cuáles están disponibles.</span>
+          </div>
+          <ModelSelector
+            value={reanalyzeModel}
+            onChange={handleModelChange}
+            health={modelHealth}
+            checking={checkingModels}
+            onCheck={handleCheckModels}
+          />
+        </div>
+      )}
 
       {/* batch + model bar (only when clips selected) */}
       {selectedClips.size > 0 && (
