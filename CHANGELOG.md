@@ -2,6 +2,49 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 💬 CapCut-style caption box + longer captions
+
+Reworked `video_service.create_caption_overlay` from a plain rounded rectangle
+into the real **CapCut "Basic" caption look** — a per-line contour that hugs the
+text and grows with the editor sliders — and raised the caption length so longer
+hooks fit. All rendering stays 100% PIL/Pilmoji (no FFmpeg drawtext).
+
+### Per-line contour (not a plain rectangle)
+- Each line's white background **hugs its own text width** (a short line like
+  `undeniable! ✨` is narrower than a long one), all merged into **one connected
+  shape**. The sides step in/out to follow the text.
+- Corners are rounded with **exact circular arcs** via the new `_round_polygon`
+  helper — both the outer (convex) corners and the step (concave) corners, with
+  the per-corner radius clamped to half the step so arcs never overlap. No blur,
+  no "organic"/soft edges.
+- Text is **re-wrapped by measured pixel width** (not character count), so it
+  never overflows or gets cut off; the font auto-shrinks only if a single word
+  is too wide. Near-identical line widths are snapped so tiny steps don't leave
+  slivers.
+
+### Grows with Width / Height — without moving the text
+- **Width** (`caption_box_pad_x`, slider "Ancho de caja", 0–250) widens every
+  line's hug. The same effective padding is applied to all lines and capped by
+  the widest line, so the **step between lines stays constant** as the box grows
+  (it no longer deforms when the wide line hits the frame edge).
+- **Height** (`caption_box_pad_y`, slider "Alto de caja", 0–200) adds per-line
+  vertical padding; the per-line boxes grow and **overlap** (rendered as a union
+  polygon) so the step/overhang zone gets taller. The **text never moves** —
+  callers overlay at `box_y = base_y - pad_y`, cancelling the `+pad_y` canvas
+  offset, so only the boxes grow around the fixed text.
+- **Corner radius** (`caption_box_radius`, slider "Redondeo de esquinas").
+- New defaults: `pad_x=30`, `pad_y=6`, `radius=0.40` (backend `StyleConfig` +
+  frontend initial state). Preview routes (`clips.py`) now forward all
+  `caption_box_*` params so preview and export match.
+
+### Longer captions — all words visible
+- Gemini prompts raised from **15 → 20 words** for the main analysis, alternate
+  captions and per-clip reanalyze (`prompts.py`). Meme/music prompts unchanged.
+- `split_text_into_lines` gained a `max_lines` param; the caption path passes
+  `max_lines=10` (was hard-capped at 4) so a full 20-word caption renders **all
+  its words** instead of silently dropping the tail. A long caption just makes a
+  taller box.
+
 ## ⚙️ Per-clip styles, editable prompts, editable API key
 
 ### Per-clip style overrides — "Aplicar a: Todos / Este clip / Varios"

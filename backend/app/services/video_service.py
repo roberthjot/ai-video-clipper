@@ -1,5 +1,6 @@
 import os
 import re
+import math
 import subprocess
 import imageio_ffmpeg
 from PIL import Image, ImageDraw
@@ -519,51 +520,240 @@ def _measure_text_with_emoji(text: str, font, font_size: int) -> int:
     return text_w + emoji_w
 
 
+def _round_polygon(pts: list, radius: float, samples: int = 12) -> list:
+    """Round every corner of a closed polygon with an exact circular arc.
+
+    Works for convex AND concave corners (CapCut-style wrapped-text contour).
+    The radius at each corner is clamped to half of each adjacent edge so arcs
+    never overlap — small steps simply get a smaller radius and meet cleanly.
+    Returns a new, denser point list ready for ImageDraw.polygon().
+    """
+    # Drop consecutive duplicate points (zero-length edges break the math).
+    clean = []
+    for p in pts:
+        if not clean or abs(p[0] - clean[-1][0]) > 1e-6 or abs(p[1] - clean[-1][1]) > 1e-6:
+            clean.append((float(p[0]), float(p[1])))
+    if len(clean) > 1 and abs(clean[0][0] - clean[-1][0]) < 1e-6 and abs(clean[0][1] - clean[-1][1]) < 1e-6:
+        clean.pop()
+    m = len(clean)
+    if m < 3:
+        return clean
+
+    out = []
+    for i in range(m):
+        prev = clean[(i - 1) % m]
+        cur = clean[i]
+        nxt = clean[(i + 1) % m]
+        v1x, v1y = prev[0] - cur[0], prev[1] - cur[1]
+        v2x, v2y = nxt[0] - cur[0], nxt[1] - cur[1]
+        len1 = math.hypot(v1x, v1y)
+        len2 = math.hypot(v2x, v2y)
+        if len1 < 1e-6 or len2 < 1e-6:
+            out.append(cur); continue
+        u1 = (v1x / len1, v1y / len1)
+        u2 = (v2x / len2, v2y / len2)
+        # Skip straight (collinear) points — they aren't real corners.
+        if abs(u1[0] * u2[1] - u1[1] * u2[0]) < 1e-6:
+            out.append(cur); continue
+
+        rr = min(radius, len1 / 2.0, len2 / 2.0)
+        t1 = (cur[0] + u1[0] * rr, cur[1] + u1[1] * rr)   # tangent point on edge 1
+        t2 = (cur[0] + u2[0] * rr, cur[1] + u2[1] * rr)   # tangent point on edge 2
+
+        # Arc centre lies along the corner bisector; this formula is correct for
+        # convex and concave corners of any angle (all ours are 90°).
+        bx, by = u1[0] + u2[0], u1[1] + u2[1]
+        blen = math.hypot(bx, by)
+        if blen < 1e-6:
+            out.append(cur); continue
+        bx, by = bx / blen, by / blen
+        half = math.acos(max(-1.0, min(1.0, u1[0] * bx + u1[1] * by)))   # half interior angle
+        sin_half = math.sin(half)
+        if sin_half < 1e-6:
+            out.append(cur); continue
+        ox = cur[0] + bx * (rr / sin_half)
+        oy = cur[1] + by * (rr / sin_half)
+        arc_r = rr * math.cos(half) / sin_half
+
+        a1 = math.atan2(t1[1] - oy, t1[0] - ox)
+        a2 = math.atan2(t2[1] - oy, t2[0] - ox)
+        da = a2 - a1
+        while da > math.pi:
+            da -= 2 * math.pi
+        while da < -math.pi:
+            da += 2 * math.pi
+        for s in range(samples + 1):
+            a = a1 + da * (s / samples)
+            out.append((ox + math.cos(a) * arc_r, oy + math.sin(a) * arc_r))
+
+    return out
+
+
 def create_caption_overlay(lines: list, font_size: int = 72,
-                            pad_x: int = 18, pad_y: int = 10,
+                            pad_x: int = 28, pad_y: int = 16,
                             line_gap: int = 0,
-                            font_key: str = "calibri") -> tuple:
-    """TikTok-style caption: each line is a fully-rounded box (all 4 corners).
-    Boxes drawn bottom-to-top, each overlapping the one below by `radius` px
-    so junctions are seamless. Where widths differ, the wider box's rounded
-    corners stick out creating the TikTok staircase step effect.
+                            font_key: str = "calibri",
+                            box_radius: float = 0.28, box_opacity: float = 0.95,
+                            box_color: str = "#FFFFFF") -> tuple:
+    """CapCut-style caption: ONE single rounded rectangle around the text.
+
+    Like CapCut's Basic text panel: the box is a single rounded rectangle, and
+    the pad_x (Width) / pad_y (Height) controls GROW the box around the text
+    without moving or resizing the text itself. Text is wrapped by measured
+    pixel width so it never overflows, and the font auto-shrinks only if a
+    single word is too wide. Box width grows with pad_x (clamped to the frame),
+    box height grows with pad_y.
     """
     from PIL import ImageFont as _IF
     import uuid as _uuid
 
     W_vid = 1080
-    fill = (255, 255, 255, 242)
-    font_path = get_font_path(font_key)
+    side_margin = 40                       # keep the box clear of the screen edges
+    pad_x = max(int(pad_x), 0)
+    pad_y = max(int(pad_y), 0)
+    # Text wraps to a STABLE width that does NOT depend on pad_x, so growing the
+    # box with the Width control never re-flows the text — only the box grows.
+    max_content_w = W_vid - side_margin * 2 - 32
+
     try:
-        font = _IF.truetype(font_path, font_size)
+        _c = (box_color or "#FFFFFF").lstrip("#")
+        _rgb = (int(_c[0:2], 16), int(_c[2:4], 16), int(_c[4:6], 16))
     except Exception:
-        font = _IF.load_default()
+        _rgb = (255, 255, 255)
+    fill = _rgb + (max(0, min(255, int(box_opacity * 255))),)
+    # Auto-pick readable text color: white on a dark box, black on a light box.
+    _lum = 0.299 * _rgb[0] + 0.587 * _rgb[1] + 0.114 * _rgb[2]
+    text_fill = (255, 255, 255, 255) if _lum < 140 else (0, 0, 0, 255)
+    font_path = get_font_path(font_key)
 
-    line_h = int(font_size * 1.40)  # taller line so emojis fit + more breathing room
-    radius = int(line_h * 0.19)
-    overlap = radius  # each box overlaps the next by radius px to close the gap
+    # Re-flow whatever lines we were handed back into a single string, then wrap
+    # by *real pixel width*. Character counts lie — the same 30 chars can be
+    # narrow or wide depending on the letters — so a char-based split lets long
+    # lines overflow the box. Pixel wrapping guarantees every line fits.
+    raw_text = " ".join(s.strip() for s in (lines or []) if s and s.strip())
 
-    # Measure each line's box width (accounting for emojis)
-    line_widths = []
-    for line in lines:
-        tw = _measure_text_with_emoji(line, font, font_size)
-        line_widths.append(min(W_vid - 60, tw + pad_x * 2))
+    def _wrap_px(text, fnt, fs):
+        out, cur = [], ""
+        for word in text.split():
+            cand = (cur + " " + word).strip()
+            if not cur or _measure_text_with_emoji(cand, fnt, fs) <= max_content_w:
+                cur = cand
+            else:
+                out.append(cur)
+                cur = word
+        if cur:
+            out.append(cur)
+        return out
 
+    fs = max(28, int(font_size))
+    font = _IF.load_default()
+    wrapped = [raw_text] if raw_text else [""]
+    while fs >= 28:
+        try:
+            font = _IF.truetype(font_path, fs)
+        except Exception:
+            font = _IF.load_default()
+        wrapped = _wrap_px(raw_text, font, fs) or [""]
+        widest = max((_measure_text_with_emoji(l, font, fs) for l in wrapped), default=0)
+        if widest <= max_content_w or fs <= 28:
+            break
+        fs -= 2                            # a single word is too wide → shrink & retry
+    font_size = fs
+
+    # Never leave a final line that is only emoji(s): pull the previous word down
+    # so the emoji stays anchored to a real word (cleaner look).
+    if len(wrapped) >= 2 and not _EMOJI_RE.sub("", wrapped[-1]).strip():
+        prev = wrapped[-2].split()
+        if len(prev) > 1:
+            wrapped[-2] = " ".join(prev[:-1])
+            wrapped[-1] = prev[-1] + " " + wrapped[-1]
+
+    lines = wrapped
     n = len(lines)
-    canvas_w = max(line_widths) if line_widths else 100
-    canvas_h = n * line_h - (n - 1) * overlap + pad_y * 2
+    line_h = int(font_size * 1.30)
 
-    img = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 0))
+    # PER-LINE CONTOUR (the CapCut look): each line's background hugs its OWN
+    # text width, so a short line is narrower than a long one — the edges step
+    # in/out to follow the text instead of being one plain rectangle. All lines
+    # merge into ONE connected shape with rounded corners (convex + concave).
+    # It still GROWS: pad_x (Width) widens every line's hug, pad_y (Height)
+    # grows the whole block vertically.
+    frame_w = W_vid - side_margin * 2
+    text_widths = [_measure_text_with_emoji(l, font, font_size) for l in lines]
+    widest_text = max(text_widths) if text_widths else 0
+    # Apply the SAME padding to EVERY line, capped so the widest line still fits
+    # the frame. The gap between a wide and a narrow line is (wide_text - narrow_
+    # text), which does not depend on the padding — so the step between lines
+    # stays CONSTANT as the box grows (only the box grows, the step holds), just
+    # like CapCut. Previously each line was clamped on its own, so the wide line
+    # hit the frame first and the step shrank as you increased Width.
+    eff_pad_x = pad_x
+    if widest_text + eff_pad_x * 2 > frame_w:
+        eff_pad_x = max(0, (frame_w - widest_text) // 2)
+    line_box_w = [min(max(int(tw + eff_pad_x * 2), int(line_h)), frame_w) for tw in text_widths]
+    canvas_w = max(line_box_w) if line_box_w else 100
+    # Text sits at FIXED line spacing (line_h); each line's BACKGROUND box adds
+    # pad_y above & below its text. Raising Height (pad_y) grows the boxes (they
+    # overlap) WITHOUT moving the text — the caller offsets the whole overlay by
+    # -pad_y so the text never changes position. Box height = n*line_h + 2*pad_y.
+    canvas_h = n * line_h + pad_y * 2
+    cx = canvas_w / 2.0
+
+    # Corner radius (line-height based so corners look the same on any box).
+    radius = box_radius * line_h * 0.7
+    radius = max(2.0, min(radius, line_h * 0.5, canvas_w * 0.5))
+
+    # Snap NEAR-IDENTICAL adjacent widths so a sub-radius step can't leave an
+    # awkward sliver; genuinely different widths keep their visible hugging step.
+    snap_tol = max(0.5 * radius, 10.0)
+    for _ in range(n):
+        changed = False
+        for i in range(n):
+            for j in (i - 1, i + 1):
+                if 0 <= j < n and 0.0 < line_box_w[j] - line_box_w[i] <= snap_tol:
+                    line_box_w[i] = line_box_w[j]
+                    changed = True
+        if not changed:
+            break
+
+    # Per-line boxes (centered): line i spans [i*line_h, (i+1)*line_h + 2*pad_y]
+    # so it adds pad_y above & below its text. They OVERLAP when pad_y is large;
+    # we take their UNION. For each vertical slice the outline uses the WIDEST
+    # box covering it → a clean staircase. Then round every corner (convex outer
+    # + concave step) with exact arcs.
+    boxes = [(i * line_h, (i + 1) * line_h + 2 * pad_y, line_box_w[i] / 2.0) for i in range(n)]
+    ys = sorted(set([b[0] for b in boxes] + [b[1] for b in boxes]))
+    intervals = []
+    for k in range(len(ys) - 1):
+        y0, y1 = ys[k], ys[k + 1]
+        ymid = (y0 + y1) / 2.0
+        active = [hw for (t, b, hw) in boxes if t <= ymid <= b]
+        if not active:
+            continue
+        hw = max(active)
+        if intervals and abs(intervals[-1][2] - hw) < 1e-6:
+            intervals[-1] = (intervals[-1][0], y1, hw)     # merge same-width runs
+        else:
+            intervals.append((y0, y1, hw))
+    right_b, left_b = [], []
+    for (y0, y1, hw) in intervals:
+        right_b.append((cx + hw, y0)); right_b.append((cx + hw, y1))
+        left_b.append((cx - hw, y0)); left_b.append((cx - hw, y1))
+    polygon = right_b + left_b[::-1]
+    rounded = _round_polygon(polygon, radius, samples=12)
+
+    # Fill the rounded contour on a supersampled mask → LANCZOS downscale for AA.
+    S = 4
+    canvas_w, canvas_h = int(canvas_w), int(canvas_h)
+    mask = Image.new('L', (canvas_w * S, canvas_h * S), 0)
+    ImageDraw.Draw(mask).polygon([(x * S, y * S) for x, y in rounded], fill=255)
+    mask = mask.resize((canvas_w, canvas_h), Image.LANCZOS)
+
+    img = Image.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))
+    color_layer = Image.new('RGBA', (canvas_w, canvas_h), _rgb + (255,))
+    box_alpha = mask.point(lambda v: int(v * box_opacity))
+    img.paste(color_layer, (0, 0), box_alpha)
     draw = ImageDraw.Draw(img)
-
-    # Draw boxes bottom-to-top so upper boxes paint over the top rounded corners
-    for i in range(n - 1, -1, -1):
-        bw = line_widths[i]
-        x0 = (canvas_w - bw) // 2
-        x1 = x0 + bw
-        y0 = pad_y + i * (line_h - overlap)
-        y1 = y0 + line_h
-        draw.rounded_rectangle([(x0, y0), (x1, y1)], radius=radius, fill=fill)
 
     # Draw text — use Pilmoji if the line has emojis, plain PIL otherwise
     has_any_emoji = any(_count_emojis(line) > 0 for line in lines)
@@ -578,21 +768,18 @@ def create_caption_overlay(lines: list, font_size: int = 72,
             print(f"[Caption] Pilmoji unavailable, emojis will not render: {e}")
 
     for i, line in enumerate(lines):
-        bw = line_widths[i]
-        x0 = (canvas_w - bw) // 2
-        y0 = pad_y + i * (line_h - overlap)
         tw = _measure_text_with_emoji(line, font, font_size)
-        text_x = x0 + (bw - tw) // 2
-        text_y = y0 + (line_h - font_size) // 2
+        text_x = (canvas_w - tw) // 2
+        text_y = pad_y + i * line_h + (line_h - font_size) // 2
 
         if pilmoji_ctx and _count_emojis(line) > 0:
             # Use Pilmoji's native offset to align emoji with text baseline
             pilmoji_ctx.text(
-                (text_x, text_y), line, font=font, fill=(0, 0, 0, 255),
+                (text_x, text_y), line, font=font, fill=text_fill,
                 emoji_position_offset=(0, -int(font_size * 0.10)),
             )
         else:
-            draw.text((text_x, text_y), line, font=font, fill=(0, 0, 0, 255))
+            draw.text((text_x, text_y), line, font=font, fill=text_fill)
 
     if pilmoji_ctx:
         try:
@@ -714,8 +901,9 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
     return png_path, box_w, box_h
 
 
-def split_text_into_lines(text: str, max_chars: int = 40) -> list:
-    """Split text into up to 4 lines, each capped at max_chars. Extra words are dropped.
+def split_text_into_lines(text: str, max_chars: int = 40, max_lines: int = 4) -> list:
+    """Split text into up to max_lines lines, each capped at max_chars. Extra words
+    beyond max_lines are dropped (raise max_lines so nothing is dropped).
     If the last line ends up containing only emojis (no text), the last word from the
     previous line is pulled down so the emoji never appears alone in its own mini-box.
     """
@@ -724,7 +912,7 @@ def split_text_into_lines(text: str, max_chars: int = 40) -> list:
     current = []
 
     for word in words:
-        if len(lines) == 4:
+        if len(lines) == max_lines:
             break
         test = " ".join(current + [word])
         if len(test) <= max_chars:
@@ -732,11 +920,11 @@ def split_text_into_lines(text: str, max_chars: int = 40) -> list:
         else:
             if current:
                 lines.append(" ".join(current))
-            if len(lines) == 4:
+            if len(lines) == max_lines:
                 break
             current = [word]
 
-    if current and len(lines) < 4:
+    if current and len(lines) < max_lines:
         lines.append(" ".join(current))
 
     # If the final line is just emoji(s) with no text, pull the previous line's
@@ -1076,6 +1264,11 @@ def generate_preview_frame(
     background_style: str = "blur",
     no_text: bool = False,
     caption_font: str = "calibri",
+    caption_box_radius: float = 0.288,
+    caption_box_opacity: float = 0.95,
+    caption_box_color: str = "#FFFFFF",
+    caption_box_pad_x: int = 14,
+    caption_box_pad_y: int = 14,
     no_emojis: bool = False,
     edit_zoom: float = 1.0,
     edit_pan_x: float = 0.0,
@@ -1155,8 +1348,8 @@ def generate_preview_frame(
         if no_emojis:
             _caption = _EMOJI_RE.sub("", _caption)
             _caption = re.sub(r"\s+", " ", _caption).strip()
-        lines = split_text_into_lines(_caption, max_chars=30)
-        pad_x, pad_y = 12, 14
+        lines = split_text_into_lines(_caption, max_chars=30, max_lines=10)
+        pad_x, pad_y = caption_box_pad_x, caption_box_pad_y
         line_gap = 5
         base_y = int(text_y * target_h)
 
@@ -1168,6 +1361,7 @@ def generate_preview_frame(
             rounded_box_path, box_w, box_h = create_caption_overlay(
                 lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y,
                 line_gap=line_gap, font_key=caption_font,
+                box_radius=caption_box_radius, box_opacity=caption_box_opacity, box_color=caption_box_color,
             )
         box_x = max(0, min(W - box_w, int(text_x * W) - box_w // 2))
         box_y = base_y - pad_y
@@ -1265,6 +1459,11 @@ def generate_preview_clip(
     background_style: str = "blur",
     no_text: bool = False,
     caption_font: str = "calibri",
+    caption_box_radius: float = 0.288,
+    caption_box_opacity: float = 0.95,
+    caption_box_color: str = "#FFFFFF",
+    caption_box_pad_x: int = 14,
+    caption_box_pad_y: int = 14,
     no_emojis: bool = False,
     edit_zoom: float = 1.0,
     edit_pan_x: float = 0.0,
@@ -1360,8 +1559,8 @@ def generate_preview_clip(
         if no_emojis:
             _caption = _EMOJI_RE.sub("", _caption)
             _caption = re.sub(r"\s+", " ", _caption).strip()
-        lines = split_text_into_lines(_caption, max_chars=30)
-        pad_x, pad_y = 12, 14
+        lines = split_text_into_lines(_caption, max_chars=30, max_lines=10)
+        pad_x, pad_y = caption_box_pad_x, caption_box_pad_y
         line_gap = 5
         base_y = int(text_y * target_h)
 
@@ -1373,6 +1572,7 @@ def generate_preview_clip(
             rounded_box_path, box_w, box_h = create_caption_overlay(
                 lines, font_size=font_size, pad_x=pad_x, pad_y=pad_y,
                 line_gap=line_gap, font_key=caption_font,
+                box_radius=caption_box_radius, box_opacity=caption_box_opacity, box_color=caption_box_color,
             )
         box_x = max(0, min(W - box_w, int(text_x * W) - box_w // 2))
         box_y = base_y - pad_y

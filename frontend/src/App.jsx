@@ -1804,7 +1804,12 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     split_screen_enabled: false,
     split_ratio: 0.5,
     caption_style: "box",
-    caption_font: "calibri",
+    caption_font: "trebuchet",
+    caption_box_radius: 0.40,
+    caption_box_opacity: 0.95,
+    caption_box_color: "#FFFFFF",
+    caption_box_pad_x: 30,
+    caption_box_pad_y: 6,
     subtitle_style: "none",
     subtitle_size_scale: 1.0,
     subtitle_y: 0.0,         // -0.5 (down) to +0.5 (up) — offset from style default
@@ -1993,7 +1998,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis]);
+  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y]);
 
   // Poll progress
   useEffect(() => {
@@ -2390,6 +2395,33 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                 <option value="oswald">Oswald Bold</option>
               </optgroup>
             </select>
+
+            {/* White-box controls (CapCut-like) — only for the box style */}
+            {style.caption_style === "box" && (
+              <div style={{ marginBottom: 20 }}>
+                <StSlider label="Redondeo de esquinas" display={`${Math.round((style.caption_box_radius ?? 0.40) * 100)}%`}
+                  min={0} max={1} step={0.01} value={style.caption_box_radius ?? 0.40}
+                  onChange={(e) => setStyle((s) => ({ ...s, caption_box_radius: parseFloat(e.target.value) }))} />
+                <StSlider label="Opacidad de la caja" display={`${Math.round((style.caption_box_opacity ?? 0.95) * 100)}%`}
+                  min={0.2} max={1} step={0.01} value={style.caption_box_opacity ?? 0.95}
+                  onChange={(e) => setStyle((s) => ({ ...s, caption_box_opacity: parseFloat(e.target.value) }))} />
+                <StSlider label="Ancho de caja (Width)" display={`${style.caption_box_pad_x ?? 30}px`}
+                  min={0} max={250} step={1} value={style.caption_box_pad_x ?? 30}
+                  onChange={(e) => setStyle((s) => ({ ...s, caption_box_pad_x: parseInt(e.target.value) }))} />
+                <StSlider label="Alto de caja (Height)" display={`${style.caption_box_pad_y ?? 6}px`}
+                  min={0} max={200} step={1} value={style.caption_box_pad_y ?? 6}
+                  onChange={(e) => setStyle((s) => ({ ...s, caption_box_pad_y: parseInt(e.target.value) }))} />
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)" }}>Color de la caja</span>
+                  <input type="color" value={style.caption_box_color ?? "#FFFFFF"}
+                    onChange={(e) => setStyle((s) => ({ ...s, caption_box_color: e.target.value }))}
+                    style={{ width: 48, height: 30, border: "1px solid var(--st-border)", borderRadius: 8, background: "var(--st-surface)" }} />
+                </div>
+                <p style={{ fontSize: 11, color: "var(--st-faint)", margin: "8px 0 0", lineHeight: 1.5 }}>
+                  La posición (X / Y) se ajusta en “Text Overlay”. El tamaño del texto, en “Font size”.
+                </p>
+              </div>
+            )}
 
             {/* Filtro cinematográfico */}
             <StSection icon={<Sparkles size={14} />}>Filtro cinematográfico</StSection>

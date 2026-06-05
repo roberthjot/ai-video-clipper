@@ -187,8 +187,9 @@ def export_clip_with_style(
         if no_emojis:
             _caption = video_service._EMOJI_RE.sub("", _caption)
             _caption = _re.sub(r"\s+", " ", _caption).strip()
-        lines = video_service.split_text_into_lines(_caption, max_chars=30)
-        pad_x, pad_y = 12, 14
+        lines = video_service.split_text_into_lines(_caption, max_chars=30, max_lines=10)
+        pad_x = getattr(style, "caption_box_pad_x", 14)
+        pad_y = getattr(style, "caption_box_pad_y", 14)
         line_gap = 5
         base_y = int(style.text_y * target_h)
 
@@ -201,6 +202,9 @@ def export_clip_with_style(
             rounded_box_path, box_w, box_h = video_service.create_caption_overlay(
                 lines, font_size=style.font_size, pad_x=pad_x, pad_y=pad_y,
                 line_gap=line_gap, font_key=_font,
+                box_radius=getattr(style, "caption_box_radius", 0.28),
+                box_opacity=getattr(style, "caption_box_opacity", 0.95),
+                box_color=getattr(style, "caption_box_color", "#FFFFFF"),
             )
         box_x = max(0, min(W - box_w, int(style.text_x * W) - box_w // 2))
         box_y = base_y - pad_y

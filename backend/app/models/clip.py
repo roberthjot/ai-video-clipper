@@ -170,8 +170,16 @@ class StyleConfig(BaseModel):
     # only the displayed text loses the emoji). Independent of no_text.
     no_emojis: bool = False
 
-    # Caption font choice (key in video_service.FONT_MAP). Default keeps Calibri.
-    caption_font: str = "calibri"
+    # Caption font choice (key in video_service.FONT_MAP). Trebuchet Bold =
+    # the rounded CapCut-ish look for the white box.
+    caption_font: str = "trebuchet"
+
+    # White-box appearance controls (caption_style == "box"), CapCut-like.
+    caption_box_radius: float = 0.40    # 0 = square corners, 1 = pill
+    caption_box_opacity: float = 0.95   # 0-1 box fill opacity
+    caption_box_color: str = "#FFFFFF"  # box fill color
+    caption_box_pad_x: int = 30         # horizontal padding (Width — grows box sideways)
+    caption_box_pad_y: int = 6          # per-line vertical padding (Height — grows step zone)
 
     # Image overlays (editor mode) — images painted on top of the video for a
     # time range. Empty by default. Burned in at export.

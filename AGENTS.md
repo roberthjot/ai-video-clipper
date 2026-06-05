@@ -171,6 +171,16 @@ Inputs order: `[0]=video [1]=split image? [2]=caption png [3]=watermark`.
   `video_service.create_caption_overlay` (white box) and
   `create_tiktok_caption_overlay` (white text + outline) render a PNG that is
   overlaid by FFmpeg. This avoids all drawtext escaping issues.
+- **CapCut-style caption box** (`create_caption_overlay`): a per-line CONTOUR,
+  not a plain rectangle — each line's background hugs its own text width (short
+  lines are narrower), merged into ONE connected shape whose corners are rounded
+  with exact circular arcs (`_round_polygon`, convex outer + concave step). It
+  GROWS without moving the text: `caption_box_pad_x` (Width slider) widens each
+  line's hug while the step between lines stays constant; `caption_box_pad_y`
+  (Height slider) adds per-line vertical padding so the boxes grow/overlap (union
+  polygon) while the text stays fixed — the caller overlays at `box_y = base_y -
+  pad_y` so the `+pad_y` canvas offset cancels. Text wraps by measured pixel
+  width, decoupled from pad_x. Defaults: pad_x=30, pad_y=6, radius=0.40.
 - **Emoji vertical offset**: Pilmoji anchors emojis to the font baseline.
   TikTok caption shifts the emoji up via `emoji_position_offset=(0,
   -font_size*0.80)`. Naive y-shifts do **not** work — must use Pilmoji's
@@ -244,8 +254,10 @@ duration, transcript_snippet, match_confidence`.
 
 ## 7. Conventions
 
-- Captions: third person, ≤15 words, no punctuation except apostrophes, all
+- Captions: third person, ≤20 words, no punctuation except apostrophes, all
   lowercase except first letter, exactly one whitelisted emoji at the end.
+  (`split_text_into_lines(..., max_lines=10)` in the caption path so all 20
+  words render — they no longer get dropped at 4 lines.)
 - Subtitle/visual changes must be applied in **both** `video_service.py`
   (preview) and `export_service.py` (final) — they have parallel filter code.
 - The frontend auto-refreshes the preview (300 ms debounce) when style
