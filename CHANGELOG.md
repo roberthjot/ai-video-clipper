@@ -2,6 +2,83 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## ✏️ Caption editing — inline text editor + manual line breaks
+
+Faster path to edit a caption from the Visual Editor (Paso 3), plus support for
+user-controlled line breaks so the wrap inside the white box can be tuned.
+
+- **"Editar texto" button** added to the Visual Editor preview action row
+  (next to *Editar encuadre*, *Guías*). Disabled when no clip is selected.
+- **Inline modal** with a 4-row `<textarea>` pre-loaded with the selected
+  clip's `viral_caption`. **Enter** inserts a hard line break (`\n`); **Esc**
+  / click-outside cancels; **Guardar** commits.
+- On save: `api.editCaption()` → updates the local clip → clears preview URLs
+  (`setPreviewUrl(null)`, `setVideoPreviewUrl(null)`) so the next preview
+  fetch re-renders with the new text.
+- **Backend `\n` support** (`video_service.py`):
+  - `split_text_into_lines()` now splits on `\n` first, then auto-wraps each
+    block independently — manual breaks are never crossed by the wrapper.
+  - `create_caption_overlay()`'s internal `_wrap_px()` does the same on the
+    re-joined string (joined with `\n` instead of spaces).
+  - Backwards-compatible: captions without `\n` render exactly as before.
+- The existing pencil ✏️ in the Clips screen already used a `<textarea>`,
+  so it picks up the new `\n` support for free.
+
+## 📝 Subtitles — new "standard" style (Netflix / documentary look)
+
+- New value `standard` joins the catalogue (now **27 styles**). ALL CAPS, white
+  text, thin black outline (~2px), no shadow, slight letter spacing — the
+  classic streaming / documentary / iPhone-caption look. Distinct from `clean`
+  (which uses chunky Arial Black with a thick outline).
+- `_ass_header()` parametrised: `Fontname` and `Spacing` are no longer
+  hardcoded. `standard` uses `Arial` (not `Arial Black`) — the actual Bold
+  weight, not the ultra-black variant — with `outline=2`, `shadow=0`,
+  `spacing=3`. All other styles unchanged.
+- Frontend `SubThumb` mini-preview uses Arial 700 + thin text-shadow outline +
+  uppercase + letter-spacing so the picker preview matches the rendered look.
+
+## 🔧 Visual Editor preview — direct manipulation
+
+Replaced the static "T caption" placeholder badge with an invisible hit area
+positioned to match where the real white box is rendered.
+
+- **Move** still works (drag the area to update `text_x` / `text_y`).
+- **Resize via mouse**: a gold corner-dot at the bottom-right scales the
+  caption. New drag mode `text_resize` captures the initial cursor distance
+  from the caption center, then computes a ratio against `font_size` on each
+  mouseMove. Result: text + white box grow together (the box's PIL dimensions
+  derive from font_size + padding, so the box scales with the text for free).
+- The hit area is **transparent by default** (no text, no background),
+  positioned so its top aligns with PIL's anchor
+  (`top = text_y * H − caption_box_pad_y`, `transform: translate(-50%, 0)`).
+- Dashed outline only appears on hover or while dragging (via the existing
+  `.draggable-text:hover` and `.dragging` CSS rules); stays gold when the
+  caption is horizontally centered.
+
+## 👤 Creator name — authoritative & race-fixed
+
+The "Creador" input on the Clips screen now actually produces captions that
+include the typed name — fixing two bugs that masked it before.
+
+- **Race condition fix**: `handleReanalyze` and `handleReanalyzeBatch` now
+  `await flushCreatorBeforeReanalyze()` (a fresh PATCH to
+  `/api/projects/{id}/creator`) **before** firing the reanalyze. Previously
+  `onBlur` started the PATCH async and the reanalyze hit the backend before
+  the new name was stored.
+- **Prompt fix #1 — `creator_section`**: rewritten to be MANDATORY ("include
+  this exact name in EVERY caption · ignore on-screen names"). The old "60-70%
+  of captions" + "identify from video, on-screen text, audio" rules told
+  Gemini to override the provided name with whatever it recognised — exactly
+  the opposite of what the user wants.
+- **Prompt fix #2 — `reanalyze_clip`**: the per-clip Re-analizar button
+  used a prompt that DID NOT mention the creator at all. Added a
+  `{{CREATOR_LINE}}` token: when `project.creator_name` is set,
+  `clips.py: reanalyze_clip` injects a MANDATORY line ("Include the name X
+  in this caption naturally · Do NOT use any other name") into the prompt
+  before sending. Empty when no creator is set (prompt unchanged).
+- `restore_name_casing()` called on the rewritten caption so the lowercase
+  rule doesn't turn `Jawis` → `jawis` after the re-analyze.
+
 ## 🎬 Editor — xfade transitions between segments
 
 Transitions can now be configured at every cut point in the timeline editor and

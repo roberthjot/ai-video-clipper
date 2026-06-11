@@ -872,19 +872,25 @@ def create_caption_overlay(lines: list, font_size: int = 72,
     # by *real pixel width*. Character counts lie — the same 30 chars can be
     # narrow or wide depending on the letters — so a char-based split lets long
     # lines overflow the box. Pixel wrapping guarantees every line fits.
-    raw_text = " ".join(s.strip() for s in (lines or []) if s and s.strip())
+    # "\n" separators are PRESERVED as hard breaks so users can manually push
+    # words to the next line by typing Enter in the edit modal.
+    raw_text = "\n".join(s.rstrip() for s in (lines or []) if s and s.strip())
 
     def _wrap_px(text, fnt, fs):
-        out, cur = [], ""
-        for word in text.split():
-            cand = (cur + " " + word).strip()
-            if not cur or _measure_text_with_emoji(cand, fnt, fs) <= max_content_w:
-                cur = cand
-            else:
+        """Pixel-wrap each \\n-delimited block independently. Auto-wrap never
+        crosses a manual line break — the user's Enter is respected."""
+        out = []
+        for block in (text or "").split("\n"):
+            cur = ""
+            for word in block.split():
+                cand = (cur + " " + word).strip()
+                if not cur or _measure_text_with_emoji(cand, fnt, fs) <= max_content_w:
+                    cur = cand
+                else:
+                    out.append(cur)
+                    cur = word
+            if cur:
                 out.append(cur)
-                cur = word
-        if cur:
-            out.append(cur)
         return out
 
     fs = max(28, int(font_size))
@@ -1148,26 +1154,33 @@ def split_text_into_lines(text: str, max_chars: int = 40, max_lines: int = 4) ->
     beyond max_lines are dropped (raise max_lines so nothing is dropped).
     If the last line ends up containing only emojis (no text), the last word from the
     previous line is pulled down so the emoji never appears alone in its own mini-box.
+
+    Respects "\\n" in `text` as a HARD line break (user-typed break in the edit
+    modal). Each block separated by "\\n" gets its own auto-wrap; auto-wrap never
+    crosses a manual break.
     """
-    words = text.split()
+    blocks = (text or "").split("\n")
     lines = []
-    current = []
 
-    for word in words:
-        if len(lines) == max_lines:
+    for block in blocks:
+        if len(lines) >= max_lines:
             break
-        test = " ".join(current + [word])
-        if len(test) <= max_chars:
-            current.append(word)
-        else:
-            if current:
-                lines.append(" ".join(current))
-            if len(lines) == max_lines:
+        words = block.split()
+        current = []
+        for word in words:
+            if len(lines) >= max_lines:
                 break
-            current = [word]
-
-    if current and len(lines) < max_lines:
-        lines.append(" ".join(current))
+            test = " ".join(current + [word])
+            if len(test) <= max_chars:
+                current.append(word)
+            else:
+                if current:
+                    lines.append(" ".join(current))
+                if len(lines) >= max_lines:
+                    break
+                current = [word]
+        if current and len(lines) < max_lines:
+            lines.append(" ".join(current))
 
     # If the final line is just emoji(s) with no text, pull the previous line's
     # last word down so the emoji is anchored to a real word (cleaner look).

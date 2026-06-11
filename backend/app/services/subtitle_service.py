@@ -48,7 +48,18 @@ def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920, size_scale
     marginV (positive = up, negative = down). 0.0 = unchanged."""
     border_style = 1   # 1 = outline, 3 = opaque box behind the text
     shadow = 2
-    if style == "popup":
+    fontname = "Arial Black"   # default for all the chunky-text styles
+    spacing = 0                # extra horizontal pixels between letters
+    if style == "standard":
+        # Netflix / documentary / iPhone-caption look — ALL CAPS, thin Arial
+        # Bold (NOT the chunky Arial Black), tight outline, no shadow.
+        font_size = 78
+        outline = 2
+        shadow = 0
+        marginV = int(video_h * 0.28)
+        fontname = "Arial"
+        spacing = 3
+    elif style == "popup":
         font_size = 110
         outline = 8
         marginV = int(video_h * 0.45)
@@ -134,7 +145,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,{font_size},{WHITE},{YELLOW},{BLACK_OUTLINE},{BLACK_BG},-1,0,0,0,100,100,0,0,{border_style},{outline},{shadow},2,40,40,{marginV},1
+Style: Default,{fontname},{font_size},{WHITE},{YELLOW},{BLACK_OUTLINE},{BLACK_BG},-1,0,0,0,100,100,{spacing},0,{border_style},{outline},{shadow},2,40,40,{marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -675,6 +686,10 @@ def generate_ass_for_clip(
         body = _generate_hollow(clip_words)
     elif style == "retro":
         body = _generate_retro(clip_words)
+    elif style == "standard":
+        # Same word-grouping body as clean (already does .upper()) — the
+        # different look comes entirely from the header (Arial, thin outline).
+        body = _generate_clean(clip_words)
     else:  # clean (default)
         body = _generate_clean(clip_words)
 

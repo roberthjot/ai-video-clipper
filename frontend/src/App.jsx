@@ -1496,7 +1496,15 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     setImagePreviewUrl(api.getPreviewUrl(projectId, clip.id));
   };
 
+  // Persist the latest typed creator name BEFORE any reanalyze fires.
+  // Avoids the onBlur→click race where the PATCH lands after the reanalyze.
+  const flushCreatorBeforeReanalyze = async () => {
+    if (!projectId) return;
+    try { await api.updateProjectCreator(projectId, (creatorName || "").trim()); } catch (_) {}
+  };
+
   const handleReanalyze = async (clip) => {
+    await flushCreatorBeforeReanalyze();
     setReanalyzingClip(clip.id);
     try {
       const result = await api.reanalyzeClip(projectId, clip.id);
@@ -1542,6 +1550,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
 
   const handleReanalyzeBatch = async () => {
     if (selectedClips.size === 0) return;
+    await flushCreatorBeforeReanalyze();
     const ids = Array.from(selectedClips);
     setReanalyzingBatch(true);
     setBatchProgress({ current: 0, total: ids.length, currentId: null });
@@ -2040,6 +2049,9 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
   const [exportedFiles, setExportedFiles] = useState([]);
   const [selectedClip, setSelectedClip] = useState(clips[0] || null);
   const [editorClip, setEditorClip] = useState(null);  // 🎬 Editar modal
+  // Inline caption-text editor (opens with the "Editar texto" button)
+  const [editingCaption, setEditingCaption] = useState(null);  // { id, text } | null
+  const [savingCaption, setSavingCaption] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -2269,10 +2281,44 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     setDragging(type);
   };
 
+  // Caption resize: start state for the corner-handle drag.
+  // We capture the initial distance from the caption center + the initial
+  // font_size so we can scale proportionally as the mouse moves.
+  const resizeStartRef = useRef(null);
+
+  const handleCaptionResizeDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();  // do NOT also trigger the move drag
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const cx = rect.left + (style.text_x ?? 0.5) * rect.width;
+    const cy = rect.top + (style.text_y ?? 0.5) * rect.height;
+    const dx = e.clientX - cx;
+    const dy = e.clientY - cy;
+    resizeStartRef.current = {
+      dist: Math.max(20, Math.hypot(dx, dy)),
+      fontSize: style.font_size || 70,
+    };
+    setDragging("text_resize");
+  };
+
   const handleMouseMove = useCallback(
     (e) => {
       if (!dragging || !canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
+      if (dragging === "text_resize") {
+        // Scale font_size by the ratio of current cursor distance to the
+        // distance at drag start, anchored on the caption center.
+        const s = resizeStartRef.current;
+        if (!s) return;
+        const cx = rect.left + (style.text_x ?? 0.5) * rect.width;
+        const cy = rect.top + (style.text_y ?? 0.5) * rect.height;
+        const d = Math.hypot(e.clientX - cx, e.clientY - cy);
+        const ratio = d / s.dist;
+        const newSize = Math.round(Math.max(20, Math.min(100, s.fontSize * ratio)));
+        setStyle((prev) => ({ ...prev, font_size: newSize }));
+        return;
+      }
       let x = Math.max(0.05, Math.min(0.95, (e.clientX - rect.left) / rect.width));
       let y = Math.max(0.05, Math.min(0.95, (e.clientY - rect.top) / rect.height));
       // Snap to the center guide lines when within ~2.5%.
@@ -2284,10 +2330,13 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
         [`${dragging}_y`]: y,
       }));
     },
-    [dragging]
+    [dragging, style.text_x, style.text_y]
   );
 
-  const handleMouseUp = useCallback(() => setDragging(null), []);
+  const handleMouseUp = useCallback(() => {
+    setDragging(null);
+    resizeStartRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (dragging) {
@@ -2475,19 +2524,59 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                   );
                 })()}
 
-                {/* Draggable caption — movable even while a preview is showing.
-                    Snaps to the center line; gold dashed border when centered. */}
+                {/* Invisible caption hit area — positioned to match where the
+                    real white-box caption is rendered. PIL anchors the caption
+                    box with its TOP at (text_y * H - pad_y), so we use the same
+                    anchor here (translate -50% X, 0 Y) instead of centering.
+                    Hit area expands DOWN from text_y, covering the caption box.
+                    Dashed outline appears only on hover / drag (via the
+                    .draggable-text:hover and .dragging CSS rules). Gold corner
+                    handle = resize. */}
                 {selectedClip && (() => {
                   const centered = Math.abs((style.text_x ?? 0.5) - 0.5) < 0.012;
-                  const overPreview = !!(previewUrl || videoPreviewUrl);
+                  const resizing = dragging === "text_resize";
+                  const fs = style.font_size || 70;
+                  // PIL pad_y shifts the box up by pad_y; mirror that.
+                  const padY = style.caption_box_pad_y ?? 6;
+                  // Rough caption box dims based on font_size — taller estimate
+                  // so the hit area covers the typical 2-3 line caption.
+                  const hitW = Math.max(180, fs * 5);
+                  const hitH = Math.max(70, fs * 1.9);
                   return (
                     <div
                       className={`draggable-text ${dragging === "text" ? "dragging" : ""}`}
-                      style={{ left: `${style.text_x * 100}%`, top: `${style.text_y * 100}%`, transform: "translate(-50%, -50%)", whiteSpace: "nowrap", opacity: overPreview ? 0.85 : 1, border: centered ? "1.5px dashed var(--st-gold)" : undefined, zIndex: 10 }}
+                      style={{
+                        left: `${style.text_x * 100}%`,
+                        top: `calc(${style.text_y * 100}% - ${padY}px)`,
+                        transform: "translate(-50%, 0)",
+                        // Override the class's visible look — transparent hit area
+                        background: "transparent",
+                        padding: 0,
+                        fontSize: 0,
+                        color: "transparent",
+                        // Sized roughly to the real rendered caption
+                        width: `${hitW}px`,
+                        height: `${hitH}px`,
+                        borderColor: centered ? "var(--st-gold)" : undefined,
+                        borderRadius: 8,
+                        zIndex: 10,
+                      }}
                       onMouseDown={handleMouseDown("text")}
-                      title="Arrastrá para mover · se centra solo cerca de la línea"
+                      title="Arrastrá para mover el caption · esquina dorada para agrandar / achicar"
                     >
-                      T caption
+                      {/* Gold corner resize handle — always visible so the user
+                          knows the caption is interactive. */}
+                      <div
+                        onMouseDown={handleCaptionResizeDown}
+                        title="Arrastrá para escalar el caption"
+                        style={{
+                          position: "absolute", right: -7, bottom: -7,
+                          width: 14, height: 14, borderRadius: "50%",
+                          background: "var(--st-gold)", border: "2px solid #15130e",
+                          cursor: "nwse-resize", zIndex: 11,
+                          boxShadow: resizing ? "0 0 0 3px rgba(230,194,112,.35)" : "0 1px 3px rgba(0,0,0,.5)",
+                        }}
+                      />
                     </div>
                   );
                 })()}
@@ -2522,6 +2611,15 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             </button>
             <button onClick={() => selectedClip && setEditorClip(selectedClip)} disabled={!selectedClip} className="st-btn st-btn--ghost" style={{ padding: "7px 12px" }} title="Zoom, posición y trim del clip">
               <ZoomIn size={14} /> Editar encuadre
+            </button>
+            <button
+              onClick={() => selectedClip && setEditingCaption({ id: selectedClip.id, text: selectedClip.viral_caption || "" })}
+              disabled={!selectedClip}
+              className="st-btn st-btn--ghost"
+              style={{ padding: "7px 12px" }}
+              title="Editar el texto del caption · Enter para nueva línea"
+            >
+              <Pencil size={14} /> Editar texto
             </button>
             <button onClick={() => setShowGuides((v) => !v)} className="st-btn st-btn--ghost"
               title={showGuides ? "Ocultar guías de centrado" : "Mostrar guías de centrado"}
@@ -2650,7 +2748,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             {/* Subtítulos */}
             <StSection icon={<Type size={14} />}>Subtítulos</StSection>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: style.subtitle_style !== "none" ? 14 : 8 }}>
-              {[["none", "Ninguno"], ["clean", "Limpio"], ["karaoke", "Karaoke"], ["popup", "Pop-up"], ["highlight", "Highlight"], ["big_center", "Big Center"], ["twoword", "Two-Word"], ["bounce", "Bounce"], ["typewriter", "Typewriter"], ["karaoke_green", "Karaoke Verde"], ["karaoke_blue", "Karaoke Azul"], ["karaoke_pink", "Karaoke Rosa"], ["box_green", "Caja Verde"], ["box_blue", "Caja Azul"], ["neon", "Neón"], ["karaoke_red", "Karaoke Rojo"], ["karaoke_orange", "Karaoke Naranja"], ["karaoke_purple", "Karaoke Morado"], ["box_pink", "Caja Rosa"], ["box_red", "Caja Roja"], ["line_box", "Caja Línea"], ["underline", "Subrayado"], ["bubble", "Burbuja"], ["reveal", "Aparece"], ["stack", "Vertical"], ["hollow", "Contorno"], ["retro", "Retro 3D"]].map(([v, label]) => (
+              {[["none", "Ninguno"], ["standard", "Estándar"], ["clean", "Limpio"], ["karaoke", "Karaoke"], ["popup", "Pop-up"], ["highlight", "Highlight"], ["big_center", "Big Center"], ["twoword", "Two-Word"], ["bounce", "Bounce"], ["typewriter", "Typewriter"], ["karaoke_green", "Karaoke Verde"], ["karaoke_blue", "Karaoke Azul"], ["karaoke_pink", "Karaoke Rosa"], ["box_green", "Caja Verde"], ["box_blue", "Caja Azul"], ["neon", "Neón"], ["karaoke_red", "Karaoke Rojo"], ["karaoke_orange", "Karaoke Naranja"], ["karaoke_purple", "Karaoke Morado"], ["box_pink", "Caja Rosa"], ["box_red", "Caja Roja"], ["line_box", "Caja Línea"], ["underline", "Subrayado"], ["bubble", "Burbuja"], ["reveal", "Aparece"], ["stack", "Vertical"], ["hollow", "Contorno"], ["retro", "Retro 3D"]].map(([v, label]) => (
                 <SubThumb key={v} styleKey={v} label={label} selected={style.subtitle_style === v} onClick={() => setStyle((s) => ({ ...s, subtitle_style: v }))} />
               ))}
             </div>
@@ -2814,6 +2912,85 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             setEditorClip(null);
           }}
         />
+      )}
+
+      {/* Inline caption-text editor — Enter inserts a hard line break (\n)
+          that the PIL renderer respects when laying out the white box. */}
+      {editingCaption && (
+        <div
+          onClick={() => !savingCaption && setEditingCaption(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,.55)",
+            display: "grid", placeItems: "center", zIndex: 100,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 460, background: "var(--st-surface)", border: "1px solid var(--st-line)",
+              borderRadius: 14, padding: 20, boxShadow: "var(--st-shadow-modal)",
+              fontFamily: "var(--st-ui)",
+            }}
+          >
+            <h3 style={{ fontFamily: "var(--st-display)", fontSize: 17, fontWeight: 600, margin: "0 0 4px", color: "var(--st-text)" }}>
+              Editar texto del caption
+            </h3>
+            <p style={{ fontSize: 12, color: "var(--st-faint)", margin: "0 0 12px" }}>
+              Enter = nueva línea · Esc para cancelar
+            </p>
+            <textarea
+              autoFocus
+              value={editingCaption.text}
+              onChange={(e) => setEditingCaption({ ...editingCaption, text: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setEditingCaption(null);
+              }}
+              rows={4}
+              style={{
+                width: "100%", padding: "10px 12px",
+                fontFamily: "var(--st-ui)", fontSize: 14, color: "var(--st-text)",
+                background: "var(--st-alt)", border: "1px solid var(--st-line)",
+                borderRadius: 8, outline: "none", resize: "vertical", minHeight: 80,
+              }}
+              placeholder="Escribí el caption. Apretá Enter para pasar palabras a la línea siguiente."
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button
+                onClick={() => setEditingCaption(null)}
+                disabled={savingCaption}
+                className="st-btn st-btn--ghost"
+                style={{ padding: "7px 14px" }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  if (!editingCaption) return;
+                  setSavingCaption(true);
+                  try {
+                    await api.editCaption(projectId, editingCaption.id, editingCaption.text);
+                    if (onUpdateClip) onUpdateClip(editingCaption.id, { viral_caption: editingCaption.text });
+                    if (selectedClip && selectedClip.id === editingCaption.id) {
+                      setSelectedClip({ ...selectedClip, viral_caption: editingCaption.text });
+                      setPreviewUrl(null);          // force the preview to re-render
+                      setVideoPreviewUrl(null);
+                    }
+                    setEditingCaption(null);
+                  } catch (err) {
+                    alert("No se pudo guardar el caption: " + err.message);
+                  } finally {
+                    setSavingCaption(false);
+                  }
+                }}
+                disabled={savingCaption}
+                className="st-btn st-btn--primary"
+                style={{ padding: "7px 14px" }}
+              >
+                {savingCaption ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -4883,6 +5060,14 @@ function SubThumb({ styleKey, label, selected, onClick }) {
   let body;
   if (styleKey === "none")
     body = <span style={{ fontFamily: "var(--st-ui)", fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,.5)" }}>Sin subs</span>;
+  else if (styleKey === "standard")
+    // Netflix / documentary look — Arial Bold (NOT Arial Black), all caps, thin outline
+    body = <span style={{
+      fontFamily: '"Arial", "Helvetica Neue", "Helvetica", sans-serif',
+      fontWeight: 700, fontSize: 13, color: "#fff",
+      textShadow: "1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000",
+      letterSpacing: "1.5px", textTransform: "uppercase", whiteSpace: "nowrap",
+    }}>YOUR MOTHER DIED</span>;
   else if (_SUB_KARA[styleKey])
     body = <span style={{ ...base, fontSize: 13 }}>are <span style={{ color: _SUB_KARA[styleKey] }}>you</span> ready</span>;
   else if (_SUB_BOX[styleKey])
@@ -5754,6 +5939,7 @@ function EditorMode({ onExit }) {
   ];
   const inspectorTabs = [["frame", "Encuadre"], ["subs", "Subtítulos"], ["overlay", "Imágenes"]];
   const SUB_STYLES = [
+    ["standard", "Estándar"],
     ["clean", "Limpio"], ["karaoke", "Karaoke"], ["popup", "Pop-up"], ["highlight", "Highlight"],
     ["big_center", "Big Center"], ["twoword", "Two-Word"], ["bounce", "Bounce"], ["typewriter", "Typewriter"],
     ["karaoke_green", "Karaoke Verde"], ["karaoke_blue", "Karaoke Azul"], ["karaoke_pink", "Karaoke Rosa"],

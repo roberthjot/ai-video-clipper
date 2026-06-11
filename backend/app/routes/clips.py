@@ -775,13 +775,25 @@ async def reanalyze_clip(project_id: str, clip_id: int):
         # Use the same model the user picked when uploading (consistent quota)
         from google.genai import types as _types
         active_model = getattr(project, 'gemini_model', None) or gemini_service.settings.GEMINI_MODEL
-        print(f"[Reanalyze] clip {clip_id} using model={active_model}")
+        # Inject the creator name as MANDATORY if set on the project, so the
+        # button reliably produces a caption that includes the user-typed name.
+        _creator = (getattr(project, 'creator_name', '') or '').strip()
+        if _creator:
+            _first = _creator.split(',')[0].strip()
+            creator_line = (
+                f'MANDATORY: Include the name "{_first}" in this caption naturally. '
+                f'Do NOT use any other name even if you recognize a different person in the video. '
+                f'Keep the exact capitalization. '
+            )
+        else:
+            creator_line = ''
+        print(f"[Reanalyze] clip {clip_id} model={active_model} creator={_creator!r}")
         response = await asyncio.to_thread(
             gemini_service.client.models.generate_content,
             model=active_model,
             contents=[_types.Content(role="user", parts=[
                 _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
-                _types.Part.from_text(text=prompts.render("reanalyze_clip")),
+                _types.Part.from_text(text=prompts.render("reanalyze_clip", CREATOR_LINE=creator_line)),
             ])],
             config=_types.GenerateContentConfig(temperature=0.5),
         )
@@ -802,6 +814,10 @@ async def reanalyze_clip(project_id: str, clip_id: int):
             if m:
                 text_part, emoji_part = m.group(1) or "", m.group(2) or ""
                 text_part = text_part[:1].upper() + text_part[1:].lower()
+                # Restore the creator name to its proper capitalization
+                # (the lowercase step above would otherwise turn "Jawis" → "jawis").
+                if _creator:
+                    text_part = gemini_service.restore_name_casing(text_part, _creator)
                 new_caption = (text_part + emoji_part).strip()
 
         # Update the clip in memory + re-validate against transcript

@@ -128,23 +128,22 @@ DEFAULTS = {
     },
     "creator_section": {
         "label": "Bloque de nombre del creador",
-        "description": "Se inserta en el prompt principal cuando el usuario indica el nombre del creador/persona.",
+        "description": "Se inserta en el prompt principal cuando el usuario indica el nombre del creador/persona. El nombre dado es la fuente de verdad — Gemini debe usarlo siempre, no intentar identificar a otra persona del video.",
         "tokens": ["{{NAMES_LIST}}"],
         "text": (
             "\n"
-            "    CREATOR NAME RULES (IMPORTANT):\n"
-            "    The person(s) featured in this video: {{NAMES_LIST}}.\n"
-            "    - Weave the name into the caption where it flows MOST naturally — it can be\n"
-            "      at the start, middle, or end, whatever sounds best. Do NOT force it the\n"
-            "      same way every time.\n"
-            "    - If MULTIPLE names are listed, identify who appears in THIS specific clip\n"
-            "      using on-screen text, spoken names, usernames, or context. Use the name\n"
-            "      of the person actually featured in that clip. If you genuinely cannot tell\n"
-            "      who it is, use the most prominent / first-listed name.\n"
-            "    - Use the name in roughly 60-70% of captions, not every single one — variety\n"
-            "      keeps it from looking auto-generated.\n"
-            "    - ALWAYS use the name naturally in the \"description\" field too.\n"
-            "    - Keep the name's exact capitalization as given (e.g. \"Sophie Rain\").\n"
+            "    CREATOR NAME RULES (ABSOLUTELY MANDATORY):\n"
+            "    The creator name is: {{NAMES_LIST}}.\n"
+            "    - You MUST include this exact name in EVERY single viral_caption. No exceptions.\n"
+            "    - Do NOT try to identify a different name from the video, the audio, or on-screen text.\n"
+            "      Even if you recognize someone or see another name on screen, IGNORE that and use the name above.\n"
+            "    - Place the name naturally in the caption — start, middle, or end, whatever flows best.\n"
+            "      Vary the position across clips so it doesn't look repetitive, but the name is ALWAYS present.\n"
+            "    - If multiple names are listed (comma-separated), pick the one that best fits this clip;\n"
+            "      if you can't tell, default to the FIRST name in the list.\n"
+            "    - Use the same name (with its exact capitalization) in the \"description\" field too.\n"
+            "    - In the \"ig_description\" field: use this exact name throughout instead of guessing\n"
+            "      a different creator from the video.\n"
             "    "
         ),
     },
@@ -202,11 +201,12 @@ DEFAULTS = {
     },
     "reanalyze_clip": {
         "label": "Reanalizar un clip (botón 🔄)",
-        "description": "Genera un caption nuevo mirando SOLO ese clip. Lo mejor cuando un caption quedó incompatible con el video.",
-        "tokens": [],
+        "description": "Genera un caption nuevo mirando SOLO ese clip. Lo mejor cuando un caption quedó incompatible con el video. Si el proyecto tiene nombre de creador, lo inyecta como obligatorio.",
+        "tokens": ["{{CREATOR_LINE}}"],
         "text": (
             "Watch this short video clip carefully. "
             "Write a new viral caption that accurately describes what is ACTUALLY happening in this clip. "
+            "{{CREATOR_LINE}}"
             "Rules: English only. Maximum 20 words. Third person only (no I/me/my). "
             "No punctuation except apostrophes. All lowercase except first letter. "
             "End with EXACTLY ONE emoji from this list (and no other): "
