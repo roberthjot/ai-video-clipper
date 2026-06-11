@@ -1605,7 +1605,10 @@ def generate_preview_frame(
         if no_emojis:
             _caption = _EMOJI_RE.sub("", _caption)
             _caption = re.sub(r"\s+", " ", _caption).strip()
-        lines = split_text_into_lines(_caption, max_chars=30, max_lines=10)
+        # Pass the RAW caption (with user-typed \n intact) — create_caption_overlay
+        # does its own pixel-wrap. Avoids the char-based pre-split turning into
+        # spurious hard breaks inside _wrap_px (which respects \n as forced).
+        lines = [_caption] if _caption else []
         pad_x, pad_y = caption_box_pad_x, caption_box_pad_y
         line_gap = 5
         base_y = int(text_y * target_h)
@@ -1818,7 +1821,10 @@ def generate_preview_clip(
         if no_emojis:
             _caption = _EMOJI_RE.sub("", _caption)
             _caption = re.sub(r"\s+", " ", _caption).strip()
-        lines = split_text_into_lines(_caption, max_chars=30, max_lines=10)
+        # Pass the RAW caption (with user-typed \n intact) — create_caption_overlay
+        # does its own pixel-wrap. Avoids the char-based pre-split turning into
+        # spurious hard breaks inside _wrap_px (which respects \n as forced).
+        lines = [_caption] if _caption else []
         pad_x, pad_y = caption_box_pad_x, caption_box_pad_y
         line_gap = 5
         base_y = int(text_y * target_h)

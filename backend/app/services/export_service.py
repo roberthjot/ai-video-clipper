@@ -189,7 +189,10 @@ def export_clip_with_style(
         if no_emojis:
             _caption = video_service._EMOJI_RE.sub("", _caption)
             _caption = _re.sub(r"\s+", " ", _caption).strip()
-        lines = video_service.split_text_into_lines(_caption, max_chars=30, max_lines=10)
+        # Pass the RAW caption (with user-typed \n intact) — create_caption_overlay
+        # does its own pixel-wrap. The char-based pre-split would turn into spurious
+        # hard breaks inside _wrap_px (which respects \n as forced).
+        lines = [_caption] if _caption else []
         pad_x = getattr(style, "caption_box_pad_x", 14)
         pad_y = getattr(style, "caption_box_pad_y", 14)
         line_gap = 5

@@ -2,6 +2,73 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🐛 Fix — caption wrap respects ONLY user-typed line breaks
+
+A regression introduced with the `\n` support was making captions wrap to two
+lines even when the text would have fit on one. Two coordinated bugs / UX
+issues are fixed in one shot.
+
+### The regression
+`split_text_into_lines()` does a coarse char-based pre-split (`max_chars=30`)
+before handing the result to `create_caption_overlay()`. After the `\n`
+support landed, `create_caption_overlay` was joining those pre-split lines
+with `\n` and `_wrap_px()` was treating ALL `\n` as forced hard breaks —
+including the artificial ones the char-splitter produced. Net effect: a
+short caption that should have fit on one line (e.g. after the user shrunk
+the font with the resize handle) was permanently glued to two lines.
+
+### The fix — bypass the char-pre-split for the caption render path
+The three callers that feed `create_caption_overlay` now pass the raw
+caption (with user-typed `\n` intact) as a single-element list instead of
+pre-splitting it:
+- `video_service.py` × 2 (the main TikTok preview + the split-screen path)
+- `export_service.py` × 1 (final export)
+
+`create_caption_overlay`'s `_wrap_px` already does its own pixel-perfect
+wrap and respects `\n` as forced breaks. Without the char pre-split feeding
+it spurious breaks, the two behaviours now coexist cleanly:
+
+- **Caption without `\n`** → pixel-wrap picks 1 / 2 / 3 lines based on
+  font_size and width. Shrink with the corner handle → fits on 1 line.
+- **Caption with user `\n`** (Enter in the modal) → manual break is
+  respected verbatim, regardless of font size.
+
+### Smoke-tested cases
+
+| Caption | font_size | Output |
+|---|---|---|
+| `"He is owning the screen right now"` | 70 | 2 lines (didn't fit) |
+| `"He is owning the screen right now"` | 40 | **1 line** ✓ |
+| `"He really came through\nwith the energy"` | 70 | 2 lines (user break) ✓ |
+
+`split_text_into_lines()` is still used by the IG-frame path
+(`create_instagram_frame_bg`, `max_chars=28`) which has its own renderer —
+unrelated to the white caption box.
+
+## 🔧 Visual Editor — tighter caption hit area
+
+The invisible drag/resize hit area was sized with fixed pixel multipliers
+(`font_size * 5` wide), which left a giant dashed rectangle extending well
+past the real white-box caption in the preview.
+
+Replaced with an estimate computed from the actual caption text + font_size,
+expressed as **% of the 1080×1920 canvas** (not absolute pixels) so it
+scales with the preview container:
+
+```js
+charW         = font_size * 0.55                    // avg Arial Bold char width
+maxLineChars  = (1080 - 80 - 32) / charW            // chars per line at canvas scale
+totalLines    = sum(ceil(chars_block / maxLineChars))   // walks each \n block
+widestChars   = max(min(chars_block, maxLineChars))     // widest line
+boxW          = min(canvas_w - 80, widestChars*charW + pad_x*2)
+boxH          = totalLines * font_size * 1.3 + pad_y*2
+hitW%, hitH%  = (box / canvas) * 100
+```
+
+Also walks `\n`-separated blocks in the caption so a multi-line caption
+(user pressed Enter) is sized accordingly. The dashed outline now hugs the
+real white box across the full range of font sizes and caption lengths.
+
 ## ✏️ Caption editing — inline text editor + manual line breaks
 
 Faster path to edit a caption from the Visual Editor (Paso 3), plus support for

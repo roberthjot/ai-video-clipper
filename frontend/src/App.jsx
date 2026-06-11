@@ -2524,11 +2524,14 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                   );
                 })()}
 
-                {/* Invisible caption hit area — positioned to match where the
-                    real white-box caption is rendered. PIL anchors the caption
-                    box with its TOP at (text_y * H - pad_y), so we use the same
-                    anchor here (translate -50% X, 0 Y) instead of centering.
-                    Hit area expands DOWN from text_y, covering the caption box.
+                {/* Invisible caption hit area — sized + positioned to match
+                    the REAL white-box caption rendered by PIL. Dimensions are
+                    estimated from the actual caption text + font_size and
+                    expressed as % of the 1080×1920 canvas so the outline
+                    scales naturally with the preview (no absolute pixels).
+                    PIL anchors the caption box with its TOP at
+                    (text_y * H - pad_y), so we mirror that with
+                    transform: translate(-50%, 0) and top adjusted by pad_y.
                     Dashed outline appears only on hover / drag (via the
                     .draggable-text:hover and .dragging CSS rules). Gold corner
                     handle = resize. */}
@@ -2536,27 +2539,46 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                   const centered = Math.abs((style.text_x ?? 0.5) - 0.5) < 0.012;
                   const resizing = dragging === "text_resize";
                   const fs = style.font_size || 70;
-                  // PIL pad_y shifts the box up by pad_y; mirror that.
+                  const padX = style.caption_box_pad_x ?? 30;
                   const padY = style.caption_box_pad_y ?? 6;
-                  // Rough caption box dims based on font_size — taller estimate
-                  // so the hit area covers the typical 2-3 line caption.
-                  const hitW = Math.max(180, fs * 5);
-                  const hitH = Math.max(70, fs * 1.9);
+                  const caption = selectedClip.viral_caption || "";
+
+                  // Estimate the rendered box in CANVAS pixels (1080×1920).
+                  const CANVAS_W = 1080, CANVAS_H = 1920;
+                  const SIDE = 40;
+                  const charW = fs * 0.55;                       // avg Arial Bold char width at fs
+                  const maxLineChars = Math.max(8, Math.floor((CANVAS_W - SIDE * 2 - 32) / charW));
+                  let totalLines = 0;
+                  let widestChars = 0;
+                  for (const block of caption.split("\n")) {
+                    const chars = block.trim().length;
+                    if (chars === 0) continue;
+                    const linesInBlock = Math.max(1, Math.ceil(chars / maxLineChars));
+                    totalLines += linesInBlock;
+                    widestChars = Math.max(widestChars, Math.min(chars, maxLineChars));
+                  }
+                  if (totalLines === 0) { totalLines = 1; widestChars = 12; }  // empty caption fallback
+
+                  const boxWcanvas = Math.min(CANVAS_W - SIDE * 2, widestChars * charW + padX * 2);
+                  const boxHcanvas = totalLines * fs * 1.3 + padY * 2;
+                  const hitWPct = (boxWcanvas / CANVAS_W) * 100;
+                  const hitHPct = (boxHcanvas / CANVAS_H) * 100;
+                  const padYPct = (padY / CANVAS_H) * 100;
+
                   return (
                     <div
                       className={`draggable-text ${dragging === "text" ? "dragging" : ""}`}
                       style={{
                         left: `${style.text_x * 100}%`,
-                        top: `calc(${style.text_y * 100}% - ${padY}px)`,
+                        top: `calc(${style.text_y * 100}% - ${padYPct}%)`,
                         transform: "translate(-50%, 0)",
-                        // Override the class's visible look — transparent hit area
                         background: "transparent",
                         padding: 0,
                         fontSize: 0,
                         color: "transparent",
-                        // Sized roughly to the real rendered caption
-                        width: `${hitW}px`,
-                        height: `${hitH}px`,
+                        // Sized as % of the canvas so it scales with the preview
+                        width: `${hitWPct}%`,
+                        height: `${hitHPct}%`,
                         borderColor: centered ? "var(--st-gold)" : undefined,
                         borderRadius: 8,
                         zIndex: 10,
@@ -2564,8 +2586,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                       onMouseDown={handleMouseDown("text")}
                       title="Arrastrá para mover el caption · esquina dorada para agrandar / achicar"
                     >
-                      {/* Gold corner resize handle — always visible so the user
-                          knows the caption is interactive. */}
+                      {/* Gold corner resize handle */}
                       <div
                         onMouseDown={handleCaptionResizeDown}
                         title="Arrastrá para escalar el caption"
