@@ -149,6 +149,8 @@ def export_clip_with_style(
         base = f"[0:v]scale={W}:{target_height}:force_original_aspect_ratio=increase,crop={W}:{target_height}"
         if bg_style == "black":
             return base + ",colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0"
+        if bg_style == "white":
+            return base + ",drawbox=x=0:y=0:w=iw:h=ih:color=white@1.0:t=fill"
         return base + ",boxblur=12:2"
 
     # Overlay position: keyframes mode → (0,0) since fg is already canvas-
@@ -380,6 +382,20 @@ def export_clip_with_style(
                 os.remove(ass_subtitle_path_extra)
             except:
                 pass
+
+    # Background music — mixed in as a fast post-step (video copied, audio
+    # re-mixed) so it stays aligned with the already-trimmed clip.
+    music_path = getattr(style, "music_path", None)
+    if music_path and os.path.exists(music_path):
+        try:
+            video_service.mix_music_track(
+                output_path, music_path,
+                music_volume=getattr(style, "music_volume", 0.8),
+                original_volume=getattr(style, "original_volume", 1.0),
+            )
+            print(f"[Export] Clip {clip.id}: mixed music {os.path.basename(music_path)}")
+        except Exception as e:
+            print(f"[Export] Clip {clip.id}: music mix failed (kept original audio): {e}")
 
     return output_path
 

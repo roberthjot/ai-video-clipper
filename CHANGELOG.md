@@ -2,6 +2,148 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🎬 Editor — xfade transitions between segments
+
+Transitions can now be configured at every cut point in the timeline editor and
+are rendered for real by FFmpeg `xfade` on export, plus simulated live in the
+preview so the user can see them without exporting.
+
+### Model & save path
+- `Segment` (`backend/app/models/clip.py`) gained `transition_in: str = "cut"`
+  and `transition_duration: float = 0.4`. `"cut"` / `""` / `"none"` mean no
+  transition (default, hard cut). Any other value is an FFmpeg xfade name from
+  the whitelist (`fade`, `fadeblack`, `fadewhite`, `dissolve`, `pixelize`,
+  `radial`, `slide{left,right,up,down}`, `wipe{left,right,up,down}`,
+  `circleopen`, `circleclose`, `smoothleft`, `smoothright`, `zoomin`).
+- `SegmentInput` in `routes/editor.py` carries the new fields and the
+  `PUT /api/editor/{id}/segments` endpoint persists them. `_norm_segments` in
+  `video_service.py` propagates them through all internal paths.
+- `transition_duration` is clamped at render time to half of each adjacent
+  segment's duration so a transition never exceeds the clip length.
+
+### Rendering — pairwise xfade chain
+- New `_has_xfade()` helper picks the render path: cut-only segment lists still
+  use the fast `concat` filter (and the stream-copy single-segment shortcut);
+  any non-cut transition switches the whole chain to a pairwise xfade graph.
+- xfade chain: every segment is first normalised to canvas `W×H`, `yuv420p`,
+  30 fps, audio 44.1 kHz so xfade accepts it. Then segments are crossed
+  pairwise: `xfade=transition=…:duration=T:offset=O` for video and
+  `acrossfade=d=T:c1=tri:c2=tri` for audio, with the cumulative offset
+  tracked by the new `_segment_offsets()` helper.
+- `total_output_duration()` exposed for callers (used by `routes/editor.py`'s
+  `clip.duration` so the saved duration reflects the real xfade overlap).
+- `remap_transcript_to_segments` rewritten on top of `_segment_offsets` so
+  subtitle word timestamps line up with the actual output time after overlap.
+
+### UI — picker + live preview overlay
+- New `TRANSITIONS` catalog (16 effects + "cut") and `TransitionPicker`
+  popover: 4-column grid + duration slider (0.10–2.00s).
+- In `TimelineEditor`, a small circular handle is rendered at every segment
+  boundary: `+` when no transition is set, `✦` in the accent color when one is.
+  Click opens the picker; saving is automatic via the existing debounced
+  `useEffect` on segments → `api.saveEditorSegments`.
+- Live preview overlay (`buildTransitionFx`): CSS approximation of every xfade
+  for the in-editor `<video>` preview so the user sees something happening
+  during the transition window. Fades use opacity tints, dissolve uses backdrop
+  blur, slides/wipes use animated `clip-path`, iris uses `circle()`, radial
+  uses `conic-gradient`, zoomin uses `transform: scale`. A gold badge
+  `▸ {type} · {dur}s` shows in the top-right of the preview while a transition
+  is active. The FFmpeg xfade on export is pixel-accurate; the CSS preview is
+  an approximation (single `<video>` element can't actually crossfade two
+  streams) — same trade-off CapCut makes.
+
+## 👤 Creator name editable from the Clips screen
+
+The creator name set at upload time is now editable from the Clips screen so
+the user can adjust it before clicking Re-analizar without going back to step 1.
+
+- New `PATCH /api/projects/{id}/creator` (in `routes/upload.py`) updates
+  `project.creator_name` in the in-memory store. `routes/clips.py` already
+  passes `creator_name` to Gemini on both analyze and reanalyze, so the new
+  value is picked up automatically on the next Re-analizar click.
+- API client (`services/api.js`): new `getProject()` (used to load the current
+  value on mount) and `updateProjectCreator()`.
+- `ClipsStep` (`App.jsx`): `creatorName` state loaded from the project on
+  mount, rendered inside the batch action bar (the strip that appears when one
+  or more clips are selected — same row as Re-analizar). Saves on blur or
+  Enter; flashes `guardando…` → `✓ guardado` for 1.5s after success.
+
+## 📝 Subtitle catalog — 26 styles total
+
+Three rounds of additions on top of the original clean / karaoke / popup /
+highlight / big_center / twoword / bounce / typewriter set (`subtitle_service.py`
++ `SubThumb` grid in `App.jsx`):
+
+- **Karaoke color variants** (active word highlighted in colour):
+  `karaoke_green`, `karaoke_blue`, `karaoke_pink`, `karaoke_red`,
+  `karaoke_orange`, `karaoke_purple`.
+- **Highlight-box color variants** (single active word in a coloured pill):
+  `box_green`, `box_blue`, `box_pink`, `box_red`.
+- **Effects** (different formats, not just different colors): `neon` (cyan
+  glow), `underline` (active word underlined + scaled), `line_box` (solid
+  black pill behind the whole line via `BorderStyle=3`), `bubble` (black text
+  in a white pill), `reveal` (words appear one by one and accumulate with
+  pop), `stack` (words stacked vertically, active in yellow), `hollow`
+  (transparent fill + thick white outline), `retro` (magenta offset shadow).
+- `_ass_header` parametrised with `border_style` / `shadow` to support
+  filled-box vs outline styles from the same builder.
+- Visual picker uses CSS-faithful `SubThumb` mini-previews (Arial Black,
+  outline via `text-shadow`, mapped colour palettes for the karaoke / box
+  families).
+
+## 🎵 Editor — background music with waveform + mix-on-export
+
+A real second audio track in the timeline editor, mirroring CapCut's audio row.
+
+- Backend: `StyleConfig.music_path / music_volume(0.8) / original_volume(1.0)`.
+  `video_service.mix_music_track()` is a post-export step: copies the video
+  stream (`-c:v copy`) and re-mixes the audio with `volume → amix` (handles
+  videos with no audio stream via the `_has_audio_stream()` probe).
+  `export_clip_with_style` calls it automatically when `style.music_path` is
+  set. New routes: `POST /api/editor/{id}/music` (upload) and
+  `GET /api/editor/{id}/music/{file}` (preview playback).
+- Waveform: `video_service.get_audio_peaks()` decodes the upload to PCM mono
+  8 kHz via FFmpeg and returns 320 normalised peaks. The upload response
+  ships the peaks so the UI can draw the wave immediately.
+- UI: the audio row is rendered **inside the `TimelineEditor`**, full-width
+  underneath the thumbnail row (not a separate floating strip), with the
+  waveform, file name, **Música** and **Original** volume sliders (0–2x),
+  and an X to remove. An `<audio>` element is kept in sync with the
+  playhead. Preview is capped at 1x by browser policy; the >1x boost only
+  takes effect on export.
+
+## 🍿 Meme Generator — per-item Retry + per-batch model picker
+
+- **Retry**: `_process_batch` refactored into a per-item function
+  `_process_one_item(...)`; the batch now stores `params + video_paths +
+  filenames` so a single failed item can be relaunched in isolation. New
+  endpoint `POST /api/meme/retry/{batch_id}/{index}`. UI: "Reintentar"
+  button on every item card (in the error block, the ready row, and the
+  processing row in case it hangs).
+- **Model picker**: MemeStep now hosts the same `ModelSelector` as Upload /
+  Analyzer, with Check-modelos health. The chosen model is sent on
+  `POST /api/meme/process` as `gemini_model` (FormData). Backend uses a
+  thread-local override (`_current_model[thread_id]`) resolved via
+  `_resolve_model()` so each batch threads its own model through the five
+  `client.models.generate_content` call sites without changing the global
+  default.
+
+## 🛠 Editor — backgrounds, visual filter, undo/redo, transcript shortcuts
+
+- **Background style** (`bgStyle`): `blur` (default, current) / `black` /
+  `white`. Wired through `_bg()` in `video_service` + `export_service` so
+  the canvas behind the foreground video can be a solid colour instead of
+  blur. UI selector lives in the editor's "Encuadre" panel.
+- **Visual filter** UI: the cinematic / warm / vivid / moody / bw chain
+  already existed in the backend (`get_visual_filter_chain`); the editor
+  now exposes it as a "Filtro" selector with a live CSS approximation
+  (`VF_CSS`) so the preview reflects the export look.
+- **Undo / redo**: snapshots the entire editable document (segments,
+  bgStyle, visualFilter, aspectRatio, music, subs, overlays, per-clip
+  transform + keyframes) into a `past / future` stack with a 450 ms
+  debounce. Toolbar buttons (Undo2 / Redo2) + keyboard shortcuts
+  (Ctrl/Cmd+Z, Ctrl+Shift+Z, Ctrl+Y); ignored when typing in inputs.
+
 ## 💬 CapCut-style caption box + longer captions
 
 Reworked `video_service.create_caption_overlay` from a plain rounded rectangle

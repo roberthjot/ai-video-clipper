@@ -19,6 +19,14 @@ class Segment(BaseModel):
     type: str = "video"                # "video" | "image"
     image_path: Optional[str] = None   # source image when type == "image"
     duration: float = 0.0              # image clip length in output seconds
+    # Transition INTO this segment from the previous one. The first segment's
+    # transition_in is ignored (nothing to transition from). "cut" / "" / "none"
+    # = hard cut (default, current behaviour). Any other value is an FFmpeg
+    # xfade transition name: fade, fadeblack, fadewhite, slideleft, slideright,
+    # slideup, slidedown, circleopen, circleclose, dissolve, pixelize, radial,
+    # wipeleft, wiperight, zoomin, smoothleft, smoothright, ...
+    transition_in: str = "cut"
+    transition_duration: float = 0.4   # seconds (clamped to half of both neighbours at render)
 
 
 class ImageOverlay(BaseModel):
@@ -162,6 +170,11 @@ class StyleConfig(BaseModel):
 
     # Background style behind the video: "blur" (current default) or "black" (solid)
     background_style: str = "blur"
+
+    # Background music (editor audio track). Mixed in as a post-step on export.
+    music_path: str | None = None       # server path to the uploaded audio file
+    music_volume: float = 0.8           # 0..2 — music track gain
+    original_volume: float = 1.0        # 0..2 — original video audio gain
 
     # Master toggle: skip caption + burned-in subtitles entirely (clean video)
     no_text: bool = False

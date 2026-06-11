@@ -46,18 +46,50 @@ def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920, size_scale
     size_scale multiplies the base font_size (0.6 - 1.6 reasonable range).
     y_offset is a -0.5..+0.5 additive shift relative to the style's default
     marginV (positive = up, negative = down). 0.0 = unchanged."""
+    border_style = 1   # 1 = outline, 3 = opaque box behind the text
+    shadow = 2
     if style == "popup":
         font_size = 110
         outline = 8
         marginV = int(video_h * 0.45)
-    elif style == "karaoke":
+    elif style in ("karaoke", "karaoke_green", "karaoke_blue", "karaoke_pink",
+                   "karaoke_red", "karaoke_orange", "karaoke_purple", "underline"):
         font_size = 80
         outline = 6
         marginV = int(video_h * 0.30)
-    elif style == "highlight":
+    elif style in ("highlight", "box_green", "box_blue", "box_pink", "box_red"):
         font_size = 78
         outline = 6
         marginV = int(video_h * 0.30)
+    elif style == "line_box":
+        font_size = 74
+        outline = 6            # with BorderStyle=3 this becomes the box padding
+        marginV = int(video_h * 0.30)
+        border_style = 3
+        shadow = 0
+    elif style == "bubble":
+        font_size = 70
+        outline = 8            # white box padding (BorderStyle=3)
+        marginV = int(video_h * 0.30)
+        border_style = 3
+        shadow = 0
+    elif style == "reveal":
+        font_size = 92
+        outline = 7
+        marginV = int(video_h * 0.40)
+    elif style == "stack":
+        font_size = 90
+        outline = 8
+        marginV = int(video_h * 0.42)
+    elif style == "hollow":
+        font_size = 88
+        outline = 7
+        marginV = int(video_h * 0.30)
+    elif style == "retro":
+        font_size = 95
+        outline = 6
+        marginV = int(video_h * 0.35)
+        shadow = 7
     elif style == "big_center":
         font_size = 150
         outline = 10
@@ -102,7 +134,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,{font_size},{WHITE},{YELLOW},{BLACK_OUTLINE},{BLACK_BG},-1,0,0,0,100,100,0,0,1,{outline},2,2,40,40,{marginV},1
+Style: Default,Arial Black,{font_size},{WHITE},{YELLOW},{BLACK_OUTLINE},{BLACK_BG},-1,0,0,0,100,100,0,0,{border_style},{outline},{shadow},2,40,40,{marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -349,6 +381,207 @@ def _generate_typewriter(words: list) -> str:
     return "\n".join(events)
 
 
+def _gen_karaoke_color(words: list, color: str) -> str:
+    """Karaoke (4 words/group) with the active word in `color` (ASS &HBBGGRR&)."""
+    WORDS_PER_GROUP = 4
+    events = []
+    for gi in range(0, len(words), WORDS_PER_GROUP):
+        group = words[gi:gi + WORDS_PER_GROUP]
+        if not group:
+            continue
+        for idx, current in enumerate(group):
+            seg_start = current["start"]
+            seg_end = group[idx + 1]["start"] if idx < len(group) - 1 else current["end"]
+            if seg_end <= seg_start:
+                continue
+            parts = []
+            for j, w in enumerate(group):
+                txt = _escape_ass_text(w["word"].upper())
+                if j == idx:
+                    parts.append(f"{{\\c{color}\\fscx112\\fscy112}}{txt}{{\\r}}")
+                else:
+                    parts.append(txt)
+            events.append(
+                f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+                f"Default,,0,0,0,,{' '.join(parts)}"
+            )
+    return "\n".join(events)
+
+
+def _gen_box_color(words: list, box_color: str, text_color: str) -> str:
+    """Highlight-box (4 words/group): the active word painted `text_color` inside
+    a thick `box_color` outline (simulated box). Colors are ASS &HBBGGRR&."""
+    WORDS_PER_GROUP = 4
+    events = []
+    for gi in range(0, len(words), WORDS_PER_GROUP):
+        group = words[gi:gi + WORDS_PER_GROUP]
+        if not group:
+            continue
+        for idx, current in enumerate(group):
+            seg_start = current["start"]
+            seg_end = group[idx + 1]["start"] if idx < len(group) - 1 else current["end"]
+            if seg_end <= seg_start:
+                continue
+            parts = []
+            for j, w in enumerate(group):
+                txt = _escape_ass_text(w["word"].upper())
+                if j == idx:
+                    parts.append(f"{{\\1c{text_color}\\3c{box_color}\\bord12}}{txt}{{\\r}}")
+                else:
+                    parts.append(txt)
+            events.append(
+                f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+                f"Default,,0,0,0,,{' '.join(parts)}"
+            )
+    return "\n".join(events)
+
+
+def _generate_neon(words: list) -> str:
+    """Clean grouping (3-4 words) with a glowing cyan neon outline."""
+    MAX_WORDS = 4
+    NEON = "&HFFFF00&"   # cyan (ASS BBGGRR)
+    events = []
+    for i in range(0, len(words), MAX_WORDS):
+        chunk = words[i:i + MAX_WORDS]
+        if not chunk:
+            continue
+        text = " ".join(_escape_ass_text(c["word"].upper()) for c in chunk)
+        styled = f"{{\\3c{NEON}\\4c{NEON}\\bord5\\shad4}}{text}"
+        events.append(
+            f"Dialogue: 0,{_format_time(chunk[0]['start'])},{_format_time(chunk[-1]['end'])},"
+            f"Default,,0,0,0,,{styled}"
+        )
+    return "\n".join(events)
+
+
+def _generate_underline(words: list) -> str:
+    """Karaoke grouping; the active word is underlined (clean decoration look)."""
+    WORDS_PER_GROUP = 4
+    events = []
+    for gi in range(0, len(words), WORDS_PER_GROUP):
+        group = words[gi:gi + WORDS_PER_GROUP]
+        if not group:
+            continue
+        for idx, current in enumerate(group):
+            seg_start = current["start"]
+            seg_end = group[idx + 1]["start"] if idx < len(group) - 1 else current["end"]
+            if seg_end <= seg_start:
+                continue
+            parts = []
+            for j, w in enumerate(group):
+                txt = _escape_ass_text(w["word"].upper())
+                parts.append(f"{{\\u1\\fscx108\\fscy108}}{txt}{{\\r}}" if j == idx else txt)
+            events.append(
+                f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+                f"Default,,0,0,0,,{' '.join(parts)}"
+            )
+    return "\n".join(events)
+
+
+def _generate_bubble(words: list) -> str:
+    """Classic TikTok caption: black text inside a solid WHITE box (per line)."""
+    MAX_WORDS = 4
+    events = []
+    for i in range(0, len(words), MAX_WORDS):
+        chunk = words[i:i + MAX_WORDS]
+        if not chunk:
+            continue
+        text = " ".join(_escape_ass_text(c["word"].upper()) for c in chunk)
+        styled = f"{{\\1c&H000000&\\3c&HFFFFFF&}}{text}"
+        events.append(
+            f"Dialogue: 0,{_format_time(chunk[0]['start'])},{_format_time(chunk[-1]['end'])},"
+            f"Default,,0,0,0,,{styled}"
+        )
+    return "\n".join(events)
+
+
+def _generate_reveal(words: list) -> str:
+    """Words appear one at a time and ACCUMULATE (build up the phrase), the
+    newest word popping in. Resets every 4 words."""
+    WORDS_PER_GROUP = 4
+    events = []
+    for gi in range(0, len(words), WORDS_PER_GROUP):
+        group = words[gi:gi + WORDS_PER_GROUP]
+        if not group:
+            continue
+        for idx, current in enumerate(group):
+            seg_start = current["start"]
+            seg_end = group[idx + 1]["start"] if idx < len(group) - 1 else current["end"]
+            if seg_end <= seg_start:
+                continue
+            parts = []
+            for j in range(idx + 1):
+                txt = _escape_ass_text(group[j]["word"].upper())
+                if j == idx:
+                    parts.append(f"{{\\fad(40,0)\\fscx70\\fscy70\\t(0,110,\\fscx106\\fscy106)\\t(110,170,\\fscx100\\fscy100)}}{txt}{{\\r}}")
+                else:
+                    parts.append(txt)
+            events.append(
+                f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+                f"Default,,0,0,0,,{' '.join(parts)}"
+            )
+    return "\n".join(events)
+
+
+def _generate_stack(words: list) -> str:
+    """Words STACKED vertically (one per line), active word highlighted yellow."""
+    WORDS_PER_GROUP = 3
+    events = []
+    for gi in range(0, len(words), WORDS_PER_GROUP):
+        group = words[gi:gi + WORDS_PER_GROUP]
+        if not group:
+            continue
+        for idx, current in enumerate(group):
+            seg_start = current["start"]
+            seg_end = group[idx + 1]["start"] if idx < len(group) - 1 else current["end"]
+            if seg_end <= seg_start:
+                continue
+            parts = []
+            for j, w in enumerate(group):
+                txt = _escape_ass_text(w["word"].upper())
+                parts.append(f"{{\\c{YELLOW}\\fscx114\\fscy114}}{txt}{{\\r}}" if j == idx else txt)
+            line = "\\N".join(parts)
+            events.append(
+                f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+                f"Default,,0,0,0,,{line}"
+            )
+    return "\n".join(events)
+
+
+def _generate_hollow(words: list) -> str:
+    """Hollow / outline-only text (transparent fill + thick outline)."""
+    MAX_WORDS = 4
+    events = []
+    for i in range(0, len(words), MAX_WORDS):
+        chunk = words[i:i + MAX_WORDS]
+        if not chunk:
+            continue
+        text = " ".join(_escape_ass_text(c["word"].upper()) for c in chunk)
+        styled = f"{{\\1a&HFF&\\bord7}}{text}"
+        events.append(
+            f"Dialogue: 0,{_format_time(chunk[0]['start'])},{_format_time(chunk[-1]['end'])},"
+            f"Default,,0,0,0,,{styled}"
+        )
+    return "\n".join(events)
+
+
+def _generate_retro(words: list) -> str:
+    """Retro 3D look: big offset magenta drop shadow under white text."""
+    MAX_WORDS = 4
+    events = []
+    for i in range(0, len(words), MAX_WORDS):
+        chunk = words[i:i + MAX_WORDS]
+        if not chunk:
+            continue
+        text = " ".join(_escape_ass_text(c["word"].upper()) for c in chunk)
+        styled = f"{{\\4c&HFF00FF&\\shad7}}{text}"
+        events.append(
+            f"Dialogue: 0,{_format_time(chunk[0]['start'])},{_format_time(chunk[-1]['end'])},"
+            f"Default,,0,0,0,,{styled}"
+        )
+    return "\n".join(events)
+
+
 def generate_ass_for_clip(
     transcript: dict,
     clip_start: float,
@@ -406,6 +639,42 @@ def generate_ass_for_clip(
         body = _generate_bounce(clip_words)
     elif style == "typewriter":
         body = _generate_typewriter(clip_words)
+    elif style == "karaoke_green":
+        body = _gen_karaoke_color(clip_words, "&H00FF00&")
+    elif style == "karaoke_blue":
+        body = _gen_karaoke_color(clip_words, "&HFFFF00&")
+    elif style == "karaoke_pink":
+        body = _gen_karaoke_color(clip_words, "&HFF00FF&")
+    elif style == "box_green":
+        body = _gen_box_color(clip_words, "&H00FF00&", "&H000000&")
+    elif style == "box_blue":
+        body = _gen_box_color(clip_words, "&HFF0000&", "&HFFFFFF&")
+    elif style == "neon":
+        body = _generate_neon(clip_words)
+    elif style == "karaoke_red":
+        body = _gen_karaoke_color(clip_words, "&H0000FF&")
+    elif style == "karaoke_orange":
+        body = _gen_karaoke_color(clip_words, "&H00A5FF&")
+    elif style == "karaoke_purple":
+        body = _gen_karaoke_color(clip_words, "&HF020A0&")
+    elif style == "box_pink":
+        body = _gen_box_color(clip_words, "&HB469FF&", "&H000000&")
+    elif style == "box_red":
+        body = _gen_box_color(clip_words, "&H0000FF&", "&HFFFFFF&")
+    elif style == "underline":
+        body = _generate_underline(clip_words)
+    elif style == "line_box":
+        body = _generate_clean(clip_words)
+    elif style == "bubble":
+        body = _generate_bubble(clip_words)
+    elif style == "reveal":
+        body = _generate_reveal(clip_words)
+    elif style == "stack":
+        body = _generate_stack(clip_words)
+    elif style == "hollow":
+        body = _generate_hollow(clip_words)
+    elif style == "retro":
+        body = _generate_retro(clip_words)
     else:  # clean (default)
         body = _generate_clean(clip_words)
 

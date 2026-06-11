@@ -74,6 +74,23 @@ export async function updateProjectModel(projectId, geminiModel) {
     return res.json();
 }
 
+export async function getProject(projectId) {
+    const res = await fetch(`${API_BASE}/projects/${projectId}`);
+    if (!res.ok) throw new Error("Failed to get project");
+    return res.json();
+}
+
+export async function updateProjectCreator(projectId, creatorName) {
+    const fd = new FormData();
+    fd.append("creator_name", creatorName || "");
+    const res = await fetch(`${API_BASE}/projects/${projectId}/creator`, {
+        method: "PATCH",
+        body: fd,
+    });
+    if (!res.ok) throw new Error("Failed to update creator");
+    return res.json();
+}
+
 export async function checkModelHealth(models) {
     const res = await fetch(`${API_BASE}/clips/model-health`, {
         method: "POST",
@@ -345,7 +362,7 @@ export function getVideoFrameUrl(file) {
     });
 }
 
-export function processMemes(files, bgColor, textY, videoScale, onProgress, contentType = "meme", cropTopPct = 0, cropBottomPct = 0, cropLeftPct = 0, cropRightPct = 0) {
+export function processMemes(files, bgColor, textY, videoScale, onProgress, contentType = "meme", cropTopPct = 0, cropBottomPct = 0, cropLeftPct = 0, cropRightPct = 0, geminiModel = "") {
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append("bg_color", bgColor);
@@ -356,6 +373,7 @@ export function processMemes(files, bgColor, textY, videoScale, onProgress, cont
         formData.append("crop_bottom_pct", cropBottomPct);
         formData.append("crop_left_pct", cropLeftPct);
         formData.append("crop_right_pct", cropRightPct);
+        if (geminiModel) formData.append("gemini_model", geminiModel);
         for (const file of files) {
             formData.append("videos", file);
         }
@@ -391,6 +409,12 @@ export async function getMemeStatus(batchId) {
 
 export function getMemeDownloadUrl(batchId, index, bust) {
     return `${API_BASE}/meme/download/${batchId}/${index}${bust ? `?t=${bust}` : ""}`;
+}
+
+export async function retryMeme(batchId, index) {
+    const res = await fetch(`${API_BASE}/meme/retry/${batchId}/${index}`, { method: "POST" });
+    if (!res.ok) throw new Error("No se pudo reintentar");
+    return res.json();
 }
 
 export function getCropPreviewUrl(batchId, index, cropTopPct, cropBottomPct, cropLeftPct = 0, cropRightPct = 0) {
@@ -513,6 +537,23 @@ export async function uploadOverlayImage(projectId, file) {
     const data = await res.json();
     const origin = API_BASE.replace(/\/api$/, "");
     data.url = origin + data.url;  // absolute URL for <img>
+    return data;
+}
+
+export async function uploadEditorMusic(projectId, file) {
+    const formData = new FormData();
+    formData.append("audio", file);
+    const res = await fetch(`${API_BASE}/editor/${projectId}/music`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Music upload failed");
+    }
+    const data = await res.json();
+    const origin = API_BASE.replace(/\/api$/, "");
+    data.url = origin + data.url;  // absolute URL for <audio>
     return data;
 }
 

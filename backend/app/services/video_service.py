@@ -85,13 +85,14 @@ def _atempo_chain(speed: float) -> str:
 
 def _norm_segments(segments: list) -> list:
     """Normalise mixed input (tuples or dicts) into a list of dicts with
-    start/end/speed/type/image_path/duration."""
+    start/end/speed/type/image_path/duration/transition_in/transition_duration."""
     out = []
     for seg in segments:
         if isinstance(seg, (tuple, list)):
             s, e = float(seg[0]), float(seg[1])
             sp = float(seg[2]) if len(seg) > 2 else 1.0
-            out.append({"start": s, "end": e, "speed": sp, "type": "video"})
+            out.append({"start": s, "end": e, "speed": sp, "type": "video",
+                        "transition_in": "cut", "transition_duration": 0.0})
         elif isinstance(seg, dict):
             out.append({
                 "start": float(seg.get("start", 0)), "end": float(seg.get("end", 0)),
@@ -99,6 +100,8 @@ def _norm_segments(segments: list) -> list:
                 "type": seg.get("type", "video"),
                 "image_path": seg.get("image_path"),
                 "duration": float(seg.get("duration", 0) or 0),
+                "transition_in": str(seg.get("transition_in") or "cut"),
+                "transition_duration": float(seg.get("transition_duration") or 0),
             })
         else:  # pydantic Segment
             out.append({
@@ -107,15 +110,82 @@ def _norm_segments(segments: list) -> list:
                 "type": getattr(seg, "type", "video"),
                 "image_path": getattr(seg, "image_path", None),
                 "duration": float(getattr(seg, "duration", 0) or 0),
+                "transition_in": str(getattr(seg, "transition_in", None) or "cut"),
+                "transition_duration": float(getattr(seg, "transition_duration", 0) or 0),
             })
     return out
 
 
 def _segment_output_duration(seg: dict) -> float:
-    """How long this segment lasts in the FINAL output."""
+    """How long this segment lasts in the FINAL output (ignoring xfade overlap)."""
     if seg["type"] == "image":
         return max(0.1, seg.get("duration", 0) or 0)
     return max(0.0, (seg["end"] - seg["start"]) / max(0.25, seg.get("speed", 1.0)))
+
+
+# Transitions we accept (FFmpeg xfade names). "cut" means no transition.
+XFADE_TRANSITIONS = {
+    "fade", "fadeblack", "fadewhite", "dissolve", "pixelize", "radial",
+    "slideleft", "slideright", "slideup", "slidedown",
+    "wipeleft", "wiperight", "wipeup", "wipedown",
+    "circleopen", "circleclose", "smoothleft", "smoothright",
+    "zoomin",
+}
+
+
+def _seg_transition(seg: dict) -> tuple:
+    """Return (name, duration) for a segment's incoming transition.
+    Returns ("cut", 0.0) when there's none (the default, hard cut)."""
+    name = (seg.get("transition_in") or "cut").lower()
+    dur = float(seg.get("transition_duration") or 0)
+    if name in ("", "cut", "none") or dur <= 0:
+        return ("cut", 0.0)
+    if name not in XFADE_TRANSITIONS:
+        # Unknown name — fall back to a plain fade so we don't crash FFmpeg.
+        name = "fade"
+    return (name, dur)
+
+
+def _segment_offsets(segs: list) -> list:
+    """Return [(out_start, out_end), ...] in OUTPUT seconds for each segment,
+    accounting for xfade overlap. Transition duration is clamped to half of
+    each neighbour so it never exceeds clip length."""
+    offs = []
+    cursor = 0.0
+    prev_dur = 0.0
+    for i, seg in enumerate(segs):
+        dur = _segment_output_duration(seg)
+        if i == 0:
+            offs.append((0.0, dur))
+            cursor = dur
+            prev_dur = dur
+            continue
+        _, T = _seg_transition(seg)
+        T_eff = min(T, prev_dur * 0.5, dur * 0.5) if T > 0 else 0.0
+        start = max(0.0, cursor - T_eff)
+        offs.append((start, start + dur))
+        cursor = start + dur
+        prev_dur = dur
+    return offs
+
+
+def total_output_duration(segments: list) -> float:
+    """Total output length of a segment list, accounting for xfade overlap."""
+    segs = _norm_segments(segments)
+    if not segs:
+        return 0.0
+    return _segment_offsets(segs)[-1][1]
+
+
+def _has_xfade(segs: list) -> bool:
+    """True if any segment (after the first) has a non-cut transition."""
+    for i, s in enumerate(segs):
+        if i == 0:
+            continue
+        name, T = _seg_transition(s)
+        if name != "cut" and T > 0:
+            return True
+    return False
 
 
 def concat_segments(source_video: str, segments: list, output_path: str,
@@ -139,8 +209,10 @@ def concat_segments(source_video: str, segments: list, output_path: str,
     has_image = any(s["type"] == "image" for s in segs)
     has_speed = any(abs(s["speed"] - 1.0) > 1e-3 for s in segs if s["type"] == "video")
 
+    use_xfade = _has_xfade(segs)
+
     # Fast path: pure single video segment, normal speed → simple trim copy-ish
-    if len(segs) == 1 and segs[0]["type"] == "video" and not has_speed:
+    if len(segs) == 1 and segs[0]["type"] == "video" and not has_speed and not use_xfade:
         s, e = segs[0]["start"], segs[0]["end"]
         dur = e - s
         cmd = [FFMPEG_EXE, "-ss", str(max(0.0, s - 4.0)), "-i", source_video,
@@ -163,6 +235,100 @@ def concat_segments(source_video: str, segments: list, output_path: str,
             img_input_idx[i] = next_input
             next_input += 1
 
+    # ── xfade path ────────────────────────────────────────────────────────
+    # When any segment has a non-cut transition, build a pairwise xfade chain.
+    # All segments are normalised to canvas WxH/yuv420p/30fps so xfade accepts
+    # them. Audio uses acrossfade. "cut" segments in this path still get a
+    # tiny 0.04s fade (visually a hard cut) to keep the graph uniform.
+    if use_xfade:
+        parts = []
+        for i, seg in enumerate(segs):
+            if seg["type"] == "image":
+                inp = img_input_idx[i]
+                dur = _segment_output_duration(seg)
+                parts.append(
+                    f"[{inp}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                    f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p,"
+                    f"trim=duration={dur},setpts=PTS-STARTPTS[v{i}]"
+                )
+                parts.append(
+                    f"anullsrc=channel_layout=stereo:sample_rate=44100,"
+                    f"atrim=duration={dur},asetpts=PTS-STARTPTS[a{i}]"
+                )
+            else:
+                s, e, sp = seg["start"], seg["end"], seg["speed"]
+                parts.append(
+                    f"[0:v]trim=start={s}:end={e},setpts=(PTS-STARTPTS)/{sp},"
+                    f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                    f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[v{i}]"
+                )
+                parts.append(
+                    f"[0:a]atrim=start={s}:end={e},asetpts=PTS-STARTPTS,"
+                    f"{_atempo_chain(sp)},aresample=44100[a{i}]"
+                )
+
+        # Pairwise xfade + acrossfade. Track cumulative output duration.
+        offs = _segment_offsets(segs)
+        prev_v = "v0"
+        prev_a = "a0"
+        for i in range(1, len(segs)):
+            name, T = _seg_transition(segs[i])
+            # In xfade path, even "cut" segments need a tiny crossfade so the
+            # filter has something to do. Imperceptible at 0.04s.
+            if name == "cut" or T <= 0:
+                name = "fade"
+                # Clamp to half of both neighbours (xfade requires T < min(dur))
+                T_eff = min(0.04, _segment_output_duration(segs[i-1]) * 0.5,
+                            _segment_output_duration(segs[i]) * 0.5)
+            else:
+                T_eff = offs[i-1][1] - offs[i][0]  # already clamped in _segment_offsets
+                T_eff = max(0.04, T_eff)
+            # xfade offset = where in stream A its last T_eff seconds begin
+            # relative to A's start. Stream A is the chained result; its
+            # cumulative duration up to here is offs[i-1][1].
+            xfade_offset = max(0.0, offs[i-1][1] - T_eff)
+            out_v = f"vx{i}"
+            out_a = f"ax{i}"
+            parts.append(
+                f"[{prev_v}][v{i}]xfade=transition={name}:duration={T_eff:.3f}:"
+                f"offset={xfade_offset:.3f}[{out_v}]"
+            )
+            parts.append(
+                f"[{prev_a}][a{i}]acrossfade=d={T_eff:.3f}:c1=tri:c2=tri[{out_a}]"
+            )
+            prev_v = out_v
+            prev_a = out_a
+
+        filtergraph = ";".join(parts)
+        cmd = inputs + [
+            "-filter_complex", filtergraph,
+            "-map", f"[{prev_v}]", "-map", f"[{prev_a}]",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+            "-c:a", "aac", "-y", "-loglevel", "error", output_path,
+        ]
+        total = offs[-1][1]
+        print(f"[Concat] xfade chain n={len(segs)} -> {total:.1f}s")
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=900)
+        if r.returncode != 0:
+            # Retry video-only (source may have no audio stream)
+            print(f"[Concat] xfade with-audio failed, retrying video-only. stderr: {r.stderr[-250:]}")
+            parts_v = [p for p in parts if not p.startswith("[0:a]")
+                       and "anullsrc" not in p and "acrossfade" not in p
+                       and not p.startswith("[a")]
+            cmd_v = inputs + [
+                "-filter_complex", ";".join(parts_v),
+                "-map", f"[{prev_v}]",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                "-y", "-loglevel", "error", output_path,
+            ]
+            r = subprocess.run(cmd_v, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=900)
+            if r.returncode != 0:
+                raise RuntimeError(f"concat_segments (xfade) failed: {r.stderr[-400:]}")
+        return total
+
+    # ── Concat path (cuts only) ───────────────────────────────────────────
     parts = []
     concat_inputs = ""
     for i, seg in enumerate(segs):
@@ -233,13 +399,11 @@ def remap_transcript_to_segments(transcript: dict, segments: list) -> dict:
     if not segs:
         return transcript
 
+    offs = _segment_offsets(segs)
     out_words = []
-    offset = 0.0
-    for seg in segs:
-        out_dur = _segment_output_duration(seg)
+    for i, seg in enumerate(segs):
+        out_start, _ = offs[i]
         if seg["type"] == "image":
-            # Image clips carry no speech — just advance the output cursor.
-            offset += out_dur
             continue
         s, e, sp = seg["start"], seg["end"], max(0.25, seg.get("speed", 1.0))
         for w in transcript["words"]:
@@ -247,11 +411,10 @@ def remap_transcript_to_segments(transcript: dict, segments: list) -> dict:
             if we <= s or ws >= e:
                 continue
             # Clip to the segment, compress by speed, then shift into output time
-            new_start = (max(ws, s) - s) / sp + offset
-            new_end = (min(we, e) - s) / sp + offset
+            new_start = (max(ws, s) - s) / sp + out_start
+            new_end = (min(we, e) - s) / sp + out_start
             if new_end > new_start:
                 out_words.append({**w, "start": round(new_start, 3), "end": round(new_end, 3)})
-        offset += out_dur
 
     out = dict(transcript)
     out["words"] = out_words
@@ -454,6 +617,85 @@ def get_visual_filter_chain(filter_name: str) -> str:
         # Full black & white with extra contrast for impact
         return "hue=s=0,eq=contrast=1.15:brightness=0.02"
     return ""
+
+
+def _has_audio_stream(path: str) -> bool:
+    """True if the file has at least one audio stream (probed via ffmpeg -i)."""
+    try:
+        r = subprocess.run([FFMPEG_EXE, "-i", path, "-hide_banner"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return "Audio:" in (r.stderr or "")
+    except Exception:
+        return True   # assume audio so we still try to mix
+
+
+def get_audio_peaks(audio_path: str, buckets: int = 300) -> list:
+    """Return ~`buckets` normalized (0..1) amplitude peaks for a waveform display.
+
+    Decodes the audio to low-rate mono 16-bit PCM and takes the max abs sample
+    per bucket. Cheap enough to run at upload time; used by the editor to draw
+    the little waveform bars (so the user can see where the sound/silence is).
+    """
+    import array
+    try:
+        r = subprocess.run(
+            [FFMPEG_EXE, "-i", audio_path, "-ac", "1", "-ar", "8000",
+             "-f", "s16le", "-hide_banner", "-loglevel", "error", "-"],
+            capture_output=True, timeout=120)
+        raw = r.stdout or b""
+    except Exception as e:
+        print(f"[Peaks] failed for {audio_path}: {e}")
+        return []
+    usable = len(raw) - (len(raw) % 2)
+    if usable <= 0:
+        return []
+    samples = array.array("h")
+    samples.frombytes(raw[:usable])
+    n = len(samples)
+    if n == 0:
+        return []
+    buckets = max(20, min(buckets, n))
+    step = n / buckets
+    peaks = []
+    for i in range(buckets):
+        a = int(i * step)
+        b = int((i + 1) * step)
+        if b <= a:
+            b = a + 1
+        m = max((abs(s) for s in samples[a:b]), default=0)
+        peaks.append(round(m / 32768.0, 3))
+    return peaks
+
+
+def mix_music_track(video_path: str, music_path: str,
+                    music_volume: float = 0.8, original_volume: float = 1.0) -> str:
+    """Mix a background-music track into an already-rendered clip, IN PLACE.
+
+    Runs as a fast post-step after the main export: the video stream is copied
+    (no re-encode) and only the audio is re-mixed, so it's cheap. The music
+    starts at the clip's beginning and is cut to the video length (-shortest).
+    If the clip has no audio of its own, the music becomes the only track.
+    """
+    tmp = video_path + ".mixtmp.mp4"
+    if _has_audio_stream(video_path):
+        fc = (f"[0:a]volume={original_volume}[a0];"
+              f"[1:a]volume={music_volume}[a1];"
+              f"[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]")
+    else:
+        fc = f"[1:a]volume={music_volume}[aout]"
+    cmd = [FFMPEG_EXE, "-i", video_path, "-i", music_path,
+           "-filter_complex", fc, "-map", "0:v", "-map", "[aout]",
+           "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+           "-shortest", "-movflags", "+faststart",
+           "-y", "-loglevel", "error", tmp]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    if r.returncode != 0 or not os.path.exists(tmp):
+        if os.path.exists(tmp):
+            try: os.remove(tmp)
+            except Exception: pass
+        raise RuntimeError(f"music mix failed: {(r.stderr or '')[-300:]}")
+    os.replace(tmp, video_path)
+    return video_path
 
 
 def _qsv_supported() -> bool:
@@ -1323,6 +1565,8 @@ def generate_preview_frame(
         base = f"[0:v]scale={W}:{target_height}:force_original_aspect_ratio=increase,crop={W}:{target_height}"
         if background_style == "black":
             return base + ",colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0"
+        if background_style == "white":
+            return base + ",drawbox=x=0:y=0:w=iw:h=ih:color=white@1.0:t=fill"
         return base + ",boxblur=12:2"
 
     if use_split:
@@ -1526,6 +1770,8 @@ def generate_preview_clip(
         base = f"[0:v]scale={W}:{target_height}:force_original_aspect_ratio=increase,crop={W}:{target_height}"
         if background_style == "black":
             return base + ",colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0"
+        if background_style == "white":
+            return base + ",drawbox=x=0:y=0:w=iw:h=ih:color=white@1.0:t=fill"
         return base + ",boxblur=12:2"
 
     # In keyframes mode the fg is already canvas-sized — overlay at (0,0).

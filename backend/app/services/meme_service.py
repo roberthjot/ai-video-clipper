@@ -23,6 +23,15 @@ MEME_UPLOAD_DIR = os.path.join(settings.PROJECTS_DIR, "_meme_uploads")
 # In-memory batch store
 meme_batches: dict = {}
 
+# Current Gemini model for this thread's batch — set by _process_batch from the
+# request payload, read by every detect_* / generate_* call below. None falls
+# back to the .env default so calls outside a batch still work.
+_current_model: dict = {}     # {thread_id: model_name}
+
+
+def _resolve_model() -> str:
+    return _current_model.get(threading.get_ident()) or settings.GEMINI_MODEL
+
 
 TEMP_DIR = os.path.join(os.path.dirname(__file__), "temp")
 
@@ -46,7 +55,7 @@ def detect_crop_boundaries(frame_path: str) -> dict:
         img_bytes = f.read()
 
     response = gemini_service.client.models.generate_content(
-        model=settings.GEMINI_MODEL,
+        model=_resolve_model(),
         contents=[types.Content(role="user", parts=[
             types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
             types.Part.from_text(text=prompts.render("meme_crop")),
@@ -111,7 +120,7 @@ def crop_video_pct(video_path: str, output_path: str,
 def generate_meme_text(file_obj) -> str:
     """Ask Gemini to generate meme text for this video."""
     response = gemini_service.client.models.generate_content(
-        model=settings.GEMINI_MODEL,
+        model=_resolve_model(),
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
             types.Part.from_text(text=prompts.render("meme_text")),
@@ -127,7 +136,7 @@ def generate_meme_text(file_obj) -> str:
 def detect_music_artist(file_obj) -> dict:
     """Ask Gemini to identify the artist in the music video. Returns dict with artist/instagram or empty strings."""
     response = gemini_service.client.models.generate_content(
-        model=settings.GEMINI_MODEL,
+        model=_resolve_model(),
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
             types.Part.from_text(text=prompts.render("music_artist")),
@@ -153,7 +162,7 @@ def detect_music_artist(file_obj) -> dict:
 def generate_music_vibe(file_obj) -> str:
     """Ask Gemini to generate an emotion-driven vibe phrase for a music video."""
     response = gemini_service.client.models.generate_content(
-        model=settings.GEMINI_MODEL,
+        model=_resolve_model(),
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
             types.Part.from_text(text=prompts.render("music_vibe")),
@@ -173,7 +182,7 @@ def generate_ig_description(file_obj, meme_text: str, content_type: str = "meme"
     else:
         prompt = prompts.render("ig_description_meme", MEME_TEXT=meme_text)
     response = gemini_service.client.models.generate_content(
-        model=settings.GEMINI_MODEL,
+        model=_resolve_model(),
         contents=[types.Content(role="user", parts=[
             types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
             types.Part.from_text(text=prompt),
@@ -327,126 +336,160 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
         raise RuntimeError(f"FFmpeg failed: {result.stderr[-600:]}")
 
 
-def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 60, text_x: float = 0.05, content_type: str = "meme", crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0, crop_left_pct: float = 0.0, crop_right_pct: float = 0.0) -> None:
+def _process_batch(batch_id: str, video_paths: list, bg_color: str, text_y: float, video_scale: float, video_y: float, font_size: int = 60, text_x: float = 0.05, content_type: str = "meme", crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0, crop_left_pct: float = 0.0, crop_right_pct: float = 0.0, gemini_model: str = None) -> None:
     """Background thread: process each video in the batch sequentially."""
     batch = meme_batches[batch_id]
     os.makedirs(MEME_OUTPUT_DIR, exist_ok=True)
-    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001 or crop_left_pct > 0.001 or crop_right_pct > 0.001
+    # Pin the chosen Gemini model to this worker thread so every detect_/
+    # generate_ call inside picks it up via _resolve_model().
+    tid = threading.get_ident()
+    if gemini_model:
+        _current_model[tid] = gemini_model
+        print(f"[Meme] Batch {batch_id}: using model {gemini_model}")
 
     for i, video_path in enumerate(video_paths):
-        item = batch["items"][i]
-        cropped_path = None
-        try:
-            # 0. Crop if needed
-            if do_crop:
-                item["status"] = "cropping"
-                cropped_path = video_path.replace(".mp4", "_cropped.mp4").replace(".mov", "_cropped.mp4")
-                video_path = crop_video_pct(video_path, cropped_path, crop_top_pct, crop_bottom_pct, crop_left_pct, crop_right_pct)
-                print(f"[Meme] Batch {batch_id} item {i}: cropped (top={crop_top_pct:.1%} bot={crop_bottom_pct:.1%} left={crop_left_pct:.1%} right={crop_right_pct:.1%})")
-
-            # 1. Upload to Gemini
-            item["status"] = "uploading"
-            print(f"[Meme] Batch {batch_id} item {i}: uploading to Gemini")
-            file_obj = upload_video(video_path)
-
-            # 2. Wait for Gemini processing
-            item["status"] = "analyzing"
-            file_obj = wait_for_processing(file_obj)
-
-            # 3. Generate text based on content type
-            if content_type == "music":
-                meme_text = generate_music_vibe(file_obj)
-            else:
-                meme_text = generate_meme_text(file_obj)
-            item["meme_text"] = meme_text
-
-            # 3b. Detect artist (music mode only, while file is still uploaded)
-            if content_type == "music":
-                try:
-                    artist_info = detect_music_artist(file_obj)
-                except Exception:
-                    artist_info = {"artist": "", "instagram": ""}
-                item["artist_info"] = artist_info
-                print(f"[Meme] Batch {batch_id} item {i}: artist = {artist_info}")
-
-            # 3c. Generate IG description (while file is still uploaded)
-            try:
-                ig_description = generate_ig_description(file_obj, meme_text, content_type)
-            except Exception:
-                ig_description = ""
-            item["ig_description"] = ig_description
-
-            delete_file(file_obj)
-            print(f"[Meme] Batch {batch_id} item {i}: [{content_type}] text = {meme_text[:60]!r}")
-
-            # 4. Export video
-            item["status"] = "exporting"
-            output_filename = f"meme_{batch_id}_{i}.mp4"
-            output_path = os.path.join(MEME_OUTPUT_DIR, output_filename)
-            export_meme_video(video_path, meme_text, output_path, bg_color, text_y=text_y, video_scale=video_scale, video_y=video_y, font_size=font_size, text_x=text_x)
-
-            # Save IG description as .txt
-            txt_filename = f"meme_{batch_id}_{i}.txt"
-            txt_path = os.path.join(MEME_OUTPUT_DIR, txt_filename)
-            label = "Vibe text" if content_type == "music" else "Meme text"
-            with open(txt_path, "w", encoding="utf-8") as f:
-                f.write(f"{label}:\n{meme_text}\n\n")
-                if content_type == "music":
-                    # Separate hashtag lines from body text so artist goes before hashtags
-                    desc_lines = ig_description.splitlines()
-                    hashtag_lines = [l for l in desc_lines if l.strip().startswith("#")]
-                    body_lines = [l for l in desc_lines if not l.strip().startswith("#")]
-                    body_text = "\n".join(body_lines).strip()
-                    hashtags_text = "\n".join(hashtag_lines).strip()
-
-                    f.write(f"Instagram Description:\n{body_text}\n")
-                    ai = item.get("artist_info", {})
-                    if ai.get("artist") or ai.get("instagram"):
-                        f.write("\n")
-                    if ai.get("artist"):
-                        f.write(f"Artist: {ai['artist']}\n")
-                    if ai.get("instagram"):
-                        f.write(f"Instagram: {ai['instagram']}\n")
-                    if hashtags_text:
-                        f.write(f"\n{hashtags_text}\n")
-                else:
-                    # Separate hashtags to end for memes too
-                    desc_lines = ig_description.splitlines()
-                    hashtag_lines = [l for l in desc_lines if l.strip().startswith("#")]
-                    body_lines = [l for l in desc_lines if not l.strip().startswith("#")]
-                    body_text = "\n".join(body_lines).strip()
-                    hashtags_text = "\n".join(hashtag_lines).strip()
-                    f.write(f"Instagram Description:\n{body_text}\n")
-                    if hashtags_text:
-                        f.write(f"\n{hashtags_text}\n")
-            item["txt_path"] = txt_path
-
-            item["video_path"] = video_path
-            item["output_path"] = output_path
-            item["status"] = "ready"
-            print(f"[Meme] Batch {batch_id} item {i}: done")
-
-        except Exception as e:
-            item["status"] = "error"
-            item["error"] = str(e)
-            print(f"[Meme] Batch {batch_id} item {i}: ERROR — {e}")
+        _process_one_item(
+            batch_id, i, video_path, bg_color, text_y, video_scale, video_y,
+            font_size, text_x, content_type, crop_top_pct, crop_bottom_pct,
+            crop_left_pct, crop_right_pct,
+        )
 
     batch["status"] = "completed"
+    _current_model.pop(tid, None)        # release the per-thread model override
     print(f"[Meme] Batch {batch_id} all done")
+
+
+def _process_one_item(batch_id, i, video_path, bg_color, text_y, video_scale, video_y,
+                      font_size, text_x, content_type, crop_top_pct, crop_bottom_pct,
+                      crop_left_pct, crop_right_pct):
+    """Process a SINGLE meme item end-to-end (upload→analyze→generate→export).
+    Used by the batch loop AND by the per-item retry. Catches its own errors and
+    writes status/error onto the item."""
+    batch = meme_batches[batch_id]
+    item = batch["items"][i]
+    do_crop = crop_top_pct > 0.001 or crop_bottom_pct > 0.001 or crop_left_pct > 0.001 or crop_right_pct > 0.001
+    cropped_path = None
+    try:
+        item["error"] = ""
+        # 0. Crop if needed
+        if do_crop:
+            item["status"] = "cropping"
+            cropped_path = video_path.replace(".mp4", "_cropped.mp4").replace(".mov", "_cropped.mp4")
+            video_path = crop_video_pct(video_path, cropped_path, crop_top_pct, crop_bottom_pct, crop_left_pct, crop_right_pct)
+            print(f"[Meme] Batch {batch_id} item {i}: cropped (top={crop_top_pct:.1%} bot={crop_bottom_pct:.1%} left={crop_left_pct:.1%} right={crop_right_pct:.1%})")
+
+        # 1. Upload to Gemini
+        item["status"] = "uploading"
+        print(f"[Meme] Batch {batch_id} item {i}: uploading to Gemini")
+        file_obj = upload_video(video_path)
+
+        # 2. Wait for Gemini processing
+        item["status"] = "analyzing"
+        file_obj = wait_for_processing(file_obj)
+
+        # 3. Generate text based on content type
+        if content_type == "music":
+            meme_text = generate_music_vibe(file_obj)
+        else:
+            meme_text = generate_meme_text(file_obj)
+        item["meme_text"] = meme_text
+
+        # 3b. Detect artist (music mode only, while file is still uploaded)
+        if content_type == "music":
+            try:
+                artist_info = detect_music_artist(file_obj)
+            except Exception:
+                artist_info = {"artist": "", "instagram": ""}
+            item["artist_info"] = artist_info
+            print(f"[Meme] Batch {batch_id} item {i}: artist = {artist_info}")
+
+        # 3c. Generate IG description (while file is still uploaded)
+        try:
+            ig_description = generate_ig_description(file_obj, meme_text, content_type)
+        except Exception:
+            ig_description = ""
+        item["ig_description"] = ig_description
+
+        delete_file(file_obj)
+        print(f"[Meme] Batch {batch_id} item {i}: [{content_type}] text = {meme_text[:60]!r}")
+
+        # 4. Export video
+        item["status"] = "exporting"
+        output_filename = f"meme_{batch_id}_{i}.mp4"
+        output_path = os.path.join(MEME_OUTPUT_DIR, output_filename)
+        export_meme_video(video_path, meme_text, output_path, bg_color, text_y=text_y, video_scale=video_scale, video_y=video_y, font_size=font_size, text_x=text_x)
+
+        # Save IG description as .txt
+        txt_filename = f"meme_{batch_id}_{i}.txt"
+        txt_path = os.path.join(MEME_OUTPUT_DIR, txt_filename)
+        label = "Vibe text" if content_type == "music" else "Meme text"
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(f"{label}:\n{meme_text}\n\n")
+            if content_type == "music":
+                # Separate hashtag lines from body text so artist goes before hashtags
+                desc_lines = ig_description.splitlines()
+                hashtag_lines = [l for l in desc_lines if l.strip().startswith("#")]
+                body_lines = [l for l in desc_lines if not l.strip().startswith("#")]
+                body_text = "\n".join(body_lines).strip()
+                hashtags_text = "\n".join(hashtag_lines).strip()
+
+                f.write(f"Instagram Description:\n{body_text}\n")
+                ai = item.get("artist_info", {})
+                if ai.get("artist") or ai.get("instagram"):
+                    f.write("\n")
+                if ai.get("artist"):
+                    f.write(f"Artist: {ai['artist']}\n")
+                if ai.get("instagram"):
+                    f.write(f"Instagram: {ai['instagram']}\n")
+                if hashtags_text:
+                    f.write(f"\n{hashtags_text}\n")
+            else:
+                # Separate hashtags to end for memes too
+                desc_lines = ig_description.splitlines()
+                hashtag_lines = [l for l in desc_lines if l.strip().startswith("#")]
+                body_lines = [l for l in desc_lines if not l.strip().startswith("#")]
+                body_text = "\n".join(body_lines).strip()
+                hashtags_text = "\n".join(hashtag_lines).strip()
+                f.write(f"Instagram Description:\n{body_text}\n")
+                if hashtags_text:
+                    f.write(f"\n{hashtags_text}\n")
+        item["txt_path"] = txt_path
+
+        item["video_path"] = video_path
+        item["output_path"] = output_path
+        item["status"] = "ready"
+        print(f"[Meme] Batch {batch_id} item {i}: done")
+
+    except Exception as e:
+        item["status"] = "error"
+        item["error"] = str(e)
+        print(f"[Meme] Batch {batch_id} item {i}: ERROR — {e}")
 
 
 def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black",
                      text_y: float = 0.08, video_scale: float = 0.9, video_y: float = 0.6,
                      font_size: int = 60, text_x: float = 0.05, content_type: str = "meme",
                      crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0,
-                     crop_left_pct: float = 0.0, crop_right_pct: float = 0.0) -> str:
+                     crop_left_pct: float = 0.0, crop_right_pct: float = 0.0,
+                     gemini_model: str = None) -> str:
     """Start a meme batch. Returns batch_id."""
     batch_id = uuid.uuid4().hex[:12]
+    # Persist everything a single-item RETRY needs to reproduce the job.
+    job_params = {
+        "bg_color": bg_color, "text_y": text_y, "video_scale": video_scale,
+        "video_y": video_y, "font_size": font_size, "text_x": text_x,
+        "content_type": content_type, "crop_top_pct": crop_top_pct,
+        "crop_bottom_pct": crop_bottom_pct, "crop_left_pct": crop_left_pct,
+        "crop_right_pct": crop_right_pct, "gemini_model": gemini_model,
+    }
     meme_batches[batch_id] = {
         "batch_id": batch_id,
         "status": "processing",
         "bg_color": bg_color,
         "content_type": content_type,
+        "params": job_params,
+        "video_paths": list(video_paths),
+        "filenames": list(filenames),
         "items": [
             {
                 "index": i,
@@ -464,10 +507,53 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
     }
     threading.Thread(
         target=_process_batch,
-        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size, text_x, content_type, crop_top_pct, crop_bottom_pct, crop_left_pct, crop_right_pct),
+        args=(batch_id, video_paths, bg_color, text_y, video_scale, video_y, font_size, text_x, content_type, crop_top_pct, crop_bottom_pct, crop_left_pct, crop_right_pct, gemini_model),
         daemon=True,
     ).start()
     return batch_id
+
+
+def retry_meme_item(batch_id: str, index: int) -> bool:
+    """Re-run a single item (after a failure, or to regenerate). Reuses the
+    original video + job params stored on the batch. Runs in a background
+    thread so the request returns immediately. Returns False if not found."""
+    batch = meme_batches.get(batch_id)
+    if not batch or index < 0 or index >= len(batch.get("items", [])):
+        return False
+    paths = batch.get("video_paths") or []
+    params = batch.get("params") or {}
+    if index >= len(paths):
+        return False
+
+    item = batch["items"][index]
+    item["status"] = "pending"
+    item["error"] = ""
+    batch["status"] = "processing"
+
+    def _run():
+        tid = threading.get_ident()
+        gm = params.get("gemini_model")
+        if gm:
+            _current_model[tid] = gm
+        try:
+            _process_one_item(
+                batch_id, index, paths[index],
+                params.get("bg_color", "black"), params.get("text_y", 0.08),
+                params.get("video_scale", 0.9), params.get("video_y", 0.6),
+                params.get("font_size", 60), params.get("text_x", 0.05),
+                params.get("content_type", "meme"),
+                params.get("crop_top_pct", 0.0), params.get("crop_bottom_pct", 0.0),
+                params.get("crop_left_pct", 0.0), params.get("crop_right_pct", 0.0),
+            )
+        finally:
+            _current_model.pop(tid, None)
+            # If every item is settled, mark the batch completed again.
+            if all(it["status"] in ("ready", "error") for it in batch["items"]):
+                batch["status"] = "completed"
+        print(f"[Meme] Batch {batch_id} item {index}: retry done ({item['status']})")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return True
 
 
 def get_batch(batch_id: str) -> dict | None:

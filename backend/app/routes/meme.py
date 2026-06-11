@@ -4,7 +4,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
 from ..services.meme_service import (
-    start_meme_batch, get_batch, MEME_UPLOAD_DIR, MEME_OUTPUT_DIR, TEMP_DIR,
+    start_meme_batch, get_batch, retry_meme_item, MEME_UPLOAD_DIR, MEME_OUTPUT_DIR, TEMP_DIR,
     extract_video_frame, detect_crop_boundaries,
 )
 
@@ -69,6 +69,7 @@ async def process_memes(
     crop_bottom_pct: float = Form(0.0),
     crop_left_pct: float = Form(0.0),
     crop_right_pct: float = Form(0.0),
+    gemini_model: str = Form(""),
     videos: list[UploadFile] = File(...),
 ):
     """Upload multiple videos and start meme batch processing."""
@@ -91,7 +92,8 @@ async def process_memes(
                                  text_y=text_y, text_x=text_x, video_scale=video_scale,
                                  video_y=video_y, font_size=font_size, content_type=content_type,
                                  crop_top_pct=crop_top_pct, crop_bottom_pct=crop_bottom_pct,
-                                 crop_left_pct=crop_left_pct, crop_right_pct=crop_right_pct)
+                                 crop_left_pct=crop_left_pct, crop_right_pct=crop_right_pct,
+                                 gemini_model=(gemini_model or None))
     return {"batch_id": batch_id, "count": len(video_paths)}
 
 
@@ -102,6 +104,15 @@ async def meme_status(batch_id: str):
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
     return batch
+
+
+@router.post("/retry/{batch_id}/{index}")
+async def retry_item(batch_id: str, index: int):
+    """Re-run a single meme item (after a failure or to regenerate it)."""
+    ok = retry_meme_item(batch_id, index)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Batch or item not found")
+    return {"status": "retrying", "batch_id": batch_id, "index": index}
 
 
 @router.get("/crop-preview/{batch_id}/{index}")

@@ -13,7 +13,163 @@ import {
   List, LayoutGrid, Clock, GripVertical, Check, Play, Pencil, RefreshCw,
   ZoomIn, Type, Wand2, SkipBack, SkipForward, Pause,
   Copy, AlertCircle, Loader2, X, Plus, Square, CheckCircle2, Crosshair,
+  Undo2, Redo2, FileText,
 } from "lucide-react";
+
+
+// ─── PromptEditButton ──────────────────────────────────────────────────────
+// Tiny "Editar prompt" button + inline modal for the screen it's placed in.
+// `promptKeys` is the list of registry keys relevant to that screen (e.g.
+// ["analysis_system"] for Upload). Saves via api.updatePrompt → prompts.json
+// (same persistent override as Ajustes → Prompts). Empty save = reset.
+function PromptEditButton({ promptKeys, label = "Editar prompt", title = "Editar prompts" }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [drafts, setDrafts] = useState({});
+  const [activeKey, setActiveKey] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  const load = async () => {
+    setLoading(true); setErr("");
+    try {
+      const d = await api.listPrompts();
+      const filtered = (d.prompts || []).filter((p) => promptKeys.includes(p.key));
+      setItems(filtered);
+      setDrafts(Object.fromEntries(filtered.map((p) => [p.key, p.current])));
+      if (filtered.length && !activeKey) setActiveKey(filtered[0].key);
+    } catch (e) { setErr(e.message || "No se pudieron cargar los prompts"); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [open]);
+
+  const save = async () => {
+    if (!activeKey) return;
+    setBusy(true); setErr("");
+    try {
+      await api.updatePrompt(activeKey, drafts[activeKey] || "");
+      setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1400);
+      await load();
+    } catch (e) { setErr(e.message || "Error al guardar"); }
+    finally { setBusy(false); }
+  };
+  const resetCurrent = async () => {
+    if (!activeKey) return;
+    if (!window.confirm("¿Volver al prompt original (descarta tu versión)?")) return;
+    setBusy(true); setErr("");
+    try {
+      await api.resetPrompt(activeKey);
+      await load();
+    } catch (e) { setErr(e.message || "Error al restablecer"); }
+    finally { setBusy(false); }
+  };
+
+  const active = items.find((p) => p.key === activeKey);
+  const dirty = active && drafts[activeKey] !== active.current;
+
+  return (
+    <>
+      <button onClick={() => setOpen(true)} className="st-btn st-btn--ghost"
+        style={{ padding: "6px 10px", fontSize: 12, gap: 6 }}
+        title="Editar el prompt que usa Gemini en esta pantalla">
+        <FileText size={13} /> {label}
+      </button>
+
+      {open && (
+        <div onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", display: "grid", placeItems: "center", zIndex: 60, padding: 20 }}>
+          <div style={{
+            width: "min(820px, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column",
+            background: "var(--st-surface)", border: "1px solid var(--st-border)", borderRadius: 14,
+            boxShadow: "var(--st-shadow)", overflow: "hidden",
+          }}>
+            {/* Header */}
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--st-line)", display: "flex", alignItems: "center", gap: 10 }}>
+              <FileText size={16} style={{ color: "var(--st-muted)" }} />
+              <span style={{ fontFamily: "var(--st-display)", fontSize: 16, fontWeight: 600 }}>{title}</span>
+              <div style={{ flex: 1 }} />
+              {savedFlash && <span style={{ fontSize: 11, color: "var(--st-ok)" }}>✓ guardado</span>}
+              <button onClick={() => setOpen(false)} className="st-btn st-btn--ghost" style={{ padding: "5px 8px" }}>
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Body */}
+            {loading ? (
+              <div style={{ padding: 40, textAlign: "center", color: "var(--st-muted)" }}>Cargando…</div>
+            ) : items.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: "var(--st-muted)" }}>No hay prompts disponibles</div>
+            ) : (
+              <>
+                {/* Tabs if more than 1 prompt */}
+                {items.length > 1 && (
+                  <div style={{ display: "flex", gap: 4, padding: "10px 16px 0", borderBottom: "1px solid var(--st-line)", flexWrap: "wrap" }}>
+                    {items.map((p) => (
+                      <span key={p.key} onClick={() => setActiveKey(p.key)} style={{
+                        padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        borderRadius: "8px 8px 0 0", marginBottom: -1,
+                        background: activeKey === p.key ? "var(--st-alt)" : "transparent",
+                        color: activeKey === p.key ? "var(--st-text)" : "var(--st-muted)",
+                        border: `1px solid ${activeKey === p.key ? "var(--st-line)" : "transparent"}`,
+                        borderBottom: activeKey === p.key ? "1px solid var(--st-alt)" : "1px solid transparent",
+                      }}>{p.label || p.key}</span>
+                    ))}
+                  </div>
+                )}
+
+                {active && (
+                  <div style={{ padding: "16px 20px", overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+                    {active.description && (
+                      <p style={{ margin: "0 0 10px", fontSize: 12.5, color: "var(--st-muted)", lineHeight: 1.5 }}>{active.description}</p>
+                    )}
+                    {active.tokens && active.tokens.length > 0 && (
+                      <div style={{ marginBottom: 10, fontSize: 11, color: "var(--st-faint)" }}>
+                        Tokens disponibles:{" "}
+                        {active.tokens.map((t) => (
+                          <code key={t} style={{ fontFamily: "var(--st-mono)", background: "var(--st-alt)", padding: "1px 6px", borderRadius: 4, margin: "0 3px", color: "var(--st-muted)" }}>{t}</code>
+                        ))}
+                      </div>
+                    )}
+                    <textarea
+                      value={drafts[active.key] ?? ""}
+                      onChange={(e) => setDrafts((d) => ({ ...d, [active.key]: e.target.value }))}
+                      spellCheck={false}
+                      style={{
+                        flex: 1, minHeight: 280, width: "100%", resize: "vertical",
+                        fontFamily: "var(--st-mono)", fontSize: 12.5, lineHeight: 1.55,
+                        background: "var(--st-alt)", color: "var(--st-text)",
+                        border: "1px solid var(--st-border)", borderRadius: 9, padding: 12,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    {err && <p style={{ color: "var(--st-live)", fontSize: 11.5, margin: "8px 0 0" }}>{err}</p>}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Footer */}
+            <div style={{ padding: "12px 20px", borderTop: "1px solid var(--st-line)", display: "flex", alignItems: "center", gap: 8 }}>
+              <button onClick={resetCurrent} disabled={busy || !active} className="st-btn st-btn--ghost" style={{ padding: "7px 12px" }}>
+                <RefreshCw size={13} /> Restablecer
+              </button>
+              <div style={{ flex: 1 }} />
+              <button onClick={() => setOpen(false)} className="st-btn st-btn--quiet" style={{ padding: "7px 14px" }}>
+                Cerrar
+              </button>
+              <button onClick={save} disabled={busy || !dirty} className="st-btn st-btn--primary" style={{ padding: "7px 16px" }}>
+                {busy ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 // Monochrome confidence dot (match=solid, mismatch=ring, no_audio=half)
 function ConfDot({ conf }) {
@@ -459,9 +615,14 @@ function UploadStep({ onComplete }) {
   return (
     <div style={{ maxWidth: 600, margin: "0 auto", padding: "30px 32px" }}>
       {/* Title */}
-      <h1 style={{ margin: "0 0 6px", fontFamily: "var(--st-display)", fontSize: 28, fontWeight: 600, letterSpacing: "-0.025em", color: "var(--st-text)" }}>
-        Subir video
-      </h1>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 6 }}>
+        <h1 style={{ margin: 0, fontFamily: "var(--st-display)", fontSize: 28, fontWeight: 600, letterSpacing: "-0.025em", color: "var(--st-text)", flex: 1 }}>
+          Subir video
+        </h1>
+        <PromptEditButton
+          promptKeys={["analysis_system", "default_instruction", "creator_section"]}
+          title="Prompts · Análisis principal" />
+      </div>
       <p style={{ margin: "0 0 26px", fontSize: 14.5, color: "var(--st-muted)", lineHeight: 1.5 }}>
         Gemini revisa el video completo y encuentra los momentos más virales automáticamente.
       </p>
@@ -1237,6 +1398,10 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   const [reanalyzingClip, setReanalyzingClip] = useState(null);
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
+  // Creator name (loaded from project on mount, editable, saved on blur/Enter)
+  const [creatorName, setCreatorName] = useState("");
+  const [creatorSaving, setCreatorSaving] = useState(false);
+  const [creatorSavedTs, setCreatorSavedTs] = useState(0);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentId: null });
   const { model: reanalyzeModel, setModel: setReanalyzeModel } = useModel(); // global model (synced w/ sidebar + Ajustes)
   const [switchingModel, setSwitchingModel] = useState(false);
@@ -1343,6 +1508,29 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     }
   };
 
+  // Load existing creator_name from the project on mount.
+  useEffect(() => {
+    if (!projectId) return;
+    api.getProject(projectId)
+      .then((p) => setCreatorName(p?.creator_name || ""))
+      .catch(() => { /* project may not exist after backend restart */ });
+  }, [projectId]);
+
+  // Save creator_name (called on blur or Enter). Saves silently and flashes
+  // a "✓ guardado" indicator for 1.5s.
+  const saveCreator = async () => {
+    if (!projectId) return;
+    setCreatorSaving(true);
+    try {
+      await api.updateProjectCreator(projectId, creatorName.trim());
+      setCreatorSavedTs(Date.now());
+    } catch (err) {
+      alert("No se pudo guardar el creador: " + err.message);
+    } finally {
+      setCreatorSaving(false);
+    }
+  };
+
   const toggleSelect = (clipId) => {
     setSelectedClips(prev => {
       const next = new Set(prev);
@@ -1422,6 +1610,9 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
             Clips detectados <span style={{ color: "var(--st-faint)", fontWeight: 500 }}>{clips.length}</span>
           </h1>
         </div>
+        <PromptEditButton
+          promptKeys={["analysis_system", "reanalyze_clip", "alternate_captions", "verify_timestamps"]}
+          title="Prompts · Análisis y reanálisis" />
         <button className="btn btn-primary" onClick={onNext}>
           <Download size={15} /> Exportar selección
         </button>
@@ -1513,6 +1704,31 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
               <button className="btn btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => setSelectedClips(new Set())}>
                 Deseleccionar
               </button>
+              {/* Creator name — Gemini incluye este nombre en los captions al reanalizar */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 8, paddingLeft: 12, borderLeft: "1px solid var(--st-line)" }}>
+                <span style={{ fontSize: 12, color: "var(--st-muted)" }}>Creador:</span>
+                <input
+                  type="text"
+                  value={creatorName}
+                  onChange={(e) => setCreatorName(e.target.value)}
+                  onBlur={saveCreator}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
+                  placeholder="p. ej. Sophie Rain"
+                  title="Nombre del creador para incluir en captions al reanalizar. Varios separados por coma."
+                  style={{
+                    fontFamily: "var(--st-ui)", fontSize: 12, padding: "4px 9px",
+                    background: "var(--st-surface)", border: "1px solid var(--st-line)",
+                    color: "var(--st-text)", borderRadius: 6, width: 180,
+                    outline: "none",
+                  }}
+                />
+                {creatorSaving && (
+                  <span style={{ fontSize: 11, color: "var(--st-faint)", fontFamily: "var(--st-mono)" }}>guardando…</span>
+                )}
+                {!creatorSaving && creatorSavedTs > 0 && Date.now() - creatorSavedTs < 1500 && (
+                  <span style={{ fontSize: 11, color: "var(--st-ok, #6dd58c)", fontFamily: "var(--st-mono)" }}>✓ guardado</span>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -2433,9 +2649,9 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
 
             {/* Subtítulos */}
             <StSection icon={<Type size={14} />}>Subtítulos</StSection>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: style.subtitle_style !== "none" ? 14 : 4 }}>
-              {[["none", "Ninguno"], ["clean", "Limpio"], ["karaoke", "Karaoke"], ["popup", "Pop-up"], ["highlight", "Highlight"], ["big_center", "Big Center"], ["twoword", "Two-Word"], ["bounce", "Bounce"], ["typewriter", "Typewriter"]].map(([v, label]) => (
-                <StChip key={v} active={style.subtitle_style === v} onClick={() => setStyle((s) => ({ ...s, subtitle_style: v }))} style={{ padding: "5px 10px", fontSize: 11.5, fontWeight: 500 }}>{label}</StChip>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: style.subtitle_style !== "none" ? 14 : 8 }}>
+              {[["none", "Ninguno"], ["clean", "Limpio"], ["karaoke", "Karaoke"], ["popup", "Pop-up"], ["highlight", "Highlight"], ["big_center", "Big Center"], ["twoword", "Two-Word"], ["bounce", "Bounce"], ["typewriter", "Typewriter"], ["karaoke_green", "Karaoke Verde"], ["karaoke_blue", "Karaoke Azul"], ["karaoke_pink", "Karaoke Rosa"], ["box_green", "Caja Verde"], ["box_blue", "Caja Azul"], ["neon", "Neón"], ["karaoke_red", "Karaoke Rojo"], ["karaoke_orange", "Karaoke Naranja"], ["karaoke_purple", "Karaoke Morado"], ["box_pink", "Caja Rosa"], ["box_red", "Caja Roja"], ["line_box", "Caja Línea"], ["underline", "Subrayado"], ["bubble", "Burbuja"], ["reveal", "Aparece"], ["stack", "Vertical"], ["hollow", "Contorno"], ["retro", "Retro 3D"]].map(([v, label]) => (
+                <SubThumb key={v} styleKey={v} label={label} selected={style.subtitle_style === v} onClick={() => setStyle((s) => ({ ...s, subtitle_style: v }))} />
               ))}
             </div>
             {style.subtitle_style !== "none" && (
@@ -2966,7 +3182,22 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
 
   const isReady = item.status === "ready";
   const isError = item.status === "error";
+  const isWorking = !isReady && !isError;   // pending/uploading/analyzing/exporting…
   const dotColor = isReady ? "var(--st-ok)" : isError ? "var(--st-live)" : "var(--st-faint)";
+
+  const [retrying, setRetrying] = useState(false);
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await api.retryMeme(batchId, index);
+      // The parent's status poll will pick up the new "pending→ready" state.
+    } catch (e) {
+      alert(e.message || "No se pudo reintentar");
+    } finally {
+      // Keep the spinner only briefly; the poll drives the real status.
+      setTimeout(() => setRetrying(false), 1200);
+    }
+  };
 
   return (
     <div className="st-card" style={{ overflow: "hidden", borderColor: isReady ? "var(--st-border)" : "var(--st-line)" }}>
@@ -3030,6 +3261,37 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
           </button>
           <button onClick={() => setShowSliders(v => !v)} className="st-btn st-btn--ghost" style={{ padding: "6px 11px" }}>
             <Settings size={13} /> {showSliders ? "Cerrar" : "Ajustes"}
+          </button>
+          <button onClick={handleRetry} disabled={retrying} className="st-btn st-btn--ghost" style={{ padding: "6px 11px" }}
+            title="Volver a analizar y generar este meme">
+            <RefreshCw size={13} /> {retrying ? "Reintentando…" : "Reintentar"}
+          </button>
+        </div>
+      )}
+
+      {/* Error / retry block */}
+      {isError && (
+        <div style={{ padding: "0 14px 14px" }}>
+          <div style={{ padding: "10px 13px", background: "var(--st-soft)", borderRadius: 9, border: "1px solid var(--st-live)", marginBottom: 10 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--st-live)", marginBottom: 2 }}>Falló este meme</div>
+            <div style={{ fontSize: 11.5, color: "var(--st-muted)", lineHeight: 1.45, wordBreak: "break-word" }}>
+              {item.error || "Gemini devolvió un error. Probá de nuevo."}
+            </div>
+          </div>
+          <button onClick={handleRetry} disabled={retrying} className="st-btn st-btn--primary"
+            style={{ width: "100%", justifyContent: "center", padding: "9px 0" }}>
+            <RefreshCw size={14} /> {retrying ? "Reintentando…" : "Reintentar este meme"}
+          </button>
+        </div>
+      )}
+
+      {/* While working — show a subtle retry in case it's stuck */}
+      {isWorking && (
+        <div style={{ padding: "0 14px 14px" }}>
+          <button onClick={handleRetry} disabled={retrying} className="st-btn st-btn--ghost"
+            style={{ width: "100%", justifyContent: "center", padding: "7px 0" }}
+            title="Si se quedó pegado, reinicia el análisis de este meme">
+            <RefreshCw size={13} /> {retrying ? "Reintentando…" : "Reintentar"}
           </button>
         </div>
       )}
@@ -3103,6 +3365,23 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
 // MEME GENERATOR
 // ================================================
 function MemeStep() {
+  const { model: memeModel, setModel: setMemeModel } = useModel(); // global model (synced w/ sidebar + Ajustes)
+  const [modelHealth, setModelHealth] = useState({});
+  const [checkingModels, setCheckingModels] = useState(false);
+  const handleCheckModels = async () => {
+    setCheckingModels(true);
+    try {
+      const result = await api.checkModelHealth(GEMINI_VIDEO_MODELS.map((m) => m.val));
+      const next = {};
+      for (const item of result.models || []) next[item.model] = item;
+      setModelHealth(next);
+    } catch (e) {
+      alert(`No se pudo chequear modelos: ${e.message}`);
+    } finally {
+      setCheckingModels(false);
+    }
+  };
+
   const [files, setFiles] = useState([]);
   const [bgColor, setBgColor] = useState("black");
   const [contentType, setContentType] = useState("meme");
@@ -3209,7 +3488,7 @@ function MemeStep() {
       const bottomPct = cropEnabled ? cropBottomPct / 100 : 0;
       const leftPct = cropEnabled ? cropLeftPct / 100 : 0;
       const rightPct = cropEnabled ? cropRightPct / 100 : 0;
-      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct, contentType, topPct, bottomPct, leftPct, rightPct);
+      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct, contentType, topPct, bottomPct, leftPct, rightPct, memeModel);
       setBatchId(result.batch_id);
     } catch (e) {
       setError(e.message || "Error al subir los videos");
@@ -3300,6 +3579,11 @@ function MemeStep() {
               : "Texto gracioso y relatable, generado por IA sobre tus videos verticales."}
           </div>
         </div>
+        <PromptEditButton
+          promptKeys={contentType === "music"
+            ? ["music_artist", "music_vibe", "ig_description_music"]
+            : ["meme_text", "meme_crop", "ig_description_meme"]}
+          title={contentType === "music" ? "Prompts · Music Vibe" : "Prompts · Meme Generator"} />
         <div style={{ display: "flex", background: "var(--st-alt)", borderRadius: 9, padding: 3 }}>
           {[["meme", "Meme"], ["music", "Music Vibe"]].map(([k, label]) => {
             const on = contentType === k;
@@ -3328,6 +3612,12 @@ function MemeStep() {
       <div style={{ flex: 1, overflowY: "auto", padding: "24px 30px" }}>
         {!batchId ? (
           <div style={{ maxWidth: 620, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Modelo de IA */}
+            <div className="st-card" style={{ padding: "16px 18px" }}>
+              <div className="st-eyebrow" style={{ marginBottom: 10 }}>Modelo de IA</div>
+              <ModelSelector value={memeModel} onChange={setMemeModel} health={modelHealth} checking={checkingModels} onCheck={handleCheckModels} disabled={!!batchId} />
+            </div>
+
             {/* Dropzone */}
             <div
               onDrop={handleDrop}
@@ -3694,6 +3984,9 @@ function AnalyzerStep() {
             Momentos virales como texto y guion — para planear, copiar o reanalizar.
           </div>
         </div>
+        <PromptEditButton
+          promptKeys={["analysis_system", "verify_timestamps", "reanalyze_clip"]}
+          title="Prompts · Analyzer" />
         {phase === "done" && (
           <>
             <div style={{ display: "flex", background: "var(--st-alt)", borderRadius: 9, padding: 3 }}>
@@ -4058,12 +4351,133 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
 // The playhead and all interaction are in OUTPUT time (the final video's
 // timeline). Each block shows the thumbnails that fall in its source range.
 // ================================================
+// Catalog of transitions exposed to the UI. Keep keys in sync with the
+// backend XFADE_TRANSITIONS whitelist in video_service.py.
+const TRANSITIONS = [
+  { key: "cut",         label: "Corte",     hint: "Sin transición (default)" },
+  { key: "fade",        label: "Fade",      hint: "Crossfade suave" },
+  { key: "fadeblack",   label: "→ Negro",   hint: "Dip-to-black" },
+  { key: "fadewhite",   label: "→ Blanco",  hint: "Dip-to-white" },
+  { key: "dissolve",    label: "Dissolve",  hint: "Disolución granular" },
+  { key: "slideleft",   label: "Slide ←",   hint: "Desliza desde la derecha" },
+  { key: "slideright",  label: "Slide →",   hint: "Desliza desde la izquierda" },
+  { key: "slideup",     label: "Slide ↑",   hint: "Desliza desde abajo" },
+  { key: "slidedown",   label: "Slide ↓",   hint: "Desliza desde arriba" },
+  { key: "wipeleft",    label: "Wipe ←",    hint: "Limpia hacia la izquierda" },
+  { key: "wiperight",   label: "Wipe →",    hint: "Limpia hacia la derecha" },
+  { key: "circleopen",  label: "Iris ◯",    hint: "Círculo se abre" },
+  { key: "circleclose", label: "Iris ●",    hint: "Círculo se cierra" },
+  { key: "zoomin",      label: "Zoom",      hint: "Acerca" },
+  { key: "pixelize",    label: "Pixelize",  hint: "Pixelado" },
+  { key: "radial",      label: "Radial",    hint: "Barrido radial" },
+];
+
+// Build the inline style for the live preview overlay that simulates a
+// transition. p ∈ [0,1] is the progress through the transition window.
+// These are CSS approximations of FFmpeg's xfade — not pixel-accurate but
+// enough for the user to confirm the effect is configured before exporting.
+function buildTransitionFx(type, p) {
+  const bell = Math.sin(Math.PI * Math.max(0, Math.min(1, p)));  // 0→1→0
+  switch (type) {
+    case "fade":       return { background: "#000", opacity: bell * 0.6 };
+    case "fadeblack":  return { background: "#000", opacity: bell };
+    case "fadewhite":  return { background: "#fff", opacity: bell };
+    case "dissolve":   return { background: "rgba(160,160,160,.45)", opacity: bell, backdropFilter: "blur(3px)" };
+    case "pixelize":   return { backdropFilter: `blur(${bell * 14}px)`, opacity: 1 };
+    case "zoomin":     return { background: "#000", opacity: bell * 0.35, transform: `scale(${1 + bell * 0.35})`, transformOrigin: "center" };
+    case "slideleft":  return { background: "#000", clipPath: `inset(0 ${(1 - p) * 100}% 0 0)` };
+    case "slideright": return { background: "#000", clipPath: `inset(0 0 0 ${(1 - p) * 100}%)` };
+    case "slideup":    return { background: "#000", clipPath: `inset(${(1 - p) * 100}% 0 0 0)` };
+    case "slidedown":  return { background: "#000", clipPath: `inset(0 0 ${(1 - p) * 100}% 0)` };
+    case "wipeleft":   return { background: "#000", clipPath: `inset(0 ${(1 - p) * 100}% 0 0)` };
+    case "wiperight":  return { background: "#000", clipPath: `inset(0 0 0 ${(1 - p) * 100}%)` };
+    case "wipeup":     return { background: "#000", clipPath: `inset(${(1 - p) * 100}% 0 0 0)` };
+    case "wipedown":   return { background: "#000", clipPath: `inset(0 0 ${(1 - p) * 100}% 0)` };
+    case "circleopen": return { background: "#000", clipPath: `circle(${(1 - p) * 75}% at 50% 50%)` };
+    case "circleclose":return { background: "#000", clipPath: `circle(${p * 75}% at 50% 50%)` };
+    case "radial":     return { background: `conic-gradient(from -90deg, transparent 0deg, transparent ${p * 360}deg, #000 ${p * 360}deg, #000 360deg)` };
+    case "smoothleft": return { background: "#000", clipPath: `inset(0 ${(1 - p) * 100}% 0 0)`, transition: "clip-path 80ms linear" };
+    case "smoothright":return { background: "#000", clipPath: `inset(0 0 0 ${(1 - p) * 100}%)`, transition: "clip-path 80ms linear" };
+    default:           return { background: "#000", opacity: bell * 0.5 };
+  }
+}
+
+function TransitionPicker({ value, duration, onChange, onClose, anchorRect }) {
+  // Floating popover anchored to the boundary handle. Position above by
+  // default; clamp to viewport.
+  const W = 340, H = 290;
+  const left = anchorRect
+    ? Math.max(8, Math.min(window.innerWidth - W - 8, anchorRect.left + anchorRect.width / 2 - W / 2))
+    : 100;
+  const top = anchorRect
+    ? Math.max(8, anchorRect.top - H - 10)
+    : 100;
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
+      <div style={{
+        position: "fixed", left, top, width: W, zIndex: 61,
+        background: "var(--st-surface)", border: "1px solid var(--st-line)",
+        borderRadius: 12, padding: 12, boxShadow: "var(--st-shadow-modal)",
+        fontFamily: "var(--st-ui)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--st-text)" }}>Transición</span>
+          <X size={14} style={{ cursor: "pointer", color: "var(--st-muted)" }} onClick={onClose} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 5 }}>
+          {TRANSITIONS.map((t) => {
+            const sel = value === t.key || (t.key === "cut" && (!value || value === "cut"));
+            return (
+              <button
+                key={t.key}
+                onClick={() => onChange(t.key, t.key === "cut" ? 0 : (duration || 0.4))}
+                title={t.hint}
+                style={{
+                  fontFamily: "var(--st-ui)", fontSize: 10.5, padding: "8px 4px",
+                  background: sel ? "var(--st-accent)" : "var(--st-alt)",
+                  color: sel ? "var(--st-on-accent)" : "var(--st-text)",
+                  border: `1px solid ${sel ? "var(--st-accent)" : "var(--st-line)"}`,
+                  borderRadius: 7, cursor: "pointer", textAlign: "center",
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 12, opacity: value === "cut" ? 0.4 : 1, pointerEvents: value === "cut" ? "none" : "auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ fontSize: 11, color: "var(--st-muted)" }}>Duración</span>
+            <span style={{ fontSize: 11, color: "var(--st-text)", fontFamily: "var(--st-mono)" }}>
+              {(duration || 0.4).toFixed(2)}s
+            </span>
+          </div>
+          <input
+            type="range" min={0.1} max={2.0} step={0.05}
+            value={duration || 0.4}
+            onChange={(e) => onChange(value && value !== "cut" ? value : "fade", parseFloat(e.target.value))}
+            style={{ width: "100%" }}
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
 function TimelineEditor({
   thumbnails, segments, selectedIdx, outputTime, outputDuration,
   onSeekOutput, onSelectSegment, onSplit, onDeleteSegment, onReorder, onResizeSegment,
   loadingThumbs,
-  onSpeedChange, onImageDurationChange, onInsertImageClick, uploadingOverlay,
+  onSpeedChange, onTransitionChange, onImageDurationChange, onInsertImageClick, uploadingOverlay,
+  music, onAddMusic, onRemoveMusic, onMusicVol, onOrigVol, uploadingMusic,
 }) {
+  const [transPicker, setTransPicker] = useState(null);  // { idx, rect } or null
   const rulerRef = useRef(null);   // thin scrub bar
   const blocksRef = useRef(null);  // blocks row
   const [scrubbing, setScrubbing] = useState(false);
@@ -4341,11 +4755,179 @@ function TimelineEditor({
             </div>
           );
         })}
+
+        {/* Transition handles at each segment boundary (i = 1..N-1) */}
+        {!loadingThumbs && outputDuration > 0 && segments.slice(1).map((seg, j) => {
+          const idx = j + 1;
+          // Cumulative output duration up to (but not including) idx
+          let cum = 0;
+          for (let k = 0; k < idx; k++) {
+            const s = segments[k];
+            cum += s.type === "image" ? (s.duration || 3) : (s.end - s.start) / (s.speed || 1);
+          }
+          const leftPct = (cum / outputDuration) * 100;
+          const tname = (seg.transition_in && seg.transition_in !== "cut") ? seg.transition_in : null;
+          const tdur = seg.transition_duration || 0;
+          return (
+            <button
+              key={`tr-${idx}`}
+              onMouseDown={(e) => { e.stopPropagation(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                setTransPicker({ idx, rect });
+              }}
+              title={tname ? `${tname} · ${tdur.toFixed(2)}s` : "Agregar transición"}
+              style={{
+                position: "absolute", top: "50%", left: `${leftPct}%`,
+                transform: "translate(-50%, -50%)",
+                width: 22, height: 22, borderRadius: 11, padding: 0,
+                background: tname ? "var(--st-accent)" : "rgba(20,20,20,.85)",
+                color: tname ? "var(--st-on-accent)" : "var(--st-text)",
+                border: `1.5px solid ${tname ? "var(--st-accent)" : "rgba(255,255,255,.45)"}`,
+                cursor: "pointer", zIndex: 5,
+                fontSize: 12, fontWeight: 700, lineHeight: 1,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: "0 1px 4px rgba(0,0,0,.55)",
+              }}
+            >
+              {tname ? "✦" : "+"}
+            </button>
+          );
+        })}
+      </div>
+
+      {transPicker && (
+        <TransitionPicker
+          value={segments[transPicker.idx]?.transition_in || "cut"}
+          duration={segments[transPicker.idx]?.transition_duration || 0.4}
+          anchorRect={transPicker.rect}
+          onClose={() => setTransPicker(null)}
+          onChange={(type, dur) => onTransitionChange?.(transPicker.idx, type, dur)}
+        />
+      )}
+
+      {/* Audio track — below the video, aligned at full width (CapCut style) */}
+      <div style={{
+        marginTop: 5, height: 40, flexShrink: 0, position: "relative",
+        borderRadius: 6, overflow: "hidden", border: "1px solid var(--st-line)",
+        background: music ? "var(--st-accent)" : "transparent",
+        display: "flex", alignItems: "center",
+      }}>
+        {music ? (
+          <>
+            {/* waveform bars (normalized) */}
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", gap: 1, padding: "0 4px" }}>
+              {(() => {
+                const pk = (music.peaks && music.peaks.length) ? music.peaks : Array(120).fill(0.12);
+                const mx = Math.max(0.06, ...pk);
+                return pk.map((p, i) => (
+                  <div key={i} style={{ flex: 1, minWidth: 1, height: `${Math.max(3, Math.min(100, (p / mx) * 100))}%`, background: "var(--st-on-accent)", opacity: 0.45, borderRadius: 1 }} />
+                ));
+              })()}
+            </div>
+            {/* name + volume + remove */}
+            <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 8, padding: "0 9px", width: "100%", color: "var(--st-on-accent)" }}>
+              <Play size={11} style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: 11, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textShadow: "0 1px 3px rgba(0,0,0,.45)", maxWidth: 200 }}>{music.name}</span>
+              <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, background: "rgba(0,0,0,.28)", borderRadius: 6, padding: "3px 9px" }}>
+                <span style={{ fontSize: 10 }}>Música</span>
+                <input type="range" min={0} max={2} step={0.05} value={music.volume} onChange={(e) => onMusicVol(parseFloat(e.target.value))} style={{ width: 66 }} />
+                <span style={{ fontSize: 10, marginLeft: 4 }}>Orig</span>
+                <input type="range" min={0} max={2} step={0.05} value={music.originalVolume} onChange={(e) => onOrigVol(parseFloat(e.target.value))} style={{ width: 52 }} />
+                <X size={13} onClick={onRemoveMusic} style={{ cursor: "pointer", marginLeft: 2 }} />
+              </span>
+            </div>
+          </>
+        ) : (
+          <button onClick={onAddMusic} disabled={uploadingMusic}
+            className="st-btn st-btn--ghost" style={{ margin: "0 auto", padding: "5px 12px", fontSize: 12 }}>
+            <Plus size={13} /> {uploadingMusic ? "Subiendo…" : "Agregar audio"}
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
+
+// CSS approximations of the backend cinematic filters
+// (video_service.get_visual_filter_chain) — preview only; the real look is
+// applied by FFmpeg on export, so these just need to read the same direction.
+const VF_CSS = {
+  none: "none",
+  cinematic: "contrast(1.08) saturate(1.12)",
+  warm: "sepia(0.28) saturate(1.18) brightness(1.02)",
+  vivid: "saturate(1.45) contrast(1.06)",
+  moody: "contrast(1.16) brightness(0.9) saturate(0.85)",
+  bw: "grayscale(1)",
+};
+const VF_LABELS = [
+  ["none", "Normal"], ["cinematic", "Cine"], ["warm", "Cálido"],
+  ["vivid", "Vívido"], ["moody", "Moody"], ["bw", "B/N"],
+];
+
+// Visual preview thumbnail for a subtitle style (CapCut-style picker). Mirrors
+// the real look: Arial Black, white text + black outline, yellow highlight for
+// karaoke/highlight. Animation can't show statically, so we hint the look.
+const _SUB_OUTLINE = "1.4px 1.4px 0 #000,-1.4px 1.4px 0 #000,1.4px -1.4px 0 #000,-1.4px -1.4px 0 #000,0 2px 4px rgba(0,0,0,.55)";
+// active-word highlight colors per karaoke variant, and [box, text] per box variant
+const _SUB_KARA = { karaoke: "#ffe14d", karaoke_green: "#37e06a", karaoke_blue: "#3dd6ff", karaoke_pink: "#ff5db1", karaoke_red: "#ff4d4d", karaoke_orange: "#ff9f3d", karaoke_purple: "#c77dff" };
+const _SUB_BOX = { highlight: ["#ffe14d", "#000"], box_green: ["#37e06a", "#000"], box_blue: ["#2f7bff", "#fff"], box_pink: ["#ff5db1", "#000"], box_red: ["#ff3b3b", "#fff"] };
+function SubThumb({ styleKey, label, selected, onClick }) {
+  const base = {
+    fontFamily: '"Arial Black", Impact, system-ui, sans-serif', fontWeight: 900,
+    color: "#fff", lineHeight: 1.04, textShadow: _SUB_OUTLINE, letterSpacing: ".3px",
+    textAlign: "center", whiteSpace: "nowrap",
+  };
+  let body;
+  if (styleKey === "none")
+    body = <span style={{ fontFamily: "var(--st-ui)", fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,.5)" }}>Sin subs</span>;
+  else if (_SUB_KARA[styleKey])
+    body = <span style={{ ...base, fontSize: 13 }}>are <span style={{ color: _SUB_KARA[styleKey] }}>you</span> ready</span>;
+  else if (_SUB_BOX[styleKey])
+    body = <span style={{ ...base, fontSize: 13 }}>this <span style={{ background: _SUB_BOX[styleKey][0], color: _SUB_BOX[styleKey][1], textShadow: "none", padding: "1px 4px", borderRadius: 4 }}>word</span></span>;
+  else if (styleKey === "neon")
+    body = <span style={{ ...base, fontSize: 15, textShadow: "0 0 6px #3dd6ff,0 0 11px #3dd6ff,1.2px 1.2px 0 #000,-1.2px 1.2px 0 #000,1.2px -1.2px 0 #000,-1.2px -1.2px 0 #000" }}>neon</span>;
+  else if (styleKey === "line_box")
+    body = <span style={{ ...base, fontSize: 12.5, textShadow: "none", background: "#000", color: "#fff", padding: "3px 7px", borderRadius: 4 }}>line box</span>;
+  else if (styleKey === "underline")
+    body = <span style={{ ...base, fontSize: 13 }}>this <span style={{ textDecoration: "underline", textDecorationThickness: "2.5px", textUnderlineOffset: "2px" }}>word</span></span>;
+  else if (styleKey === "bubble")
+    body = <span style={{ ...base, textShadow: "none", background: "#fff", color: "#000", padding: "3px 8px", borderRadius: 6, fontSize: 12.5 }}>bubble</span>;
+  else if (styleKey === "reveal")
+    body = <span style={{ ...base, fontSize: 13 }}>one two <span style={{ display: "inline-block", fontSize: 16.5 }}>three</span></span>;
+  else if (styleKey === "stack")
+    body = <span style={{ ...base, fontSize: 10.5, lineHeight: 1.0, display: "flex", flexDirection: "column", gap: 1 }}><span>ARE</span><span style={{ color: "#ffe14d" }}>YOU</span><span>GO</span></span>;
+  else if (styleKey === "hollow")
+    body = <span style={{ fontFamily: '"Arial Black", Impact, system-ui, sans-serif', fontWeight: 900, fontSize: 15, color: "transparent", WebkitTextStroke: "1.6px #fff", letterSpacing: ".3px" }}>hollow</span>;
+  else if (styleKey === "retro")
+    body = <span style={{ ...base, fontSize: 15, textShadow: "3px 3px 0 #ff2db8,1.2px 1.2px 0 #000,-1.2px -1.2px 0 #000,1.2px -1.2px 0 #000,-1.2px 1.2px 0 #000" }}>retro</span>;
+  else if (styleKey === "popup")
+    body = <span style={{ ...base, fontSize: 21 }}>BOOM</span>;
+  else if (styleKey === "big_center")
+    body = <span style={{ ...base, fontSize: 24 }}>HUGE</span>;
+  else if (styleKey === "twoword")
+    body = <span style={{ ...base, fontSize: 17 }}>two words</span>;
+  else if (styleKey === "bounce")
+    body = <span style={{ ...base, fontSize: 18, display: "inline-block", transform: "rotate(-3deg)" }}>bounce!</span>;
+  else if (styleKey === "typewriter")
+    body = <span style={{ ...base, fontSize: 13 }}>typing<span style={{ opacity: 0.65 }}>|</span></span>;
+  else
+    body = <span style={{ ...base, fontSize: 12.5 }}>clean caption</span>;
+  return (
+    <div onClick={onClick} title={label} style={{
+      cursor: "pointer", borderRadius: 9, overflow: "hidden", position: "relative",
+      height: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 6px",
+      background: "radial-gradient(120% 120% at 50% 30%, #232323, #0b0b0b)",
+      border: `2px solid ${selected ? "var(--st-accent)" : "transparent"}`,
+      boxShadow: selected ? "0 0 0 1px var(--st-accent)" : "inset 0 0 0 1px rgba(255,255,255,.05)",
+    }}>
+      {body}
+      <span style={{ position: "absolute", bottom: 3, left: 0, right: 0, textAlign: "center", fontSize: 8.5, color: "rgba(255,255,255,.5)", fontFamily: "var(--st-mono)", letterSpacing: ".4px", pointerEvents: "none" }}>{label}</span>
+    </div>
+  );
+}
 
 // ================================================
 // EDITOR MODE — standalone manual editor (no AI clip detection)
@@ -4374,6 +4956,13 @@ function EditorMode({ onExit }) {
   const [showKeyframesModal, setShowKeyframesModal] = useState(false);
   const [activeRailTool, setActiveRailTool] = useState("frame");
   const [aspectRatio, setAspectRatio] = useState("9:16");
+  const [bgStyle, setBgStyle] = useState("blur");   // background fill: blur | black | white
+  const [visualFilter, setVisualFilter] = useState("none"); // none|cinematic|warm|vivid|moody|bw
+  // Background music track (the 2nd timeline bar): {path,url,name,volume,originalVolume}
+  const [music, setMusic] = useState(null);
+  const [uploadingMusic, setUploadingMusic] = useState(false);
+  const musicInputRef = useRef(null);
+  const musicRef = useRef(null);
   // Direct mouse manipulation of the video (pan/zoom) in the main preview.
   const videoDragRef = useRef(null);  // {startX, startY, ox, oy}
 
@@ -4475,6 +5064,30 @@ function EditorMode({ onExit }) {
     Math.abs(transcribedRange.end - trimEnd) > 0.5
   );
 
+  // Active transition under the playhead, if any. Window is centered on the
+  // boundary between segments i and i+1. progress p ∈ [0,1] sweeps the window.
+  const activeTransition = (() => {
+    if (segments.length < 2) return null;
+    let cum = 0;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const s = segments[i];
+      const segDur = s.type === "image" ? (s.duration || 3) : (s.end - s.start) / (s.speed || 1);
+      cum += segDur;
+      const next = segments[i + 1];
+      const t = next.transition_in || "cut";
+      const T = (t && t !== "cut") ? (next.transition_duration || 0.4) : 0;
+      if (T <= 0) continue;
+      const halfT = T / 2;
+      const winStart = cum - halfT;
+      const winEnd = cum + halfT;
+      if (outputTime >= winStart && outputTime <= winEnd) {
+        const p = Math.max(0, Math.min(1, (outputTime - winStart) / T));
+        return { type: t, progress: p, duration: T, boundary: i + 1 };
+      }
+    }
+    return null;
+  })();
+
   // ─── Upload ─────────────────────────────────────────────────────────────
   const handleFile = async (file) => {
     if (!file) return;
@@ -4506,7 +5119,7 @@ function EditorMode({ onExit }) {
       // The central style useEffect keeps it in sync afterwards.
       try {
         await api.updateStyle(result.project_id, {
-          fill_mode: "fit", fill_mode_scale: 1.0, background_style: "black",
+          fill_mode: "fit", fill_mode_scale: 1.0, background_style: "blur",
           caption_style: "tiktok", aspect_ratio: "9:16",
           subtitle_style: "none", subtitle_size_scale: 1.0, subtitle_y: 0.0,
           no_text: false, no_emojis: true, visual_filter: "none",
@@ -4570,7 +5183,107 @@ function EditorMode({ onExit }) {
     start: s.start, end: s.end, speed: s.speed || 1,
     type: s.type || "video", image_path: s.image_path || null,
     duration: s.duration || 0,
+    transition_in: s.transition_in || "cut",
+    transition_duration: s.transition_duration || 0,
   });
+
+  // Set the transition INTO segment idx (idx >= 1). type="cut" clears it.
+  const setSegmentTransition = (idx, type, duration) => {
+    setSegments((prev) => prev.map((s, i) => i === idx
+      ? { ...s, transition_in: type || "cut", transition_duration: type === "cut" ? 0 : (duration ?? 0.4) }
+      : s));
+  };
+
+  // ─── Undo / redo ────────────────────────────────────────────────────────
+  // Snapshot the whole editable "document" (everything the user can change)
+  // into a JSON string; a debounced effect records changes into a past/future
+  // stack. Setting lastDocRef BEFORE restoring keeps undo/redo from recording
+  // themselves as new history entries.
+  const captureDoc = () => JSON.stringify({
+    segments,
+    bgStyle, visualFilter, aspectRatio, music,
+    subtitlesOn, subStyle, subSize, subY,
+    overlays,
+    ez: clipObj?.edit_zoom ?? 1, epx: clipObj?.edit_pan_x ?? 0, epy: clipObj?.edit_pan_y ?? 0,
+    keyframes: clipObj?.keyframes ?? [],
+  });
+
+  const restoreDoc = (json) => {
+    let d; try { d = JSON.parse(json); } catch { return; }
+    setSegments(d.segments || []);
+    setBgStyle(d.bgStyle); setVisualFilter(d.visualFilter); setAspectRatio(d.aspectRatio);
+    setMusic(d.music ?? null);
+    setSubtitlesOn(d.subtitlesOn); setSubStyle(d.subStyle); setSubSize(d.subSize); setSubY(d.subY);
+    setOverlays(d.overlays || []);
+    setClipObj((c) => c ? { ...c, edit_zoom: d.ez, edit_pan_x: d.epx, edit_pan_y: d.epy, keyframes: d.keyframes || [] } : c);
+    // Style + overlays + subtitles re-persist via the buildEditorStyle effect.
+    // Segments and transform/keyframes have no such effect on a non-slider
+    // change, so persist them explicitly.
+    if (projectId) {
+      api.saveEditorSegments(projectId, (d.segments || []).map(segToPayload)).catch(() => {});
+      if (clipObj) api.editClipTransform(projectId, clipObj.id, {
+        edit_zoom: d.ez, edit_pan_x: d.epx, edit_pan_y: d.epy, keyframes: d.keyframes || [],
+      }).catch(() => {});
+    }
+  };
+
+  const histRef = useRef({ past: [], future: [] });
+  const lastDocRef = useRef(null);
+  const [, setHistTick] = useState(0);
+  const bumpHist = () => setHistTick((t) => t + 1);
+
+  // Record settled changes (debounced) into the past stack.
+  useEffect(() => {
+    if (!projectId || !clipObj) return;
+    const doc = captureDoc();
+    if (lastDocRef.current === null) { lastDocRef.current = doc; return; }
+    if (doc === lastDocRef.current) return;
+    const t = setTimeout(() => {
+      const h = histRef.current;
+      h.past.push(lastDocRef.current);
+      if (h.past.length > 80) h.past.shift();
+      h.future = [];
+      lastDocRef.current = doc;
+      bumpHist();
+    }, 450);
+    return () => clearTimeout(t);
+  }, [segments, bgStyle, visualFilter, aspectRatio, music, subtitlesOn, subStyle, subSize, subY, overlays, clipObj]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const undo = () => {
+    const h = histRef.current;
+    if (!h.past.length) return;
+    h.future.unshift(lastDocRef.current ?? captureDoc());
+    const target = h.past.pop();
+    lastDocRef.current = target;
+    restoreDoc(target);
+    bumpHist();
+  };
+  const redo = () => {
+    const h = histRef.current;
+    if (!h.future.length) return;
+    h.past.push(lastDocRef.current ?? captureDoc());
+    const target = h.future.shift();
+    lastDocRef.current = target;
+    restoreDoc(target);
+    bumpHist();
+  };
+  const canUndo = histRef.current.past.length > 0;
+  const canRedo = histRef.current.future.length > 0;
+
+  // Keyboard: Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z or Ctrl+Y = redo.
+  const undoRef = useRef(undo); undoRef.current = undo;
+  const redoRef = useRef(redo); redoRef.current = redo;
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) return;
+      const z = e.key.toLowerCase() === "z";
+      if ((e.ctrlKey || e.metaKey) && z && !e.shiftKey) { e.preventDefault(); undoRef.current(); }
+      else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (z && e.shiftKey))) { e.preventDefault(); redoRef.current(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Insert an image as a timeline clip (full-screen, default 3s, appended)
   const addImageClip = async (file) => {
@@ -4695,11 +5408,14 @@ function EditorMode({ onExit }) {
   // Central style builder — the PUT /style endpoint REPLACES the whole style,
   // so every save must include all editor fields or they'd reset to defaults.
   const buildEditorStyle = () => ({
-    fill_mode: "fit", fill_mode_scale: 1.0, background_style: "black",
+    fill_mode: "fit", fill_mode_scale: 1.0, background_style: bgStyle,
     caption_style: "tiktok", aspect_ratio: aspectRatio,
     subtitle_style: subtitlesOn ? subStyle : "none",
     subtitle_size_scale: subSize, subtitle_y: subY,
-    no_text: false, no_emojis: true, visual_filter: "none",
+    no_text: false, no_emojis: true, visual_filter: visualFilter,
+    music_path: music?.path || null,
+    music_volume: music?.volume ?? 0.8,
+    original_volume: music?.originalVolume ?? 1.0,
     image_overlays: overlays.map((o) => ({
       path: o.path, x: o.x, y: o.y, scale: o.scale,
       start: o.start, end: o.end, opacity: o.opacity,
@@ -4713,7 +5429,7 @@ function EditorMode({ onExit }) {
       api.updateStyle(projectId, buildEditorStyle()).catch((e) => console.error("style save failed:", e));
     }, 350);
     return () => clearTimeout(t);
-  }, [aspectRatio, subtitlesOn, subStyle, subSize, subY, overlays]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [aspectRatio, bgStyle, visualFilter, music, subtitlesOn, subStyle, subSize, subY, overlays]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drag / resize an overlay on the preview (mouse)
   useEffect(() => {
@@ -4796,6 +5512,40 @@ function EditorMode({ onExit }) {
       syncBg(undefined, false);
     }
   };
+
+  // ─── Background music ──────────────────────────────────────────────────
+  const handleMusicUpload = async (file) => {
+    if (!projectId || !file) return;
+    setUploadingMusic(true);
+    try {
+      const res = await api.uploadEditorMusic(projectId, file);
+      setMusic({ path: res.path, url: res.url, name: res.filename || file.name, volume: 0.8, originalVolume: 1.0, peaks: res.peaks || [] });
+    } catch (e) {
+      console.error("music upload failed:", e);
+    } finally {
+      setUploadingMusic(false);
+    }
+  };
+
+  // Music <audio> volume (HTML is 0..1; export uses 0..2 so we clamp the preview).
+  useEffect(() => {
+    if (musicRef.current) musicRef.current.volume = music ? Math.min(1, music.volume) : 0;
+  }, [music]);
+
+  // Play / pause the music together with the video, anchored to the output time.
+  useEffect(() => {
+    const a = musicRef.current;
+    if (!a || !music) return;
+    if (playing) { try { a.currentTime = outputTime; } catch (_) {} a.play().catch(() => {}); }
+    else a.pause();
+  }, [playing, music]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-anchor the music if it drifts from the output timeline (seek / segment jump).
+  useEffect(() => {
+    const a = musicRef.current;
+    if (!a || !music || !playing) return;
+    if (Math.abs(a.currentTime - outputTime) > 0.3) { try { a.currentTime = outputTime; } catch (_) {} }
+  }, [outputTime, music, playing]);
 
   // ─── Add Subtitles (button → trigger Whisper on the trim) ──────────────
   const activateSubtitles = async () => {
@@ -4926,6 +5676,8 @@ function EditorMode({ onExit }) {
     setClipObj(null);
     setSegments([]); setSelectedSegIdx(null); setThumbnails([]);
     setOverlays([]); setSelectedOverlayIdx(null);
+    setMusic(null); setBgStyle("blur"); setVisualFilter("none");
+    histRef.current = { past: [], future: [] }; lastDocRef.current = null;
     setAspectRatio("9:16");
     setSubtitlesOn(false); setTranscribedRange(null); setSubWordCount(0);
     setTranscriptWords([]);
@@ -5004,6 +5756,11 @@ function EditorMode({ onExit }) {
   const SUB_STYLES = [
     ["clean", "Limpio"], ["karaoke", "Karaoke"], ["popup", "Pop-up"], ["highlight", "Highlight"],
     ["big_center", "Big Center"], ["twoword", "Two-Word"], ["bounce", "Bounce"], ["typewriter", "Typewriter"],
+    ["karaoke_green", "Karaoke Verde"], ["karaoke_blue", "Karaoke Azul"], ["karaoke_pink", "Karaoke Rosa"],
+    ["box_green", "Caja Verde"], ["box_blue", "Caja Azul"], ["neon", "Neón"],
+    ["karaoke_red", "Karaoke Rojo"], ["karaoke_orange", "Karaoke Naranja"], ["karaoke_purple", "Karaoke Morado"],
+    ["box_pink", "Caja Rosa"], ["box_red", "Caja Roja"], ["line_box", "Caja Línea"], ["underline", "Subrayado"],
+    ["bubble", "Burbuja"], ["reveal", "Aparece"], ["stack", "Vertical"], ["hollow", "Contorno"], ["retro", "Retro 3D"],
   ];
   // Thin adapter over the shared StSlider (keeps EditorMode's number-style
   // onChange + `val` prop so existing usages stay unchanged).
@@ -5049,6 +5806,12 @@ function EditorMode({ onExit }) {
               {filename || "Clip sin título"}
             </div>
           </div>
+          <button onClick={undo} disabled={!canUndo} title="Deshacer (Ctrl+Z)" className="st-btn st-btn--ghost" style={{ padding: "7px 10px", opacity: canUndo ? 1 : 0.4 }}>
+            <Undo2 size={15} />
+          </button>
+          <button onClick={redo} disabled={!canRedo} title="Rehacer (Ctrl+Shift+Z)" className="st-btn st-btn--ghost" style={{ padding: "7px 10px", opacity: canRedo ? 1 : 0.4 }}>
+            <Redo2 size={15} />
+          </button>
           <button onClick={resetVideoTransform} className="st-btn st-btn--ghost" style={{ padding: "7px 12px" }}>
             <RefreshCw size={14} /> Restablecer
           </button>
@@ -5067,7 +5830,8 @@ function EditorMode({ onExit }) {
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, minHeight: 0 }}>
               <div ref={previewBoxRef} style={{
                 height: "100%", maxHeight: 440, aspectRatio: aspectRatio.replace(":", " / "),
-                borderRadius: 14, overflow: "hidden", position: "relative", background: "#000",
+                borderRadius: 14, overflow: "hidden", position: "relative",
+                background: bgStyle === "white" ? "#fff" : "#000",
                 boxShadow: "var(--st-shadow)", containerType: "size",
               }}>
                 {/* Blurred background fill (mirrors export fit mode) */}
@@ -5079,7 +5843,7 @@ function EditorMode({ onExit }) {
                     position: "absolute", inset: 0, width: "100%", height: "100%",
                     objectFit: "cover", filter: "blur(24px) brightness(0.5)",
                     transform: "scale(1.15)", pointerEvents: "none",
-                    visibility: showingImageClip ? "hidden" : "visible",
+                    visibility: (showingImageClip || bgStyle !== "blur") ? "hidden" : "visible",
                   }}
                 />
                 <video
@@ -5102,6 +5866,7 @@ function EditorMode({ onExit }) {
                     transform: `translate(${vPanX}%, ${vPanY}%) scale(${vZoom})`,
                     transformOrigin: "center",
                     cursor: "grab",
+                    filter: VF_CSS[visualFilter] || "none",
                     visibility: showingImageClip ? "hidden" : "visible",
                   }}
                 />
@@ -5167,6 +5932,24 @@ function EditorMode({ onExit }) {
                 <span style={{ position: "absolute", top: 10, left: 11, fontFamily: "var(--st-mono)", fontSize: 9.5, color: "#fff", background: "rgba(0,0,0,.5)", padding: "2px 6px", borderRadius: 5, zIndex: 7 }}>
                   {aspectRatio}
                 </span>
+                {/* Live transition preview (CSS approximation of FFmpeg xfade) */}
+                {activeTransition && (
+                  <>
+                    <div style={{
+                      position: "absolute", inset: 0, zIndex: 9, pointerEvents: "none",
+                      ...buildTransitionFx(activeTransition.type, activeTransition.progress),
+                    }} />
+                    <span style={{
+                      position: "absolute", top: 10, right: 11, zIndex: 10,
+                      fontFamily: "var(--st-mono)", fontSize: 10, color: "#15130e",
+                      background: "var(--st-gold, #e6c270)", padding: "3px 8px",
+                      borderRadius: 5, fontWeight: 700, letterSpacing: ".4px",
+                      boxShadow: "0 2px 6px rgba(0,0,0,.4)",
+                    }}>
+                      ▸ {activeTransition.type} · {activeTransition.duration.toFixed(2)}s
+                    </span>
+                  </>
+                )}
               </div>
             </div>
             {/* Transport */}
@@ -5218,6 +6001,44 @@ function EditorMode({ onExit }) {
                         }}>
                           <div style={{ fontFamily: "var(--st-mono)", fontSize: 13, fontWeight: 600, color: sel ? "var(--st-text)" : "var(--st-muted)" }}>{v}</div>
                           <div style={{ fontSize: 10.5, color: "var(--st-faint)" }}>{d}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14 }}>
+                    <ImageIcon size={14} style={{ color: "var(--st-muted)" }} />
+                    <span className="st-eyebrow">Fondo</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
+                    {[["blur", "Blur"], ["black", "Negro"], ["white", "Blanco"]].map(([v, d]) => {
+                      const sel = bgStyle === v;
+                      return (
+                        <div key={v} onClick={() => setBgStyle(v)} style={{
+                          padding: "9px 6px", borderRadius: 9, cursor: "pointer", textAlign: "center",
+                          border: `1px solid ${sel ? "var(--st-accent)" : "var(--st-border)"}`,
+                          background: sel ? "var(--st-soft)" : "transparent",
+                        }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: sel ? "var(--st-text)" : "var(--st-muted)" }}>{d}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14 }}>
+                    <Wand2 size={14} style={{ color: "var(--st-muted)" }} />
+                    <span className="st-eyebrow">Filtro</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
+                    {VF_LABELS.map(([v, d]) => {
+                      const sel = visualFilter === v;
+                      return (
+                        <div key={v} onClick={() => setVisualFilter(v)} style={{
+                          padding: "9px 6px", borderRadius: 9, cursor: "pointer", textAlign: "center",
+                          border: `1px solid ${sel ? "var(--st-accent)" : "var(--st-border)"}`,
+                          background: sel ? "var(--st-soft)" : "transparent",
+                        }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: sel ? "var(--st-text)" : "var(--st-muted)" }}>{d}</div>
                         </div>
                       );
                     })}
@@ -5277,19 +6098,11 @@ function EditorMode({ onExit }) {
                           </button>
                         </div>
                       )}
-                      {/* Style chips */}
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 18 }}>
-                        {SUB_STYLES.map(([v, label]) => {
-                          const sel = subStyle === v;
-                          return (
-                            <span key={v} onClick={() => setSubStyle(v)} style={{
-                              fontSize: 11.5, fontWeight: 500, padding: "5px 10px", borderRadius: 7, cursor: "pointer",
-                              border: `1px solid ${sel ? "var(--st-accent)" : "var(--st-border)"}`,
-                              background: sel ? "var(--st-soft)" : "transparent",
-                              color: sel ? "var(--st-text)" : "var(--st-muted)",
-                            }}>{label}</span>
-                          );
-                        })}
+                      {/* Style preview grid (CapCut-style thumbnails) */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 18 }}>
+                        {SUB_STYLES.map(([v, label]) => (
+                          <SubThumb key={v} styleKey={v} label={label} selected={subStyle === v} onClick={() => setSubStyle(v)} />
+                        ))}
                       </div>
                       <FrameSlider label="Tamaño" val={`${Math.round(subSize * 100)}%`} min={0.6} max={1.6} step={0.05} value={subSize}
                         onChange={(n) => setSubSize(n)} />
@@ -5370,8 +6183,14 @@ function EditorMode({ onExit }) {
           </div>
         </div>
 
-        {/* ═══ TIMELINE (bottom, full width) ═══ */}
-        <div style={{ height: 172, flexShrink: 0, borderTop: "1px solid var(--st-line)", background: "var(--st-surface)" }}>
+        {/* The audio track now lives INSIDE the timeline (below the video).
+            These are just the hidden file input + the preview <audio> element. */}
+        <input ref={musicInputRef} type="file" accept="audio/*" hidden
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleMusicUpload(f); e.target.value = ""; }} />
+        <audio ref={musicRef} src={music?.url || undefined} preload="auto" />
+
+        {/* ═══ TIMELINE (video track + audio track below, full width) ═══ */}
+        <div style={{ height: 225, flexShrink: 0, borderTop: "1px solid var(--st-line)", background: "var(--st-surface)" }}>
           <TimelineEditor
             thumbnails={thumbnails}
             segments={segments}
@@ -5386,9 +6205,16 @@ function EditorMode({ onExit }) {
             onResizeSegment={resizeSegment}
             loadingThumbs={loadingThumbs}
             onSpeedChange={setSegmentSpeed}
+            onTransitionChange={setSegmentTransition}
             onImageDurationChange={setImageClipDuration}
             onInsertImageClick={() => imageClipFileRef.current?.click()}
             uploadingOverlay={uploadingOverlay}
+            music={music}
+            onAddMusic={() => musicInputRef.current?.click()}
+            onRemoveMusic={() => setMusic(null)}
+            onMusicVol={(v) => setMusic((m) => m ? { ...m, volume: v } : m)}
+            onOrigVol={(v) => setMusic((m) => m ? { ...m, originalVolume: v } : m)}
+            uploadingMusic={uploadingMusic}
           />
         </div>
       </div>

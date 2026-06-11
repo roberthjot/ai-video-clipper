@@ -36,6 +36,8 @@ class SegmentInput(BaseModel):
     type: str = "video"
     image_path: str | None = None
     duration: float = 0.0
+    transition_in: str = "cut"
+    transition_duration: float = 0.0
 
 
 class SegmentsRequest(BaseModel):
@@ -254,6 +256,50 @@ async def editor_overlay_file(project_id: str, filename: str):
     return FileResponse(path)
 
 
+@router.post("/{project_id}/music")
+async def editor_upload_music(project_id: str, audio: UploadFile = File(...)):
+    """Upload a background-music track for the editor. Returns server path + URL.
+    The path is stored in StyleConfig.music_path and mixed in on export."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+
+    music_dir = os.path.join(project.output_dir, "music")
+    os.makedirs(music_dir, exist_ok=True)
+    ext = os.path.splitext(audio.filename or "")[1].lower()
+    if ext not in (".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".flac"):
+        ext = ".mp3"
+    fname = f"music_{uuid.uuid4().hex[:8]}{ext}"
+    fpath = os.path.join(music_dir, fname)
+    with open(fpath, "wb") as f:
+        shutil.copyfileobj(audio.file, f)
+
+    # Waveform peaks for the editor's audio track (the little bars).
+    peaks = video_service.get_audio_peaks(fpath, buckets=320)
+
+    return {
+        "path": fpath,
+        "url": f"/api/editor/{project_id}/music/{fname}",
+        "filename": audio.filename or fname,
+        "peaks": peaks,
+    }
+
+
+@router.get("/{project_id}/music/{filename}")
+async def editor_music_file(project_id: str, filename: str):
+    """Serve an uploaded music track (for preview playback in the editor)."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = os.path.join(projects[project_id].output_dir, "music", filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Music not found")
+    return FileResponse(path)
+
+
 @router.get("/{project_id}/thumb/{filename}")
 async def editor_thumb_file(project_id: str, filename: str):
     """Serve a single timeline thumbnail JPEG."""
@@ -289,15 +335,19 @@ async def editor_save_segments(project_id: str, req: SegmentsRequest):
     # playback/export order so the user can reorder pieces (CapCut style).
     clean = []
     for s in req.segments:
+        t_in = (s.transition_in or "cut").lower()
+        t_dur = max(0.0, min(3.0, float(s.transition_duration or 0)))
         if s.type == "image":
             clean.append(Segment(start=0.0, end=0.0, type="image",
-                                 image_path=s.image_path, duration=max(0.5, float(s.duration or 3.0))))
+                                 image_path=s.image_path, duration=max(0.5, float(s.duration or 3.0)),
+                                 transition_in=t_in, transition_duration=t_dur))
             continue
         a = max(0.0, min(project.video_duration, float(s.start)))
         b = max(0.0, min(project.video_duration, float(s.end)))
         if b - a > 0.05:
             clean.append(Segment(start=round(a, 3), end=round(b, 3),
-                                 speed=max(0.25, min(4.0, float(s.speed or 1.0)))))
+                                 speed=max(0.25, min(4.0, float(s.speed or 1.0))),
+                                 transition_in=t_in, transition_duration=t_dur))
     clip.segments = clean
 
     # Source range covered by VIDEO segments (for transcription windowing)
@@ -305,12 +355,10 @@ async def editor_save_segments(project_id: str, req: SegmentsRequest):
     if vid:
         clip.start_time = min(seg.start for seg in vid)
         clip.end_time = max(seg.end for seg in vid)
-    # Output duration accounts for speed (video) + image durations
-    def _odur(seg):
-        if seg.type == "image":
-            return seg.duration
-        return (seg.end - seg.start) / max(0.25, seg.speed)
-    clip.duration = sum(_odur(s) for s in clean) if clean else (clip.end_time - clip.start_time)
+    # Output duration accounts for speed, image durations, AND xfade overlap.
+    from ..services import video_service
+    clip.duration = (video_service.total_output_duration([s.model_dump() for s in clean])
+                     if clean else (clip.end_time - clip.start_time))
 
     return {
         "status": "ok",

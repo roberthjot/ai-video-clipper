@@ -100,6 +100,15 @@ async def get_project(project_id: str):
     return projects[project_id]
 
 
+@router.patch("/projects/{project_id}/creator")
+async def update_project_creator(project_id: str, creator_name: str = Form("")):
+    """Update the project's creator_name (used by Gemini on reanalyze)."""
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    projects[project_id].creator_name = (creator_name or "").strip()
+    return {"status": "ok", "creator_name": projects[project_id].creator_name}
+
+
 @router.get("/status/{project_id}")
 async def get_project_status(project_id: str):
     """Get just the project status (for polling during analysis)."""
