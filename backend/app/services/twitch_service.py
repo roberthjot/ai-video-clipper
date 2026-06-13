@@ -273,12 +273,37 @@ def process_clip_to_project(clip_slug: str, clip_title: str,
     projects = get_project_store()
     projects[project_id] = project
 
+    # Whisper transcription — runs serially BEFORE Gemini caption thread so
+    # the editor can burn-in word-level subtitles. Failure is non-fatal: the
+    # project stays "analyzing" and the caption job continues; only the
+    # subtitle option in the editor becomes unavailable.
+    _run_whisper(project_id, upload_path)
+
     # Background: caption + IG description via Gemini, then mark "ready"
     t = threading.Thread(target=_caption_with_gemini,
                           args=(project_id,), daemon=True)
     t.start()
     print(f"[TwitchClip] project={project_id} file={filename} dur={duration:.1f}s — analyzing in background")
     return project_id
+
+
+def _run_whisper(project_id: str, video_path: str) -> None:
+    """Transcribe a video via Whisper and store on project.transcript.
+    Non-fatal — logs and continues if Whisper crashes or the lib is missing."""
+    from ..routes.upload import get_project_store
+    from . import whisper_service
+    projects = get_project_store()
+    project = projects.get(project_id)
+    if not project:
+        return
+    try:
+        print(f"[TwitchClip] {project_id}: starting Whisper on {os.path.basename(video_path)}…")
+        transcript = whisper_service.transcribe(video_path)
+        project.transcript = transcript
+        n_words = len((transcript or {}).get("words", []))
+        print(f"[TwitchClip] {project_id}: Whisper done — {n_words} words")
+    except Exception as e:
+        print(f"[TwitchClip] {project_id}: Whisper failed (subtitles unavailable): {e}")
 
 
 def process_clips_batch_to_project(clips: list[dict], broadcaster_name: str = "",
@@ -412,8 +437,15 @@ def process_clips_batch_to_project(clips: list[dict], broadcaster_name: str = ""
     projects = get_project_store()
     projects[project_id] = project
 
+    # Whisper transcribes the WHOLE concatenated MP4 in a single pass. Each
+    # ClipData's start/end already points at the right time-range inside this
+    # file, so per-clip subtitle rendering picks the right words for free.
+    # Failure is non-fatal — only the subtitle option in the editor becomes
+    # unavailable, the rest of the project still works.
+    _run_whisper(project_id, combined_path)
+
     print(f"[TwitchBatch] project={project_id} clips={len(clip_records)} "
-          f"total_dur={total_dur:.1f}s — analyzing in background")
+          f"total_dur={total_dur:.1f}s — captioning in background")
     threading.Thread(target=_caption_clips_batch_with_gemini,
                      args=(project_id,), daemon=True).start()
     return project_id

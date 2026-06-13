@@ -2,6 +2,28 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🎤 Whisper for Twitch clip flows (subtitles now work)
+
+`process_clip_to_project` and `process_clips_batch_to_project` were skipping
+Whisper entirely — they created projects with `project.transcript = None`.
+Result: when the user opened the Editor and picked any subtitle style
+(clean / karaoke / popup / etc.) the burned-in subs silently didn't render,
+because `subtitle_service.generate_ass_for_clip` had no transcript to draw
+from.
+
+Fix:
+- New shared helper `twitch_service._run_whisper(project_id, video_path)` —
+  loads `whisper_service` lazily, transcribes, assigns the result to
+  `project.transcript`. Non-fatal on failure (logs and continues; only the
+  subtitle option becomes unavailable, the project still becomes `ready`).
+- Both flows call it after the MP4 lands on disk and BEFORE spawning the
+  Gemini caption background thread. Runs serially (~5-15s for a single
+  clip, ~1-2 min for a batch of 10 concatenated clips). Whisper is local
+  CPU; doesn't conflict with anything else.
+- For the batch flow the transcript covers the WHOLE concatenated MP4,
+  so each `ClipData`'s `start/end` already lines up with the right
+  word-level timestamps for free — no manual remapping needed.
+
 ## 🌀 Cyclic mirror + sway (anti-detect for TikTok / Reels reuploads)
 
 Two new editor effects that change the video's perceptual fingerprint without
