@@ -1730,6 +1730,11 @@ def generate_preview_clip(
     edit_pan_y: float = 0.0,
     fill_mode_scale: float = 1.0,
     keyframes: list = None,         # list of Keyframe (or dicts) — animated zoom/pan
+    mirror_cyclic_enabled: bool = False,
+    mirror_cyclic_interval: float = 5.0,
+    sway_enabled: bool = False,
+    sway_period: float = 3.0,
+    sway_amplitude: int = 40,
 ) -> str:
     """Generate preview clip with blur + rounded white box + text."""
     clip_duration = min(duration, max_seconds)
@@ -1790,27 +1795,52 @@ def generate_preview_clip(
             return base + ",drawbox=x=0:y=0:w=iw:h=ih:color=white@1.0:t=fill"
         return base + ",boxblur=12:2"
 
+    # Cyclic mirror — same logic as in export_service: applied to FG only,
+    # before overlay, so captions/watermark/subs stay un-flipped.
+    fg_chain = fg_filter
+    if mirror_cyclic_enabled:
+        m_int = max(0.5, min(20.0, float(mirror_cyclic_interval or 5.0)))
+        fg_chain = (
+            f"{fg_chain},"
+            f"hflip=enable='lt(mod(t\\,{m_int * 2:.3f})\\,{m_int:.3f})'"
+        )
+
+    # Sway — sine-wave offset added to the overlay X coord. Captions use
+    # their own absolute positions, so they don't sway.
+    sway_x_add = ""
+    if sway_enabled:
+        s_period = max(0.5, min(30.0, float(sway_period or 3.0)))
+        s_amp = max(0, min(200, int(sway_amplitude or 40)))
+        if s_amp > 0:
+            sway_x_add = f"+sin(2*PI*t/{s_period:.3f})*{s_amp}"
+
     # In keyframes mode the fg is already canvas-sized — overlay at (0,0).
     # In static mode the overlay carries the pan offset (as before).
-    # IMPORTANT: build each overlay string INSIDE its branch — `video_h`
-    # only exists when `use_split` is True (defined in the if-split block above).
     if use_split:
-        _overlay_xy_split = "0:0" if use_keyframes else (
-            f"(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*{video_h}"
-        )
+        if use_keyframes:
+            _overlay_xy_split = f"0{sway_x_add}:0"
+        else:
+            _overlay_xy_split = (
+                f"(W-w)/2+({_pan_x_pct})*W{sway_x_add}:"
+                f"(H-h)/2+({_pan_y_pct})*{video_h}"
+            )
         filter_complex = (
             f"{_bg(video_h)}[bg];"
-            f"[0:v]{fg_filter}[fg];"
+            f"[0:v]{fg_chain}[fg];"
             f"[bg][fg]overlay={_overlay_xy_split},format=yuv420p[video_part];"
             f"[1:v]scale={W}:{image_h}:force_original_aspect_ratio=increase,crop={W}:{image_h},setsar=1,format=yuv420p[img_part];"
             f"[video_part][img_part]vstack=inputs=2[v]"
         )
         input_index = 2
     else:
-        _overlay_xy_full = "0:0" if use_keyframes else (
-            f"(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H"
-        )
-        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_filter}[fg];[bg][fg]overlay={_overlay_xy_full}[v]"
+        if use_keyframes:
+            _overlay_xy_full = f"0{sway_x_add}:0"
+        else:
+            _overlay_xy_full = (
+                f"(W-w)/2+({_pan_x_pct})*W{sway_x_add}:"
+                f"(H-h)/2+({_pan_y_pct})*H"
+            )
+        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_chain}[fg];[bg][fg]overlay={_overlay_xy_full}[v]"
 
     last_label = "v"
     rounded_box_path = None

@@ -288,6 +288,7 @@ function Sidebar({ active, filename, clipCount, hasProject, onNav }) {
         <NavItem icon={<ImageIcon size={17} />} label="Memes" active={active === "meme"} onClick={() => onNav("meme")} />
         <NavItem icon={<Radio size={17} />} label="Live Stream" active={active === "live"} onClick={() => onNav("live")} />
         <NavItem icon={<Sparkles size={17} />} label="Analyzer" active={active === "analyzer"} onClick={() => onNav("analyzer")} />
+        <NavItem icon={<Download size={17} />} label="Descargas" active={active === "downloader"} onClick={() => onNav("downloader")} />
       </div>
 
       {/* footer */}
@@ -2226,7 +2227,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y]);
+  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y, style.mirror_cyclic_enabled, style.mirror_cyclic_interval, style.sway_enabled, style.sway_period, style.sway_amplitude]);
 
   // Poll progress
   useEffect(() => {
@@ -2871,13 +2872,63 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             </StRow>
 
             {/* Anti-Detect (expandable) */}
-            <StRow icon={<Sparkles size={15} />} label="Anti-Detect" summary={(() => { const n = [style.strip_metadata, style.flip_horizontal, style.zoom_uniquify, style.boost_contrast].filter(Boolean).length; return n > 0 ? `${n} activo${n > 1 ? "s" : ""}` : "off"; })()}>
+            <StRow icon={<Sparkles size={15} />} label="Anti-Detect" summary={(() => {
+              const n = [style.strip_metadata, style.flip_horizontal, style.zoom_uniquify, style.boost_contrast,
+                         style.mirror_cyclic_enabled, style.sway_enabled].filter(Boolean).length;
+              return n > 0 ? `${n} activo${n > 1 ? "s" : ""}` : "off";
+            })()}>
               <p style={{ fontSize: 11.5, color: "var(--st-muted)", margin: "0 0 10px" }}>Se aplican al exportar · no afectan el preview.</p>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <StChip active={style.strip_metadata} onClick={() => setStyle(s => ({ ...s, strip_metadata: !s.strip_metadata }))} title="Elimina EXIF/MP4 metadata">{style.strip_metadata ? "✓ " : ""}Strip Metadata</StChip>
                 <StChip active={style.flip_horizontal} onClick={() => setStyle(s => ({ ...s, flip_horizontal: !s.flip_horizontal }))} title="Espejo horizontal">{style.flip_horizontal ? "✓ " : ""}Flip</StChip>
                 <StChip active={style.zoom_uniquify} onClick={() => setStyle(s => ({ ...s, zoom_uniquify: !s.zoom_uniquify }))} title="Zoom +2%">{style.zoom_uniquify ? "✓ " : ""}Zoom +2%</StChip>
                 <StChip active={style.boost_contrast} onClick={() => setStyle(s => ({ ...s, boost_contrast: !s.boost_contrast }))} title="Contraste/brillo">{style.boost_contrast ? "✓ " : ""}Boost</StChip>
+              </div>
+
+              {/* Cyclic mirror — toggle + interval slider */}
+              <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 9, background: "var(--st-soft)", border: "1px solid var(--st-line)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: style.mirror_cyclic_enabled ? 10 : 0 }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-text)" }}>🪞 Espejo cíclico</div>
+                    <div style={{ fontSize: 11, color: "var(--st-faint)", marginTop: 2 }}>El video se invierte cada N segundos. Captions NO se mueven.</div>
+                  </div>
+                  <StChip active={!!style.mirror_cyclic_enabled}
+                    onClick={() => setStyle(s => ({ ...s, mirror_cyclic_enabled: !s.mirror_cyclic_enabled }))}>
+                    {style.mirror_cyclic_enabled ? "ON" : "OFF"}
+                  </StChip>
+                </div>
+                {style.mirror_cyclic_enabled && (
+                  <StSlider label="Intervalo" display={`${(style.mirror_cyclic_interval ?? 5).toFixed(1)}s`}
+                    min={1} max={10} step={0.5}
+                    value={style.mirror_cyclic_interval ?? 5}
+                    onChange={(e) => setStyle(s => ({ ...s, mirror_cyclic_interval: parseFloat(e.target.value) }))} />
+                )}
+              </div>
+
+              {/* Sway — toggle + period + amplitude */}
+              <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 9, background: "var(--st-soft)", border: "1px solid var(--st-line)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: style.sway_enabled ? 10 : 0 }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-text)" }}>↔ Sway lateral</div>
+                    <div style={{ fontSize: 11, color: "var(--st-faint)", marginTop: 2 }}>El video se balancea de un lado al otro. Captions NO se mueven.</div>
+                  </div>
+                  <StChip active={!!style.sway_enabled}
+                    onClick={() => setStyle(s => ({ ...s, sway_enabled: !s.sway_enabled }))}>
+                    {style.sway_enabled ? "ON" : "OFF"}
+                  </StChip>
+                </div>
+                {style.sway_enabled && (
+                  <>
+                    <StSlider label="Velocidad (período)" display={`${(style.sway_period ?? 3).toFixed(1)}s`}
+                      min={1} max={10} step={0.5}
+                      value={style.sway_period ?? 3}
+                      onChange={(e) => setStyle(s => ({ ...s, sway_period: parseFloat(e.target.value) }))} />
+                    <StSlider label="Distancia (amplitud)" display={`${style.sway_amplitude ?? 40}px`}
+                      min={10} max={100} step={5}
+                      value={style.sway_amplitude ?? 40}
+                      onChange={(e) => setStyle(s => ({ ...s, sway_amplitude: parseInt(e.target.value) }))} />
+                  </>
+                )}
               </div>
             </StRow>
 
@@ -3050,7 +3101,458 @@ function SegmentTimer({ startedAt, totalMinutes }) {
   );
 }
 
-function LiveStreamStep() {
+// Chart + top-peaks panel for the chat-velocity tab. Pure CSS bars, no SVG —
+// so it scales with the modal and stays light. Hover a bar to see the time
+// and exact count; click a top-peak row to autopopulate the HH:MM:SS inputs.
+function ChatVelocityPanel({
+  status, progress, totalMessages, error, buckets, peaks, duration,
+  onRetry, onPickPeak, fmtHMS,
+}) {
+  // While running, show progress
+  if (status === "running" || status === "idle") {
+    return (
+      <div style={{ padding: 40, textAlign: "center", color: "var(--st-muted)", fontSize: 13 }}>
+        <div style={{ fontSize: 14, color: "var(--st-text)", marginBottom: 6 }}>
+          Procesando chat del VOD…
+        </div>
+        <div style={{ fontSize: 12 }}>
+          {totalMessages > 0 ? `${totalMessages.toLocaleString()} mensajes leídos` : "Conectando a Twitch…"}
+        </div>
+        <div style={{ width: "60%", margin: "16px auto 4px", background: "var(--st-alt)", borderRadius: 99, height: 6, overflow: "hidden" }}>
+          <div style={{
+            width: `${Math.max(5, progress || 5)}%`,
+            background: "var(--st-accent)", height: "100%", borderRadius: 99,
+            transition: "width 0.6s",
+          }} />
+        </div>
+        <div style={{ fontSize: 11, color: "var(--st-faint)", marginTop: 4, fontFamily: "var(--st-mono)" }}>
+          puede tardar 1-2 min en streams largos
+        </div>
+      </div>
+    );
+  }
+  if (status === "error") {
+    return (
+      <div style={{ padding: 24 }}>
+        <div style={{ padding: "10px 13px", borderRadius: 9, background: "rgba(192,57,43,0.08)", border: "1px solid rgba(192,57,43,0.25)", color: "var(--st-live)", fontSize: 13, marginBottom: 12 }}>
+          {error || "Falló el análisis del chat"}
+        </div>
+        <button onClick={onRetry} className="st-btn st-btn--ghost" style={{ padding: "8px 14px" }}>
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+  // status === "ready"
+  if (!buckets || buckets.length === 0) {
+    return (
+      <div style={{ padding: 40, textAlign: "center", color: "var(--st-muted)", fontSize: 13 }}>
+        Este VOD no tiene chat replay disponible.
+      </div>
+    );
+  }
+
+  const maxCount = Math.max(1, ...buckets.map((b) => b.count));
+  const peakTimes = new Set(peaks.map((p) => p.time));
+
+  return (
+    <div style={{ padding: "12px 18px 18px" }}>
+      {/* Summary */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10, fontSize: 12, color: "var(--st-muted)" }}>
+        <span>
+          <b style={{ color: "var(--st-text)" }}>{totalMessages.toLocaleString()}</b> mensajes ·
+          duración del chat <b style={{ color: "var(--st-text)" }}>{fmtHMS(duration)}</b>
+        </span>
+        <span style={{ fontFamily: "var(--st-mono)", fontSize: 11 }}>
+          Pico máximo: {maxCount} msgs / 10s
+        </span>
+      </div>
+
+      {/* Chart — pure CSS bars. Peaks are highlighted in gold. */}
+      <div style={{
+        display: "flex", alignItems: "flex-end", gap: 1,
+        height: 110, padding: "6px 4px",
+        background: "var(--st-soft)", border: "1px solid var(--st-line)",
+        borderRadius: 8, marginBottom: 6, overflow: "hidden",
+      }}>
+        {buckets.map((b, i) => {
+          const heightPct = Math.max(2, (b.count / maxCount) * 100);
+          const isPeak = peakTimes.has(b.time);
+          return (
+            <div
+              key={i}
+              title={`${fmtHMS(b.time)} — ${b.count} msgs, ${b.emote_count} emote-spam`}
+              style={{
+                flex: 1, minWidth: 1, height: `${heightPct}%`,
+                background: isPeak ? "var(--st-gold, #e6c270)" : "var(--st-accent)",
+                opacity: isPeak ? 1 : 0.5,
+                borderRadius: 1,
+              }}
+            />
+          );
+        })}
+      </div>
+      {/* X-axis time labels (4 evenly spaced) */}
+      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "var(--st-mono)", fontSize: 10, color: "var(--st-faint)", marginBottom: 16, padding: "0 4px" }}>
+        {[0, 0.25, 0.5, 0.75, 1].map((p, i) => (
+          <span key={i}>{fmtHMS(Math.round(duration * p))}</span>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>
+        Top picos de chat
+      </div>
+      {peaks.map((p, idx) => (
+        <div
+          key={idx}
+          onClick={() => onPickPeak(p)}
+          style={{
+            display: "flex", alignItems: "center", gap: 12, padding: "9px 12px",
+            cursor: "pointer", borderRadius: 8,
+            border: "1px solid var(--st-line)", marginBottom: 4,
+            transition: "background .12s",
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = "var(--st-soft)"}
+          onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+        >
+          <span style={{ fontFamily: "var(--st-mono)", fontSize: 11, color: "var(--st-faint)", width: 22, textAlign: "right" }}>
+            {String(idx + 1).padStart(2, "0")}
+          </span>
+          <span style={{ fontFamily: "var(--st-mono)", fontSize: 12, fontWeight: 600, color: "var(--st-text)", width: 76 }}>
+            {fmtHMS(p.time)}
+          </span>
+          <span style={{ fontFamily: "var(--st-mono)", fontSize: 11.5, color: "var(--st-muted)", flex: 1 }}>
+            {p.count} msgs/10s
+          </span>
+          <span style={{
+            fontFamily: "var(--st-mono)", fontSize: 10.5,
+            background: p.emote_pct > 50 ? "var(--st-gold, #e6c270)" : "var(--st-alt)",
+            color: p.emote_pct > 50 ? "#15130e" : "var(--st-muted)",
+            padding: "2px 7px", borderRadius: 99, fontWeight: 600,
+          }}>
+            {p.emote_pct}% emotes
+          </span>
+          <Download size={13} style={{ color: "var(--st-accent)", flexShrink: 0 }} />
+        </div>
+      ))}
+      {peaks.length === 0 && (
+        <div style={{ padding: 16, textAlign: "center", fontSize: 12, color: "var(--st-faint)" }}>
+          No se detectaron picos claros — el chat fue parejo durante todo el stream.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ================================================
+// DOWNLOADER MODE — universal video downloader (yt-dlp)
+// Supports YouTube, Instagram, TikTok (no watermark), Twitter, Twitch, Reddit, …
+// ================================================
+const PLATFORM_LABELS = {
+  youtube: "📺 YouTube",
+  tiktok: "🎵 TikTok",
+  instagram: "📸 Instagram",
+  twitter: "🐦 Twitter / X",
+  twitch: "💜 Twitch",
+  reddit: "🤖 Reddit",
+  vimeo: "🎬 Vimeo",
+  other: "🌐 Otro sitio",
+};
+
+function detectUrlPlatform(url) {
+  const u = (url || "").toLowerCase();
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return "youtube";
+  if (u.includes("tiktok.com")) return "tiktok";
+  if (u.includes("instagram.com")) return "instagram";
+  if (u.includes("twitter.com") || u.includes("x.com")) return "twitter";
+  if (u.includes("twitch.tv")) return "twitch";
+  if (u.includes("reddit.com") || u.includes("redd.it")) return "reddit";
+  if (u.includes("vimeo.com")) return "vimeo";
+  return "other";
+}
+
+const fmtBytes = (n) => {
+  if (!n) return "—";
+  if (n > 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  if (n > 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n > 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${n} B`;
+};
+
+const fmtSpeed = (bps) => {
+  if (!bps) return "—";
+  if (bps > 1024 * 1024) return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
+  return `${(bps / 1024).toFixed(0)} KB/s`;
+};
+
+const fmtDuration = (sec) => {
+  if (!sec) return "—";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+};
+
+function DownloaderStep({ onSendToClipper }) {
+  const [url, setUrl] = useState("");
+  const [quality, setQuality] = useState("max");     // "max" | "1080" | "720"
+  const [audioOnly, setAudioOnly] = useState(false);
+  const [jobs, setJobs] = useState([]);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+  const pollRef = useRef(null);
+
+  const platform = detectUrlPlatform(url);
+
+  // Load existing downloads on mount + poll while any job is active
+  useEffect(() => {
+    const loadJobs = async () => {
+      try {
+        const data = await api.listDownloads();
+        setJobs(data || []);
+      } catch (_) {}
+    };
+    loadJobs();
+  }, []);
+
+  useEffect(() => {
+    const anyActive = jobs.some((j) => j.status === "queued" || j.status === "downloading" || j.status === "merging");
+    if (!anyActive) {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      return;
+    }
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const data = await api.listDownloads();
+        setJobs(data || []);
+      } catch (_) {}
+    }, 1500);
+    return () => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    };
+  }, [jobs]);
+
+  const handleStart = async () => {
+    if (!url.trim()) { setError("Pegá un link"); return; }
+    setError("");
+    setStarting(true);
+    try {
+      const job = await api.startDownload(url.trim(), quality, audioOnly);
+      setJobs((prev) => [job, ...prev]);
+      setUrl("");
+    } catch (e) {
+      setError(e.message || "No se pudo iniciar la descarga");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    await api.deleteDownload(id);
+    setJobs((prev) => prev.filter((j) => j.id !== id));
+  };
+
+  return (
+    <div style={{ padding: "30px 0", height: "100vh", overflowY: "auto" }}>
+      <div style={{ maxWidth: 740, margin: "0 auto", padding: "0 32px" }}>
+        <h1 style={{ margin: 0, fontFamily: "var(--st-display)", fontSize: 28, fontWeight: 600, letterSpacing: "-.025em" }}>
+          Descargas
+        </h1>
+        <p style={{ margin: "6px 0 24px", fontSize: 14, color: "var(--st-muted)", lineHeight: 1.5 }}>
+          Bajá videos de YouTube, Instagram, TikTok (sin watermark), Twitter, Twitch, Reddit y más. Calidad máxima por default.
+        </p>
+
+        {/* ── New download form ── */}
+        <div className="st-card" style={{ padding: "22px 24px", marginBottom: 22 }}>
+          <div className="st-eyebrow" style={{ marginBottom: 8 }}>URL del video</div>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 9,
+            background: "var(--st-soft)", border: `1px solid ${url ? "var(--st-accent)" : "var(--st-border)"}`,
+            borderRadius: 10, padding: "11px 13px", marginBottom: 18, transition: "border-color .15s",
+          }}>
+            <Download size={16} style={{ color: "var(--st-muted)", flexShrink: 0 }} />
+            <input
+              type="text"
+              placeholder="youtube.com/watch?v=... · tiktok.com/@user/video/... · instagram.com/reel/..."
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleStart()}
+              style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "var(--st-text)", fontFamily: "var(--st-mono)", fontSize: 12.5 }}
+            />
+            {url && (
+              <span style={{ fontFamily: "var(--st-mono)", fontSize: 11, color: "var(--st-accent)", flexShrink: 0, fontWeight: 700 }}>
+                {PLATFORM_LABELS[platform] || platform}
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, marginBottom: 18 }}>
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>Calidad</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[["max", "Máxima"], ["1080", "1080p"], ["720", "720p"]].map(([v, label]) => {
+                  const on = quality === v && !audioOnly;
+                  return (
+                    <span key={v} onClick={() => { setQuality(v); setAudioOnly(false); }} style={{
+                      flex: 1, textAlign: "center", padding: "8px 0", borderRadius: 8,
+                      fontSize: 12, fontWeight: 600, cursor: "pointer",
+                      border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                      background: on ? "var(--st-soft)" : "transparent",
+                      color: on ? "var(--st-text)" : "var(--st-muted)",
+                    }}>{label}</span>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>Formato</div>
+              <span onClick={() => setAudioOnly((v) => !v)} style={{
+                display: "block", textAlign: "center", padding: "8px 0", borderRadius: 8,
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+                border: `1px solid ${audioOnly ? "var(--st-accent)" : "var(--st-border)"}`,
+                background: audioOnly ? "var(--st-soft)" : "transparent",
+                color: audioOnly ? "var(--st-text)" : "var(--st-muted)",
+              }}>{audioOnly ? "🎵 Audio (MP3)" : "🎬 Video (MP4)"}</span>
+            </div>
+          </div>
+
+          {error && (
+            <div style={{ color: "var(--st-live)", fontSize: 13, marginBottom: 14, background: "rgba(192,57,43,0.08)", border: "1px solid rgba(192,57,43,0.25)", padding: "10px 13px", borderRadius: 9 }}>
+              {error}
+            </div>
+          )}
+
+          <button onClick={handleStart} disabled={starting || !url.trim()}
+            className="st-btn st-btn--primary"
+            style={{ width: "100%", justifyContent: "center", padding: "12px 0", fontSize: 14 }}>
+            {starting ? "Iniciando…" : <><Download size={15} /> Descargar</>}
+          </button>
+
+          {platform === "tiktok" && url && (
+            <p style={{ fontSize: 11, color: "var(--st-faint)", margin: "10px 0 0", textAlign: "center" }}>
+              TikTok: descargamos la versión <b style={{ color: "var(--st-text)" }}>sin watermark</b> automáticamente.
+            </p>
+          )}
+        </div>
+
+        {/* ── Downloads list ── */}
+        {jobs.length > 0 && (
+          <div className="st-card" style={{ padding: "16px 18px" }}>
+            <div className="st-eyebrow" style={{ marginBottom: 12 }}>Descargas ({jobs.length})</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {jobs.map((j) => (
+                <DownloadRow
+                  key={j.id} job={j}
+                  onDelete={() => handleDelete(j.id)}
+                  onSendToClipper={onSendToClipper}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DownloadRow({ job, onDelete, onSendToClipper }) {
+  const isActive = job.status === "queued" || job.status === "downloading" || job.status === "merging";
+  const isReady = job.status === "ready";
+  const isError = job.status === "error";
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 12,
+      padding: "12px 14px", borderRadius: 10,
+      background: "var(--st-soft)", border: "1px solid var(--st-line)",
+    }}>
+      <span style={{ fontFamily: "var(--st-mono)", fontSize: 10.5, color: "var(--st-faint)", width: 76, flexShrink: 0 }}>
+        {PLATFORM_LABELS[job.platform] || job.platform}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--st-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {job.title || job.url}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--st-muted)", marginTop: 2, display: "flex", gap: 10, fontFamily: "var(--st-mono)", flexWrap: "wrap" }}>
+          {job.uploader && <span>{job.uploader}</span>}
+          {job.duration_seconds > 0 && <><span>·</span><span>{fmtDuration(job.duration_seconds)}</span></>}
+          {isActive && (
+            <>
+              <span>·</span>
+              <span>
+                {job.status === "merging" ? "Mergeando audio + video…" :
+                 job.status === "queued" ? "En cola…" :
+                 `${job.progress}% · ${fmtSpeed(job.speed_bps)} · ${fmtBytes(job.downloaded_bytes)} / ${fmtBytes(job.total_bytes)}`}
+              </span>
+            </>
+          )}
+          {isReady && job.filesize_mb > 0 && (
+            <>
+              <span>·</span>
+              <span>{job.filesize_mb} MB</span>
+            </>
+          )}
+          {isError && (
+            <>
+              <span>·</span>
+              <span style={{ color: "var(--st-live)" }} title={job.error}>⚠ {job.error?.slice(0, 50) || "Error"}</span>
+            </>
+          )}
+        </div>
+        {isActive && job.progress > 0 && (
+          <div style={{ background: "var(--st-alt)", borderRadius: 99, height: 4, marginTop: 6, overflow: "hidden" }}>
+            <div style={{
+              width: `${Math.max(2, job.progress)}%`,
+              background: "var(--st-accent)", height: "100%", borderRadius: 99,
+              transition: "width 0.3s",
+            }} />
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        {isReady && (
+          <a href={api.getDownloadFileUrl(job.id)} download className="st-iconbtn"
+             style={{ textDecoration: "none" }} title="Descargar archivo">
+            <Download size={15} />
+          </a>
+        )}
+        <button onClick={onDelete} className="st-iconbtn" title="Eliminar">
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+// Compact HH:MM:SS triple-input used by the VOD slice picker.
+function HmsInput({ label, value, onChange }) {
+  const clamp = (v, max) => Math.max(0, Math.min(max, parseInt(v || 0) || 0));
+  const cell = {
+    width: "100%", padding: "8px 0", textAlign: "center",
+    background: "var(--st-soft)", border: "1px solid var(--st-border)",
+    borderRadius: 8, color: "var(--st-text)", fontFamily: "var(--st-mono)",
+    fontSize: 14, fontWeight: 600, outline: "none",
+  };
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>{label}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
+        <input type="number" min={0} max={23} value={value.h}
+          onChange={(e) => onChange({ ...value, h: clamp(e.target.value, 23) })} style={cell} />
+        <input type="number" min={0} max={59} value={value.m}
+          onChange={(e) => onChange({ ...value, m: clamp(e.target.value, 59) })} style={cell} />
+        <input type="number" min={0} max={59} value={value.s}
+          onChange={(e) => onChange({ ...value, s: clamp(e.target.value, 59) })} style={cell} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, marginTop: 4, fontFamily: "var(--st-mono)", fontSize: 10, color: "var(--st-faint)", textAlign: "center" }}>
+        <span>HH</span><span>MM</span><span>SS</span>
+      </div>
+    </div>
+  );
+}
+
+function LiveStreamStep({ onClipToProject }) {
   const [url, setUrl] = useState("");
   const [segmentMinutes, setSegmentMinutes] = useState(10);
   const [resolution, setResolution] = useState("720p");
@@ -3059,6 +3561,220 @@ function LiveStreamStep() {
   const [sessionData, setSessionData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // VOD slice inputs (HH:MM:SS) — used when the URL is a VOD (/videos/ or /video/)
+  const [vodStart, setVodStart] = useState({ h: 0, m: 0, s: 0 });
+  const [vodDur, setVodDur] = useState({ h: 0, m: 30, s: 0 });
+  // Auto-detect VOD URLs as the user types
+  const isVod = /\/videos?\/[a-zA-Z0-9]+/i.test(url);
+  // Twitch is the only platform we can hit Helix on for "top viewer clips".
+  const isTwitchVod = isVod && /twitch\.tv/i.test(url);
+  // Viral clips modal state
+  const [viralOpen, setViralOpen] = useState(false);
+  const [viralTab, setViralTab] = useState("clips");        // "clips" | "chat"
+  const [viralClips, setViralClips] = useState([]);
+  const [viralLoading, setViralLoading] = useState(false);
+  const [viralError, setViralError] = useState("");
+  // Chat-velocity state (Nivel 2)
+  const [chatStatus, setChatStatus] = useState("idle");     // idle | running | ready | error
+  const [chatProgress, setChatProgress] = useState(0);
+  const [chatTotalMsgs, setChatTotalMsgs] = useState(0);
+  const [chatBuckets, setChatBuckets] = useState([]);
+  const [chatPeaks, setChatPeaks] = useState([]);
+  const [chatDuration, setChatDuration] = useState(0);
+  const [chatError, setChatError] = useState("");
+  const chatPollRef = useRef(null);
+
+  const fmtHMS = (totalSec) => {
+    const t = Math.max(0, Math.floor(totalSec));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  };
+
+  const loadViralClips = async () => {
+    setViralLoading(true);
+    setViralError("");
+    setViralOpen(true);
+    try {
+      const data = await api.getTwitchClips(url.trim(), 500);
+      setViralClips(data.clips || []);
+      if (!data.clips || data.clips.length === 0) {
+        setViralError("Este VOD no tiene clips publicados por viewers (todavía).");
+      }
+    } catch (e) {
+      setViralError(e.message || "No se pudieron cargar los clips");
+      setViralClips([]);
+    } finally {
+      setViralLoading(false);
+    }
+  };
+
+  // One-click pipeline: clip → Gemini project → Clipper editor.
+  // Replaces the older "autopopulate HH:MM:SS inputs" behaviour.
+  const [processingClip, setProcessingClip] = useState(null);  // { phase, name, progress } or null
+  const [processingError, setProcessingError] = useState("");
+  // Multi-select state — Set of clip.id, plus optional batch broadcaster
+  const [selectedClips, setSelectedClips] = useState(new Set());
+  const toggleClipSelected = (id) => {
+    setSelectedClips((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  // Batch handler — process N selected clips into one project
+  const processSelectedClips = async () => {
+    if (selectedClips.size === 0) return;
+    const picks = viralClips.filter((c) => selectedClips.has(c.id));
+    if (picks.length === 0) return;
+    setProcessingError("");
+    setProcessingClip({
+      phase: "downloading",
+      name: `${picks.length} clips`,
+      progress: `0/${picks.length}`,
+    });
+    try {
+      const start = await api.processTwitchClipsBatch(
+        picks.map((c) => ({ slug: c.id, title: c.title })),
+        picks[0].broadcaster_name || "",
+        ""
+      );
+      const projectId = start.project_id;
+      setProcessingClip({
+        phase: "analyzing", name: `${picks.length} clips`, progress: `0/${picks.length}`,
+      });
+      const deadline = Date.now() + 10 * 60 * 1000;     // 10 min ceiling
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const s = await api.getProjectStatus(projectId).catch(() => null);
+        if (!s) continue;
+        if (s.analyze_progress) {
+          setProcessingClip((prev) => prev ? { ...prev, progress: s.analyze_progress } : prev);
+        }
+        if (s.status === "ready") {
+          const data = await api.getClips(projectId);
+          if (onClipToProject) {
+            onClipToProject(projectId, data.clips || [], `${picks.length} Twitch clips`);
+          }
+          setProcessingClip(null);
+          setViralOpen(false);
+          setSelectedClips(new Set());
+          return;
+        }
+        if (s.status === "error") {
+          throw new Error("Gemini falló al analizar el batch");
+        }
+      }
+      throw new Error("Tiempo agotado esperando el análisis");
+    } catch (e) {
+      setProcessingError(e.message || "No se pudo procesar el batch");
+      setProcessingClip(null);
+    }
+  };
+
+  const useViralClip = async (clip) => {
+    if (!clip || !clip.id) return;
+    setProcessingError("");
+    setProcessingClip({ phase: "downloading", name: clip.title });
+    try {
+      const start = await api.processTwitchClip(
+        clip.id,
+        clip.title,
+        clip.broadcaster_name || "",
+        ""    // gemini_model — backend will use project default
+      );
+      const projectId = start.project_id;
+      setProcessingClip({ phase: "analyzing", name: clip.title });
+      // Poll until ready or error
+      const deadline = Date.now() + 5 * 60 * 1000;   // 5 min max
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const s = await api.getProjectStatus(projectId).catch(() => null);
+        if (!s) continue;
+        if (s.status === "ready") {
+          const data = await api.getClips(projectId);
+          if (onClipToProject) {
+            onClipToProject(projectId, data.clips || [], clip.title);
+          }
+          setProcessingClip(null);
+          setViralOpen(false);
+          return;
+        }
+        if (s.status === "error") {
+          throw new Error("Gemini falló al analizar el clip");
+        }
+      }
+      throw new Error("Tiempo agotado esperando el análisis");
+    } catch (e) {
+      setProcessingError(e.message || "No se pudo procesar el clip");
+      setProcessingClip(null);
+    }
+  };
+
+  // Click on a chat-velocity peak → autopopulate inputs (15s lead, 60s total)
+  const useChatPeak = (peak) => {
+    const lead = 15;
+    const total = 60;
+    const startSec = Math.max(0, (peak.time || 0) - lead);
+    setVodStart({
+      h: Math.floor(startSec / 3600),
+      m: Math.floor((startSec % 3600) / 60),
+      s: startSec % 60,
+    });
+    setVodDur({ h: 0, m: 1, s: 0 });   // 1 minute default
+    setViralOpen(false);
+  };
+
+  // ── Chat velocity download / polling ──────────────────────────────────────
+  const loadChatVelocity = async () => {
+    setChatError("");
+    setChatStatus("running");
+    setChatProgress(0);
+    setChatBuckets([]);
+    setChatPeaks([]);
+    try {
+      await api.startTwitchChatVelocity(url.trim());
+    } catch (e) {
+      setChatError(e.message || "No se pudo iniciar el análisis de chat");
+      setChatStatus("error");
+      return;
+    }
+    // Poll every 1.5s until ready or error
+    const vid = (url.match(/\/videos?\/(\w+)/i) || [])[1];
+    if (!vid) { setChatError("No se pudo extraer el video_id"); setChatStatus("error"); return; }
+    const poll = async () => {
+      try {
+        const data = await api.getTwitchChatVelocity(vid);
+        setChatProgress(data.progress || 0);
+        setChatTotalMsgs(data.total_messages || 0);
+        if (data.status === "ready") {
+          setChatBuckets(data.buckets || []);
+          setChatPeaks(data.peaks || []);
+          setChatDuration(data.duration_seconds || 0);
+          setChatStatus("ready");
+          clearInterval(chatPollRef.current);
+        } else if (data.status === "error") {
+          setChatError(data.error || "Falló el análisis");
+          setChatStatus("error");
+          clearInterval(chatPollRef.current);
+        }
+      } catch (e) {
+        setChatError(e.message);
+        setChatStatus("error");
+        clearInterval(chatPollRef.current);
+      }
+    };
+    poll();
+    chatPollRef.current = setInterval(poll, 1500);
+  };
+
+  // Clean up the poller if the modal closes mid-job
+  useEffect(() => {
+    if (!viralOpen && chatPollRef.current) {
+      clearInterval(chatPollRef.current);
+      chatPollRef.current = null;
+    }
+  }, [viralOpen]);
   const pollRef = useRef(null);
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef(null);
@@ -3087,9 +3803,22 @@ function LiveStreamStep() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.startStream(url.trim(), segmentMinutes, 5, resolution, startOffset);
+      const opts = {};
+      if (isVod) {
+        const startSec = vodStart.h * 3600 + vodStart.m * 60 + vodStart.s;
+        const durSec = vodDur.h * 3600 + vodDur.m * 60 + vodDur.s;
+        if (durSec <= 0) {
+          setError("La duración debe ser mayor a 0");
+          setLoading(false);
+          return;
+        }
+        opts.singleShot = true;
+        opts.startOffsetSeconds = startSec;
+        opts.durationSeconds = durSec;
+      }
+      const res = await api.startStream(url.trim(), segmentMinutes, 5, resolution, startOffset, opts);
       setSessionId(res.session_id);
-      setSessionData({ session_id: res.session_id, status: res.status, segments: [], ready_count: 0 });
+      setSessionData({ session_id: res.session_id, status: res.status, segments: [], ready_count: 0, is_vod: res.is_vod });
       setElapsed(0);
       startTimeRef.current = Date.now();
       timerRef.current = setInterval(() => {
@@ -3154,58 +3883,103 @@ function LiveStreamStep() {
               <Radio size={16} style={{ color: "var(--st-muted)", flexShrink: 0 }} />
               <input
                 type="text"
-                placeholder="twitch.tv/canal"
+                placeholder="twitch.tv/canal · twitch.tv/videos/123456 · kick.com/canal"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleStart()}
                 style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "var(--st-text)", fontFamily: "var(--st-mono)", fontSize: 12.5 }}
               />
-              <span style={{ fontFamily: "var(--st-mono)", fontSize: 11, color: "var(--st-faint)", flexShrink: 0 }}>kick · twitch</span>
+              <span style={{ fontFamily: "var(--st-mono)", fontSize: 11, color: isVod ? "var(--st-accent)" : "var(--st-faint)", flexShrink: 0, fontWeight: isVod ? 700 : 400 }}>
+                {isVod ? "VOD ✓" : "kick · twitch"}
+              </span>
             </div>
 
-            <div className="st-eyebrow" style={{ marginBottom: 10 }}>Duración por segmento</div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
-              {[5, 7, 10, 15, 20, 30].map((m) => {
-                const on = segmentMinutes === m;
-                return (
-                  <span key={m} onClick={() => setSegmentMinutes(m)} style={{
-                    flex: 1, textAlign: "center", padding: "9px 0", borderRadius: 9, fontFamily: "var(--st-mono)", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
-                    border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`, background: on ? "var(--st-soft)" : "transparent", color: on ? "var(--st-text)" : "var(--st-muted)",
-                  }}>{m}m</span>
-                );
-              })}
-            </div>
+            {isVod ? (
+              /* ── VOD mode: HH:MM:SS slice inputs (single-shot, -c copy) ── */
+              <>
+                <div style={{ padding: "10px 12px", marginBottom: 12, borderRadius: 9, background: "var(--st-soft)", border: "1px solid var(--st-line)", fontSize: 12.5, color: "var(--st-muted)", lineHeight: 1.5 }}>
+                  Detectamos un <b style={{ color: "var(--st-text)" }}>VOD</b>. Vamos a descargar solo el rango que pidas, sin re-encodear. Sale rápido.
+                </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
-              <div>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>Resolución</div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {["480p", "720p", "1080p"].map((r) => {
-                    const on = resolution === r;
+                {isTwitchVod && (
+                  <button
+                    onClick={loadViralClips}
+                    className="st-btn st-btn--ghost"
+                    style={{ width: "100%", justifyContent: "center", padding: "10px 0", fontSize: 13, marginBottom: 16, gap: 8 }}
+                    title="Lista los clips que más views tienen entre los que hicieron los viewers"
+                  >
+                    🔍 Ver momentos virales del VOD
+                  </button>
+                )}
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+                  <HmsInput label="Empezar en" value={vodStart} onChange={setVodStart} />
+                  <HmsInput label="Duración" value={vodDur} onChange={setVodDur} />
+                </div>
+
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>Calidad</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {["480p", "720p", "1080p"].map((r) => {
+                      const on = resolution === r;
+                      return (
+                        <span key={r} onClick={() => setResolution(r)} style={{
+                          flex: 1, textAlign: "center", padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                          border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`, background: on ? "var(--st-soft)" : "transparent", color: on ? "var(--st-text)" : "var(--st-muted)",
+                        }}>{r}</span>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* ── Live mode: continuous segment recording (original UI) ── */
+              <>
+                <div className="st-eyebrow" style={{ marginBottom: 10 }}>Duración por segmento</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+                  {[5, 7, 10, 15, 20, 30].map((m) => {
+                    const on = segmentMinutes === m;
                     return (
-                      <span key={r} onClick={() => setResolution(r)} style={{
-                        flex: 1, textAlign: "center", padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                      <span key={m} onClick={() => setSegmentMinutes(m)} style={{
+                        flex: 1, textAlign: "center", padding: "9px 0", borderRadius: 9, fontFamily: "var(--st-mono)", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
                         border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`, background: on ? "var(--st-soft)" : "transparent", color: on ? "var(--st-text)" : "var(--st-muted)",
-                      }}>{r}</span>
+                      }}>{m}m</span>
                     );
                   })}
                 </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>Empezar desde</div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {[[0, "live"], [10, "−10"], [20, "−20"], [30, "−30"]].map(([mins, label]) => {
-                    const on = startOffset === mins;
-                    return (
-                      <span key={mins} onClick={() => setStartOffset(mins)} title={mins === 0 ? "En vivo" : `${mins} min atrás`} style={{
-                        flex: 1, textAlign: "center", padding: "8px 0", borderRadius: 8, fontFamily: "var(--st-mono)", fontSize: 11, fontWeight: 600, cursor: "pointer",
-                        border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`, background: on ? "var(--st-soft)" : "transparent", color: on ? "var(--st-text)" : "var(--st-muted)",
-                      }}>{label}</span>
-                    );
-                  })}
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>Resolución</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {["480p", "720p", "1080p"].map((r) => {
+                        const on = resolution === r;
+                        return (
+                          <span key={r} onClick={() => setResolution(r)} style={{
+                            flex: 1, textAlign: "center", padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                            border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`, background: on ? "var(--st-soft)" : "transparent", color: on ? "var(--st-text)" : "var(--st-muted)",
+                          }}>{r}</span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>Empezar desde</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {[[0, "live"], [10, "−10"], [20, "−20"], [30, "−30"]].map(([mins, label]) => {
+                        const on = startOffset === mins;
+                        return (
+                          <span key={mins} onClick={() => setStartOffset(mins)} title={mins === 0 ? "En vivo" : `${mins} min atrás`} style={{
+                            flex: 1, textAlign: "center", padding: "8px 0", borderRadius: 8, fontFamily: "var(--st-mono)", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                            border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`, background: on ? "var(--st-soft)" : "transparent", color: on ? "var(--st-text)" : "var(--st-muted)",
+                          }}>{label}</span>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </>
+            )}
 
             {error && (
               <div style={{ color: "var(--st-live)", fontSize: 13, marginBottom: 14, background: "rgba(192,57,43,0.08)", border: "1px solid rgba(192,57,43,0.25)", padding: "10px 13px", borderRadius: 9 }}>
@@ -3214,7 +3988,11 @@ function LiveStreamStep() {
             )}
 
             <button onClick={handleStart} disabled={loading || !url.trim()} className="st-btn st-btn--primary" style={{ width: "100%", justifyContent: "center", padding: "12px 0", fontSize: 14 }}>
-              {loading ? "Conectando..." : <><Play size={15} fill="currentColor" /> Iniciar grabación</>}
+              {loading
+                ? (isVod ? "Conectando…" : "Conectando...")
+                : isVod
+                  ? <><Download size={15} /> Descargar slice del VOD</>
+                  : <><Play size={15} fill="currentColor" /> Iniciar grabación</>}
             </button>
           </div>
         ) : (
@@ -3268,9 +4046,13 @@ function LiveStreamStep() {
                       </a>
                     </>
                   ) : seg.status === "skipped" ? (
-                    <span style={{ fontSize: 11.5, color: "var(--st-faint)" }}>muy corto</span>
-                  ) : seg.error ? (
-                    <span style={{ fontSize: 11.5, color: "var(--st-live)" }}>{seg.error.slice(0, 60)}</span>
+                    <span title={seg.error || ""} style={{ fontSize: 11.5, color: "var(--st-faint)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {seg.error ? `⚠ ${seg.error}` : "muy corto"}
+                    </span>
+                  ) : seg.status === "failed" ? (
+                    <span title={seg.error || ""} style={{ fontSize: 11.5, color: "var(--st-live)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      ⚠ {seg.error || "Falló la descarga"}
+                    </span>
                   ) : null}
                 </div>
               ))}
@@ -3288,6 +4070,227 @@ function LiveStreamStep() {
                 {readyCount} segmento{readyCount > 1 ? "s" : ""} listo{readyCount > 1 ? "s" : ""} — subilo{readyCount > 1 ? "s" : ""} al Video Clipper para extraer clips.
               </div>
             )}
+          </div>
+        )}
+
+        {/* ─── Viral clips modal (Twitch Helix /clips) ─── */}
+        {viralOpen && (
+          <div
+            onClick={() => setViralOpen(false)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", display: "grid", placeItems: "center", zIndex: 100, padding: 20 }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "100%", maxWidth: 740, maxHeight: "85vh", display: "flex", flexDirection: "column",
+                background: "var(--st-surface)", border: "1px solid var(--st-line)",
+                borderRadius: 14, boxShadow: "var(--st-shadow-modal)", overflow: "hidden",
+                fontFamily: "var(--st-ui)",
+              }}
+            >
+              <div style={{ padding: "14px 18px 0", borderBottom: "1px solid var(--st-line)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div>
+                    <h3 style={{ fontFamily: "var(--st-display)", fontSize: 17, fontWeight: 600, margin: 0, color: "var(--st-text)" }}>
+                      Momentos virales del VOD
+                    </h3>
+                    <p style={{ fontSize: 12, color: "var(--st-faint)", margin: "3px 0 0" }}>
+                      Click en uno para autopopular los inputs HH:MM:SS
+                    </p>
+                  </div>
+                  <X size={18} style={{ cursor: "pointer", color: "var(--st-muted)" }} onClick={() => setViralOpen(false)} />
+                </div>
+                {/* Tabs */}
+                <div style={{ display: "flex", gap: 4, marginTop: 14 }}>
+                  {[
+                    ["clips", "Top clips (viewers)"],
+                    ["chat", "★ Hype del chat"],
+                  ].map(([k, label]) => {
+                    const active = viralTab === k;
+                    return (
+                      <div
+                        key={k}
+                        onClick={() => {
+                          setViralTab(k);
+                          if (k === "chat" && chatStatus === "idle") loadChatVelocity();
+                        }}
+                        style={{
+                          padding: "8px 14px",
+                          fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                          color: active ? "var(--st-text)" : "var(--st-muted)",
+                          borderBottom: `2px solid ${active ? "var(--st-accent)" : "transparent"}`,
+                          marginBottom: -1,
+                          transition: "color .12s, border-color .12s",
+                        }}
+                      >
+                        {label}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ flex: 1, overflowY: "auto", position: "relative" }}>
+                {/* ─── Processing overlay (one-click clip → project flow) ─── */}
+                {processingClip && (
+                  <div style={{
+                    position: "absolute", inset: 0, zIndex: 5,
+                    background: "rgba(13, 12, 11, 0.92)",
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                    gap: 14, padding: 30, textAlign: "center",
+                  }}>
+                    <div style={{ width: 38, height: 38, borderRadius: "50%",
+                      border: "3px solid rgba(255,255,255,.15)",
+                      borderTopColor: "var(--st-accent)",
+                      animation: "spin 0.9s linear infinite",
+                    }} />
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--st-text)" }}>
+                      {processingClip.phase === "downloading"
+                        ? "Bajando los clips de Twitch…"
+                        : "Gemini está escribiendo los captions…"}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--st-muted)", maxWidth: 340 }}>
+                      {processingClip.name}
+                    </div>
+                    {processingClip.progress && (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--st-accent)", fontFamily: "var(--st-mono)" }}>
+                        {processingClip.progress}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11, color: "var(--st-faint)", fontFamily: "var(--st-mono)" }}>
+                      ~30 seg por clip · te llevamos al editor cuando esté listo
+                    </div>
+                  </div>
+                )}
+                {processingError && (
+                  <div style={{ margin: "12px 18px", padding: "10px 13px", borderRadius: 9, background: "rgba(192,57,43,0.08)", border: "1px solid rgba(192,57,43,0.25)", color: "var(--st-live)", fontSize: 13 }}>
+                    {processingError}
+                  </div>
+                )}
+
+                {/* ─── Tab: Clips (viewers) ─── */}
+                {viralTab === "clips" && (
+                  <div style={{ padding: "8px 0" }}>
+                    {viralLoading && (
+                      <div style={{ padding: 40, textAlign: "center", color: "var(--st-muted)", fontSize: 13 }}>
+                        Cargando clips de Twitch…
+                      </div>
+                    )}
+                    {!viralLoading && viralError && (
+                      <div style={{ margin: "12px 18px", padding: "10px 13px", borderRadius: 9, background: "rgba(192,57,43,0.08)", border: "1px solid rgba(192,57,43,0.25)", color: "var(--st-live)", fontSize: 13 }}>
+                        {viralError}
+                      </div>
+                    )}
+                    {!viralLoading && !viralError && viralClips.map((c, idx) => {
+                      const selected = selectedClips.has(c.id);
+                      return (
+                      <div
+                        key={c.id || idx}
+                        onClick={() => toggleClipSelected(c.id)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 12, padding: "10px 18px",
+                          cursor: "pointer", borderBottom: "1px solid var(--st-line)",
+                          background: selected ? "var(--st-soft)" : "transparent",
+                        }}
+                        onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = "var(--st-soft)"; }}
+                        onMouseLeave={(e) => { if (!selected) e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={(e) => { e.stopPropagation(); toggleClipSelected(c.id); }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ width: 16, height: 16, accentColor: "var(--st-accent)", cursor: "pointer", flexShrink: 0 }}
+                        />
+                        <span style={{ fontFamily: "var(--st-mono)", fontSize: 11, color: "var(--st-faint)", width: 24, textAlign: "right" }}>
+                          {String(idx + 1).padStart(2, "0")}
+                        </span>
+                        {c.thumbnail_url && (
+                          <img src={c.thumbnail_url.replace("%{width}", "120").replace("%{height}", "68")}
+                               alt="" style={{ width: 80, height: 45, objectFit: "cover", borderRadius: 5, flexShrink: 0 }} />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--st-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {c.title}
+                          </div>
+                          <div style={{ fontSize: 11.5, color: "var(--st-muted)", marginTop: 2, display: "flex", gap: 10, fontFamily: "var(--st-mono)" }}>
+                            <span>{fmtHMS(c.vod_offset_seconds)}</span>
+                            <span>·</span>
+                            <span>{c.view_count.toLocaleString()} views</span>
+                            <span>·</span>
+                            <span>{Math.round(c.duration)}s</span>
+                            {c.creator_name && <><span>·</span><span style={{ color: "var(--st-faint)" }}>{c.creator_name}</span></>}
+                          </div>
+                        </div>
+                      </div>
+                      );
+                    })}
+                    {!viralLoading && !viralError && viralClips.length === 0 && (
+                      <div style={{ padding: 40, textAlign: "center", color: "var(--st-muted)", fontSize: 13 }}>
+                        Sin clips disponibles para este VOD.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ─── Tab: Chat velocity ─── */}
+                {viralTab === "chat" && (
+                  <ChatVelocityPanel
+                    status={chatStatus}
+                    progress={chatProgress}
+                    totalMessages={chatTotalMsgs}
+                    error={chatError}
+                    buckets={chatBuckets}
+                    peaks={chatPeaks}
+                    duration={chatDuration}
+                    onRetry={loadChatVelocity}
+                    onPickPeak={useChatPeak}
+                    fmtHMS={fmtHMS}
+                  />
+                )}
+              </div>
+
+              {/* ─── Footer: batch action ─── */}
+              {viralTab === "clips" && viralClips.length > 0 && !processingClip && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "12px 18px", borderTop: "1px solid var(--st-line)",
+                  background: "var(--st-soft)",
+                }}>
+                  <span style={{ fontSize: 12.5, color: "var(--st-muted)" }}>
+                    <b style={{ color: "var(--st-text)" }}>{selectedClips.size}</b>
+                    {" / "}{viralClips.length} seleccionados
+                  </span>
+                  {selectedClips.size > 0 && (
+                    <button
+                      onClick={() => setSelectedClips(new Set())}
+                      className="st-btn st-btn--ghost"
+                      style={{ padding: "6px 12px", fontSize: 12 }}
+                    >
+                      Deseleccionar
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      const all = new Set(viralClips.map((c) => c.id));
+                      setSelectedClips(all);
+                    }}
+                    className="st-btn st-btn--ghost"
+                    style={{ padding: "6px 12px", fontSize: 12 }}
+                  >
+                    Seleccionar todos
+                  </button>
+                  <button
+                    onClick={processSelectedClips}
+                    disabled={selectedClips.size === 0}
+                    className="st-btn st-btn--primary"
+                    style={{ marginLeft: "auto", padding: "8px 16px", fontSize: 13, gap: 6 }}
+                  >
+                    <Download size={14} /> Procesar {selectedClips.size > 0 ? selectedClips.size : ""} con Gemini
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -3384,18 +4387,34 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
   const dotColor = isReady ? "var(--st-ok)" : isError ? "var(--st-live)" : "var(--st-faint)";
 
   const [retrying, setRetrying] = useState(false);
+  // Track the meme_text we had at the moment of clicking Retry. The
+  // spinner stays up until the parent's poll surfaces a DIFFERENT text
+  // (or an error), confirming Gemini actually regenerated.
+  const retryStartTextRef = useRef(null);
   const handleRetry = async () => {
+    retryStartTextRef.current = item.meme_text || "";
     setRetrying(true);
     try {
       await api.retryMeme(batchId, index);
-      // The parent's status poll will pick up the new "pending→ready" state.
+      // No fixed timeout — the effect below clears `retrying` when the
+      // parent's poll picks up a new meme_text or an error.
     } catch (e) {
       alert(e.message || "No se pudo reintentar");
-    } finally {
-      // Keep the spinner only briefly; the poll drives the real status.
-      setTimeout(() => setRetrying(false), 1200);
+      setRetrying(false);
     }
   };
+
+  // Clear the retry spinner once the item shows a NEW text or an error.
+  useEffect(() => {
+    if (!retrying) return;
+    if (item.status === "error") {
+      setRetrying(false);
+      return;
+    }
+    if (item.status === "ready" && (item.meme_text || "") !== (retryStartTextRef.current || "")) {
+      setRetrying(false);
+    }
+  }, [retrying, item.status, item.meme_text]);
 
   return (
     <div className="st-card" style={{ overflow: "hidden", borderColor: isReady ? "var(--st-border)" : "var(--st-line)" }}>
@@ -3613,18 +4632,18 @@ function MemeStep() {
   const pollRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Poll batch status
+  // Poll batch status every 2s while the modal is open. We DON'T stop on
+  // "completed" — if we did, the per-item Retry button would fire but the
+  // resulting "pending → ready" transition would never reach the UI. A
+  // request every 2s is cheap and stops when the user closes the modal.
   useEffect(() => {
     if (!batchId) return;
     pollRef.current = setInterval(async () => {
       try {
         const data = await api.getMemeStatus(batchId);
         setBatch(data);
-        if (data.status === "completed") {
-          clearInterval(pollRef.current);
-        }
       } catch (e) {
-        // ignore poll errors
+        // ignore transient poll errors
       }
     }, 2000);
     return () => clearInterval(pollRef.current);
@@ -6738,6 +7757,7 @@ function App() {
     mode === "meme" ? "meme" :
     mode === "stream" ? "live" :
     mode === "analyzer" ? "analyzer" :
+    mode === "downloader" ? "downloader" :
     step === 2 ? "clips" : step === 3 ? "export" : "upload";
 
   const handleNav = (target) => {
@@ -6748,6 +7768,7 @@ function App() {
     else if (target === "meme") setMode("meme");
     else if (target === "live") setMode("stream");
     else if (target === "analyzer") setMode("analyzer");
+    else if (target === "downloader") setMode("downloader");
     else if (target === "settings") setMode("settings");
   };
 
@@ -6771,8 +7792,23 @@ function App() {
       />
       <main style={{ flex: 1, minWidth: 0, background: "var(--st-bg)" }}>
         {mode === "analyzer" && <AnalyzerStep />}
-        {mode === "stream" && <LiveStreamStep />}
+        {mode === "stream" && (
+          <LiveStreamStep
+            onClipToProject={(projectId, clips, filename) => {
+              setMode("video");
+              handleUploadComplete({ projectId, clips, filename });
+            }}
+          />
+        )}
         {mode === "meme" && <MemeStep />}
+        {mode === "downloader" && (
+          <DownloaderStep
+            onSendToClipper={(projectId, clips, filename) => {
+              setMode("video");
+              handleUploadComplete({ projectId, clips, filename });
+            }}
+          />
+        )}
         {mode === "settings" && <SettingsStep onOpenPrompts={() => setMode("prompts")} />}
         {mode === "prompts" && <PromptsStep onExit={() => setMode("settings")} />}
 

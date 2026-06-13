@@ -24,6 +24,7 @@ class Project(BaseModel):
     gemini_model: str = "gemini-2.5-flash"  # which Gemini model to use for analysis
     analyze_start: float = 0.0  # seconds — start of analysis window (0 = from beginning)
     analyze_duration: float = 0.0  # seconds — length of window (0 = analyze to end)
+    analyze_progress: str = ""    # "3/10" while batch jobs run, "" otherwise
 
     def model_post_init(self, __context):
         if self.created_at == 0.0:

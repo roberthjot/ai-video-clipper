@@ -128,7 +128,8 @@ async def get_project_status(project_id: str):
         "error": {"phase": "error", "message": "An error occurred", "percent": 0},
     }
     info = status_map.get(p.status, {"phase": p.status, "message": p.status, "percent": 0})
-    return {"status": p.status, **info}
+    progress = getattr(p, "analyze_progress", "") or ""
+    return {"status": p.status, "analyze_progress": progress, **info}
 
 
 def get_project_store():

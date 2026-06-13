@@ -2,6 +2,160 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🌀 Cyclic mirror + sway (anti-detect for TikTok / Reels reuploads)
+
+Two new editor effects that change the video's perceptual fingerprint without
+moving the burned-in text — captions, watermark and subtitles stay fixed.
+
+- **Cyclic mirror**: `hflip` toggles ON for N seconds, OFF for N seconds,
+  repeating. Implemented via FFmpeg's `enable='lt(mod(t, N*2), N)'` so the
+  flip is conditional on time. Slider exposes interval 1–10s (default 5).
+  Applied to the FG stream BEFORE the caption / watermark / subs overlays,
+  so those stay normal.
+- **Sway**: foreground video drifts side-to-side following a sine curve.
+  The overlay's X coordinate gets `+sin(2*PI*t/period)*amplitude`. Sliders
+  for period (1–10s, default 3) and amplitude (10–100px, default 40).
+- Both wired into `export_service.py` AND `video_service.generate_preview_clip`
+  so the Play-clip preview shows the effect live (not just the final export).
+  Added to `routes/clips.py: preview_clip_video` and to the auto-refresh
+  `useEffect` dependency array so changes to the sliders re-render the
+  preview within ~300ms.
+- New fields in `StyleConfig`: `mirror_cyclic_enabled`, `mirror_cyclic_interval`,
+  `sway_enabled`, `sway_period`, `sway_amplitude`.
+- UI lives inside the existing 🛡 Anti-Detect section (Paso 3) — two
+  toggle+slider cards alongside the existing chips.
+
+## ⬇️ Universal video downloader (Fase 1)
+
+New "Descargas" mode in the sidebar. Paste a URL from any major social site
+and get the video back as MP4 (or MP3 audio). Powered by `yt-dlp` for most
+sites + `tikwm.com` for TikTok specifically to bypass anti-bot blocks.
+
+- **Sites**: YouTube, Instagram, TikTok (no watermark), Twitter/X, Twitch,
+  Reddit, Vimeo, ~1000 others via yt-dlp's extractor registry.
+- **Quality**: Máxima (default) → `bestvideo+bestaudio/best` merged via
+  FFmpeg = 4K source preserved when available. Also 1080p / 720p presets +
+  audio-only MP3 toggle.
+- **TikTok fast path**: yt-dlp gets blocked by TikTok's anti-bot ("Your IP
+  is blocked"). New cascade in `_worker()`: TikTok URLs hit `tikwm.com/api/`
+  first (free public API that runs from rotating residential IPs — the same
+  backend that powers SnapTik, SaveFrom, etc.). Returns the direct
+  no-watermark MP4 URL + metadata. Falls back to yt-dlp if tikwm fails.
+  End-to-end tested: 30-sec TikTok downloads in ~2 seconds, no watermark.
+- **Backend**: new `services/downloader_service.py` with background jobs +
+  progress tracking. `routes/downloader.py` exposes start / status / list /
+  delete / stream-file endpoints.
+- **Frontend**: new `DownloaderStep` component. Single URL input with live
+  platform detection (📺 YouTube · 🎵 TikTok · 📸 Instagram · …). Active
+  downloads show speed + ETA + progress bar. Finished items get a one-click
+  download button. Polling switches off when the modal closes.
+- **ffmpeg integration gotcha**: `imageio_ffmpeg` ships a versioned binary
+  name (`ffmpeg-win-x86_64-v7.1.exe`), not `ffmpeg.exe`. yt-dlp's
+  directory-based lookup couldn't find it. Fix: pass the binary's full
+  path to `ffmpeg_location` (yt-dlp accepts a file path and uses it
+  directly). curl-cffi is also installed to satisfy yt-dlp's
+  "impersonation" requirement on modern TikTok extractor versions.
+
+## 🎬 Twitch VOD download + viral clip discovery
+
+A whole pipeline to take a Twitch VOD and end up in the editor with N
+caption-ready clips, without leaving the app.
+
+### VOD slice download (any URL with `/videos/`)
+- HH:MM:SS inputs replace the minute-based chips when a VOD URL is pasted.
+  Backend single-shot recording with `-c copy` (no re-encode) — a 30-min
+  slice downloads in 2-5 minutes instead of 30. New fields on
+  `StreamSession`: `is_vod`, `single_shot`, `start_offset_seconds`,
+  `duration_seconds`.
+- **Critical fix**: `streamlink`'s `hls-start-offset` doesn't propagate into
+  the playlist URL we hand to FFmpeg, so every VOD download was starting
+  at second 0 of the VOD regardless of the requested offset. Inject
+  `-ss SECONDS` BEFORE `-i` in the FFmpeg command — input seek that lands
+  on the nearest keyframe (±2s).
+- Better failure surfacing: capture FFmpeg's stderr in `record_segment`
+  and return `(elapsed, exit_code, stderr_tail)`. UI shows the actual
+  error message instead of "muy corto" guesswork.
+
+### Twitch Helix Clips API (viewer-curated viral signal)
+- New `services/twitch_service.py` with OAuth client-credentials token
+  (`/oauth2/token`, cached ~60 days). Requires `TWITCH_CLIENT_ID` and
+  `TWITCH_CLIENT_SECRET` in `.env` (free from
+  [dev.twitch.tv/console](https://dev.twitch.tv/console)).
+- **Two-step fetch**: `/helix/clips` doesn't accept `video_id` as a filter
+  (Twitch API quirk). So we hit `/helix/videos?id=X` first to get the
+  broadcaster_id + stream date, then `/helix/clips?broadcaster_id=Y&
+  started_at=...&ended_at=...` over a 30-day window, then filter the
+  result client-side to keep only clips with `video_id == X` and a non-null
+  `vod_offset`. Up to 500 clips by default (was 50), sorted by view count.
+- New `GET /api/stream/twitch-clips?url=X&limit=N` endpoint.
+- Frontend modal opens from the VOD page with a "🔍 Ver momentos virales"
+  button. Each row shows thumbnail + title + timestamp + view count +
+  creator. Click autopopulates the HH:MM:SS slice inputs at the moment's
+  vod_offset (with a 3s lead-in).
+
+### Chat velocity (Nivel 2, ships but with caveats)
+- New `services/twitch_chat_service.py`: downloads VOD chat replay via
+  Twitch's GraphQL `VideoCommentsByOffsetOrCursor` query and counts
+  messages per 10-second bucket, tagging emote-spam buckets (>70%
+  emote chars = chat going crazy). Returns a tiny JSON map of buckets +
+  top-N peaks (sorted by count, deduped by 60s gap).
+- **GraphQL integrity dance**: Twitch added an anti-bot check on `gql.twitch.tv`.
+  First call `/integrity` to get a JWT, include it as `Client-Integrity`
+  header in every chat-page request along with the rotating `X-Device-Id`.
+  Token cached ~4h.
+- **Cursor pagination is blocked by integrity** even with valid tokens —
+  observed "failed integrity check" on every cursor request. Workaround:
+  use offset-based pagination (`contentOffsetSeconds`) and advance by
+  `last_message_offset + 1` after each page. Sustained ~60 msgs/sec
+  during testing.
+- Retries with exponential backoff on transient errors (service error,
+  HTTP 429/5xx) + 80ms inter-request delay so we don't trigger rate limits.
+- Background job + polling endpoint; frontend renders progress, then a
+  CSS-bar chart of all buckets (peaks highlighted in gold) + top 10
+  peaks list with click-to-autopopulate.
+- **Known limitation**: download is slow on popular streams (xQc 4-hour
+  VOD ~ 50k messages = ~14 minutes). UI shows live progress; user can
+  cancel by closing the modal.
+
+### One-click clip → Gemini project
+- Click on a viewer clip in the modal → backend downloads the Twitch
+  clip's signed MP4 URL (via `VideoAccessToken_Clip` GraphQL — much
+  faster than VOD slicing because Twitch serves clips as standalone
+  MP4s), creates a new Project with a single ClipData spanning the
+  whole clip, and spawns a Gemini caption job in the background. Frontend
+  polls `/api/status/{id}` and jumps the user to Step 2 when status =
+  `ready`. New route `POST /api/stream/twitch-clip-to-project`.
+
+### Multi-select batch
+- Checkboxes on every clip row in the modal + footer with
+  "Procesar N con Gemini". Selected clips get concatenated into one MP4
+  via `ffmpeg -f concat -c copy` (stream-copy, fast; falls back to
+  filter-graph concat if formats differ), creating ONE Project with N
+  ClipData entries at the correct time offsets. Background thread runs
+  Gemini caption on each clip sequentially. `project.analyze_progress`
+  exposes `"3/10"` via the status endpoint so the UI shows a live counter.
+  New route `POST /api/stream/twitch-clips-batch-to-project`.
+
+## 🍿 Meme retry button + music_vibe prompt
+
+- **Polling fix**: `MemeStep` was calling `clearInterval` as soon as
+  `batch.status === "completed"`. After that, clicking Retry on a "ready"
+  item correctly switched the backend to `processing` again, but the
+  frontend never saw the new state because polling had stopped — spinner
+  stuck forever, text never updated even though the backend had regenerated.
+  Fix: keep polling at 2s for the modal's whole lifetime.
+- **Retry spinner timing**: the per-item retry button used a fixed 1.2s
+  setTimeout to clear the spinner — but the reanalyze actually takes
+  20-40s. Replaced with an effect that only clears `retrying` when the
+  item's `meme_text` actually changes (or status becomes `error`).
+- **music_vibe prompt rewrite**: the old prompt listed 6 example phrases
+  in quotes ("I was NOT ready for those vocals", "That song that takes
+  you right back", …). Gemini was copying them verbatim — few-shot
+  leakage. Replaced with 7 ENGAGEMENT MECHANICS described as abstract
+  angles (POV, contrast, niche comparison, confession, unfinished thought,
+  specific lyric/timestamp call-out, audience question), plus an explicit
+  anti-template list. Sentence-case + "do NOT name the artist" rule.
+
 ## 🐛 Fix — caption wrap respects ONLY user-typed line breaks
 
 A regression introduced with the `\n` support was making captions wrap to two

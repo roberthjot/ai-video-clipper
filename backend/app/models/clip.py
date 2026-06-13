@@ -204,6 +204,20 @@ class StyleConfig(BaseModel):
     zoom_uniquify: bool = False   # zoom +2% to break fingerprint
     boost_contrast: bool = False  # subtle eq boost
 
+    # Cyclic mirror: hflip toggles ON for N seconds, then OFF for N seconds,
+    # repeating. Breaks perceptual hashing without leaving text/UI mirrored
+    # the whole time. Only the FG video flips — captions / watermark / subs
+    # are overlaid AFTER and stay normal.
+    mirror_cyclic_enabled: bool = False
+    mirror_cyclic_interval: float = 5.0   # seconds; 1.0–10.0 sensible range
+
+    # Sway: foreground video drifts side-to-side following a sine curve.
+    # Period = seconds for one full back-and-forth, amplitude = max pixel
+    # offset from center. Captions stay fixed.
+    sway_enabled: bool = False
+    sway_period: float = 3.0      # seconds per full cycle
+    sway_amplitude: int = 40      # pixels of horizontal offset
+
 
 # Resolve ClipData's forward reference to StyleConfig (defined above this line).
 ClipData.model_rebuild()
@@ -247,6 +261,13 @@ class StreamSession(BaseModel):
     clips_per_segment: int = 5
     resolution: str = "720p"
     start_offset_minutes: int = 0
+    # VOD / single-shot mode (downloads a specific HH:MM:SS slice with -c copy,
+    # no re-encode, no looping). When set, segment_minutes / start_offset_minutes
+    # are ignored.
+    is_vod: bool = False                 # auto-set when URL contains /videos/
+    single_shot: bool = False            # record one slice then stop
+    start_offset_seconds: int = 0        # exact seek into the stream / VOD
+    duration_seconds: int = 0            # 0 = no override, use segment_minutes * 60
     status: str = "idle"      # starting | recording | stopping | stopped | error
     error: str = ""
     segments: list[StreamSegment] = []
@@ -259,4 +280,8 @@ class StreamStartRequest(BaseModel):
     segment_minutes: int = 10
     clips_per_segment: int = 5
     resolution: str = "720p"  # "480p" | "720p" | "1080p"
-    start_offset_minutes: int = 0  # Rewind N minutes before recording starts
+    start_offset_minutes: int = 0  # Rewind N minutes before recording starts (live)
+    # VOD / single-shot mode
+    single_shot: bool = False
+    start_offset_seconds: int = 0
+    duration_seconds: int = 0

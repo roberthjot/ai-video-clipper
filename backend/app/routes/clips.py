@@ -663,6 +663,11 @@ async def preview_clip_video(project_id: str, clip_id: int):
             edit_pan_y=getattr(clip, 'edit_pan_y', 0.0),
             fill_mode_scale=getattr(style, 'fill_mode_scale', 1.0),
             keyframes=getattr(clip, 'keyframes', []) or [],
+            mirror_cyclic_enabled=getattr(style, 'mirror_cyclic_enabled', False),
+            mirror_cyclic_interval=getattr(style, 'mirror_cyclic_interval', 5.0),
+            sway_enabled=getattr(style, 'sway_enabled', False),
+            sway_period=getattr(style, 'sway_period', 3.0),
+            sway_amplitude=getattr(style, 'sway_amplitude', 40),
         )
     except Exception as e:
         # Print the full traceback so the actual cause is visible in the

@@ -13,6 +13,12 @@ class Settings:
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
     GEMINI_MODEL: str = "gemini-3-flash-preview"
 
+    # Twitch Helix API — used to fetch viral clip timestamps for a VOD so we
+    # can show "top viewer-made clips of this VOD" before downloading.
+    # Get credentials at https://dev.twitch.tv/console (free).
+    TWITCH_CLIENT_ID: str = os.getenv("TWITCH_CLIENT_ID", "")
+    TWITCH_CLIENT_SECRET: str = os.getenv("TWITCH_CLIENT_SECRET", "")
+
     # Directories
     UPLOAD_DIR: str = str(ROOT_DIR / "uploads")
     PROJECTS_DIR: str = str(ROOT_DIR / "projects")

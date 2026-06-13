@@ -267,22 +267,34 @@ DEFAULTS = {
     },
     "music_vibe": {
         "label": "Música · frase de vibe",
-        "description": "Frase de ambiente para un clip musical, según la emoción detectada.",
+        "description": "Frase de engagement para un clip musical, inferida del contenido específico del clip — no de ejemplos fijos. Pensada para parar el scroll y disparar comentarios/shares.",
         "tokens": [],
         "text": (
-            "Watch this music clip carefully and identify the PRIMARY emotion it triggers in the listener. "
-            "Then write a short, punchy phrase designed to make people on Instagram stop scrolling, "
-            "comment, tag a friend, or repost it. "
-            "Base the phrase on the emotion you detected:\n"
-            "- Nostalgia → make them think of a person or memory ('That song that takes you right back')\n"
-            "- Awe/talent → make them feel they witnessed something rare ('I was NOT ready for those vocals')\n"
-            "- Cultural pride → celebrate the sound or roots ('This is what [genre] is supposed to sound like')\n"
-            "- Euphoria/energy → capture the electricity ('The energy in this room is unreal')\n"
-            "- Sadness/longing → make them feel understood ('The song that hits when you least expect it')\n"
-            "- Discovery → make them feel like insiders ('How does this artist not have millions of followers')\n"
-            "Rules: English only. Maximum 12 words. No hashtags. No emojis. "
-            "No punctuation except apostrophes and commas. "
-            "Return ONLY the phrase — nothing else."
+            "Watch this music clip and write ONE engagement-driving caption for Instagram / TikTok.\n"
+            "\n"
+            "CRITICAL — write something ORIGINAL based on this SPECIFIC clip:\n"
+            "- React to what you actually heard / saw — a specific lyric, a vocal moment, the beat drop,\n"
+            "  the artist's outfit, the room's energy, the producer choice. Be SPECIFIC, not generic.\n"
+            "- Do NOT use template phrases like 'I was not ready', 'this song takes you back',\n"
+            "  'this is what music is supposed to sound like'. Those are overused. Skip them.\n"
+            "- The phrase should feel like a real fan's first reaction in the comments — raw, surprised,\n"
+            "  emotional, or oddly specific. Voice = one human texting another, not marketing copy.\n"
+            "\n"
+            "ENGAGEMENT MECHANICS (pick ONE per caption — these are angles, NOT phrases to copy):\n"
+            "  1. CALL OUT a specific moment by timestamp or lyric — 'the way she lands that high note at 0:42'\n"
+            "  2. POV / second-person — start with 'POV:' or 'me when' or 'you when' and describe the feeling\n"
+            "  3. UNFINISHED THOUGHT that begs a reply — 'we're not talking enough about how…' / 'tell me why…'\n"
+            "  4. CONTRAST / PARADOX — pair two opposite emotions, eg. devastatingly soft / quietly loud\n"
+            "  5. NICHE COMPARISON — '[song / artist / scene] meets [other thing]' (only if you actually hear it)\n"
+            "  6. CONFESSION / OVERSHARE — 'this is the song I play when [oddly specific situation]'\n"
+            "  7. QUESTION to the audience — phrased as if you genuinely want them to answer below\n"
+            "\n"
+            "STYLE RULES:\n"
+            "- English. 4 to 14 words. Punchy.\n"
+            "- Sentence case (first letter capitalized, rest mostly lowercase — Gen Z reads as authentic).\n"
+            "- Apostrophes and commas OK. No periods, no hashtags, no emojis, no quotes.\n"
+            "- Do NOT name the artist (the UI shows the name elsewhere).\n"
+            "- Output ONLY the phrase. Nothing else. No labels, no explanation."
         ),
     },
     "ig_description_meme": {

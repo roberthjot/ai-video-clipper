@@ -56,6 +56,14 @@ def detect_platform(url: str) -> str:
     return "other"
 
 
+def is_vod_url(url: str) -> bool:
+    """True if the URL looks like a VOD (recorded past stream) rather than live.
+    Twitch VODs: twitch.tv/videos/123456789
+    Kick VODs:   kick.com/video/xxxxx (varies; treat /video/ as VOD too)"""
+    u = url.lower()
+    return ("/videos/" in u) or ("/video/" in u)
+
+
 # ─── Resolve HLS stream URL via streamlink ────────────────────────────────────
 
 RESOLUTION_SCALE = {
@@ -71,13 +79,21 @@ RESOLUTION_QUALITY = {
 }
 
 
-def resolve_stream_url(url: str, resolution: str = "720p", start_offset_minutes: int = 0) -> str:
-    """Use streamlink to get the direct HLS URL for recording."""
+def resolve_stream_url(url: str, resolution: str = "720p",
+                       start_offset_minutes: int = 0,
+                       start_offset_seconds: int = 0) -> str:
+    """Use streamlink to get the direct HLS URL for recording.
+    start_offset_seconds takes precedence over start_offset_minutes when both
+    are set (used by VOD / single-shot mode to seek with second-level precision).
+    """
     session = sl.Streamlink()
-    if start_offset_minutes > 0:
-        # hls-start-offset expects seconds as int or HH:MM:SS string
-        session.set_option("hls-start-offset", start_offset_minutes * 60)
-        print(f"[Stream] Rewind offset: -{start_offset_minutes} min ({start_offset_minutes * 60}s)")
+    offset_s = int(start_offset_seconds) if start_offset_seconds > 0 else int(start_offset_minutes) * 60
+    if offset_s > 0:
+        # hls-start-offset accepts seconds as int. For VODs this seeks into
+        # the video timeline; for live it rewinds the DVR buffer.
+        session.set_option("hls-start-offset", offset_s)
+        hh = offset_s // 3600; mm = (offset_s % 3600) // 60; ss = offset_s % 60
+        print(f"[Stream] Start offset: {hh:02d}:{mm:02d}:{ss:02d} ({offset_s}s)")
     streams = session.streams(url)
     if not streams:
         raise ValueError(f"No streams found for URL: {url}")
@@ -98,24 +114,53 @@ def resolve_stream_url(url: str, resolution: str = "720p", start_offset_minutes:
 # ─── Record one segment with FFmpeg ──────────────────────────────────────────
 
 def record_segment(hls_url: str, output_path: str, duration_seconds: int,
-                   stop_event: threading.Event, resolution: str = "720p") -> float:
-    """Record duration_seconds of a live stream to output_path. Returns actual seconds recorded."""
-    scale = RESOLUTION_SCALE.get(resolution, RESOLUTION_SCALE["720p"])
-    cmd = [
-        FFMPEG_EXE,
-        "-i", hls_url,
-        "-t", str(duration_seconds),
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-vf", f"scale={scale}",
-        "-c:a", "aac",
-        "-y",
-        "-loglevel", "warning",
-        output_path,
-    ]
+                   stop_event: threading.Event, resolution: str = "720p",
+                   copy_mode: bool = False, start_offset_seconds: int = 0) -> tuple:
+    """Record duration_seconds of a stream to output_path.
 
-    proc = subprocess.Popen(cmd)
+    start_offset_seconds: passed to FFmpeg as `-ss N` BEFORE `-i` so the seek
+    happens at the input level (HLS playlist), not at the output. This is the
+    only way to actually start downloading from a specific point in a VOD —
+    streamlink's hls-start-offset only affects piped reads, not the playlist
+    URL we hand to FFmpeg.
+
+    Returns (elapsed_seconds, exit_code, stderr_tail).
+
+    copy_mode=True uses `-c copy` (no re-encode, no scale). With -c copy, the
+    seek snaps to the nearest keyframe (typically 2 sec granularity in HLS).
+    copy_mode=False re-encodes with libx264 + scaling for live capture.
+    """
+    base = [FFMPEG_EXE]
+    if start_offset_seconds and start_offset_seconds > 0:
+        base += ["-ss", str(int(start_offset_seconds))]
+
+    if copy_mode:
+        cmd = base + [
+            "-i", hls_url,
+            "-t", str(duration_seconds),
+            "-c", "copy",
+            "-y",
+            "-loglevel", "warning",
+            output_path,
+        ]
+    else:
+        scale = RESOLUTION_SCALE.get(resolution, RESOLUTION_SCALE["720p"])
+        cmd = base + [
+            "-i", hls_url,
+            "-t", str(duration_seconds),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-vf", f"scale={scale}",
+            "-c:a", "aac",
+            "-y",
+            "-loglevel", "warning",
+            output_path,
+        ]
+
+    # Capture stderr so we can surface FFmpeg errors instead of guessing
+    proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                            text=True, encoding="utf-8", errors="replace")
     start = time.time()
     while proc.poll() is None:
         if stop_event.is_set():
@@ -123,8 +168,14 @@ def record_segment(hls_url: str, output_path: str, duration_seconds: int,
             proc.wait()
             break
         time.sleep(1)
-
-    return time.time() - start
+    elapsed = time.time() - start
+    # Drain stderr (won't block — process already exited)
+    try:
+        err_output = proc.stderr.read() if proc.stderr else ""
+    except Exception:
+        err_output = ""
+    err_tail = err_output[-600:] if err_output else ""
+    return elapsed, proc.returncode, err_tail
 
 
 # ─── Main recording loop ──────────────────────────────────────────────────────
@@ -134,8 +185,14 @@ def _recording_loop(session: StreamSession, stop_event: threading.Event) -> None
     os.makedirs(streams_dir, exist_ok=True)
 
     try:
-        hls_url = resolve_stream_url(session.url, session.resolution, session.start_offset_minutes)
-        print(f"[Stream] Resolved HLS URL for {session.url} ({session.resolution})")
+        hls_url = resolve_stream_url(
+            session.url, session.resolution,
+            start_offset_minutes=session.start_offset_minutes,
+            start_offset_seconds=session.start_offset_seconds,
+        )
+        print(f"[Stream] Resolved HLS URL for {session.url} ({session.resolution})"
+              f"{' [VOD]' if session.is_vod else ''}"
+              f"{' [single-shot]' if session.single_shot else ''}")
     except Exception as e:
         session.status = "error"
         session.error = str(e)
@@ -144,10 +201,22 @@ def _recording_loop(session: StreamSession, stop_event: threading.Event) -> None
 
     segment_index = 0
     session.status = "recording"
+    # VOD / single-shot uses -c copy (no re-encode, fast). Live re-encodes.
+    copy_mode = bool(session.is_vod or session.single_shot)
+    # Seek into the HLS playlist via FFmpeg `-ss`. streamlink's hls-start-offset
+    # doesn't propagate into the playlist URL we hand to FFmpeg, so without this
+    # every download starts at second 0 of the VOD.
+    seek_seconds = int(session.start_offset_seconds or 0)
+    if seek_seconds == 0 and session.start_offset_minutes:
+        seek_seconds = int(session.start_offset_minutes) * 60
 
     while not stop_event.is_set():
         seg_path = os.path.join(streams_dir, f"segment_{segment_index:03d}.mp4")
-        duration_s = session.segment_minutes * 60
+        # Override duration when caller asked for a precise HH:MM:SS slice.
+        if session.duration_seconds and session.duration_seconds > 0:
+            duration_s = int(session.duration_seconds)
+        else:
+            duration_s = session.segment_minutes * 60
 
         segment = StreamSegment(
             index=segment_index,
@@ -156,25 +225,49 @@ def _recording_loop(session: StreamSession, stop_event: threading.Event) -> None
             started_at=datetime.now(timezone.utc).isoformat(),
         )
         session.segments.append(segment)
-        print(f"[Stream] Recording segment {segment_index} ({session.segment_minutes} min)...")
+        mode_tag = "copy" if copy_mode else "re-encode"
+        print(f"[Stream] Recording segment {segment_index} ({duration_s}s, {mode_tag})...")
 
-        recorded = record_segment(hls_url, seg_path, duration_s, stop_event, session.resolution)
-        segment.duration_recorded = recorded
+        elapsed, exit_code, err_tail = record_segment(
+            hls_url, seg_path, duration_s, stop_event,
+            session.resolution, copy_mode=copy_mode,
+            start_offset_seconds=seek_seconds,
+        )
+        segment.duration_recorded = elapsed
 
-        if recorded < 15:
-            segment.status = "skipped"
-            print(f"[Stream] Segment {segment_index} skipped ({recorded:.0f}s too short)")
-        else:
+        # Decide success/failure based on exit code + file existence + size.
+        file_size = os.path.getsize(seg_path) if os.path.exists(seg_path) else 0
+        file_ok = exit_code == 0 and file_size > 100_000  # > 100 KB
+
+        if file_ok:
             segment.status = "ready"
-            print(f"[Stream] Segment {segment_index} ready ({recorded:.0f}s) → {seg_path}")
+            print(f"[Stream] Segment {segment_index} ready "
+                  f"(elapsed={elapsed:.0f}s, {file_size/1024/1024:.1f}MB) → {seg_path}")
+        elif exit_code != 0:
+            segment.status = "failed"
+            # Pull the most useful line from the stderr tail
+            err_msg = (err_tail.strip().splitlines()[-1] if err_tail.strip() else
+                       f"FFmpeg exited with code {exit_code}")
+            segment.error = err_msg
+            print(f"[Stream] Segment {segment_index} FAILED (exit={exit_code}):\n{err_tail}")
+        else:
+            # Exited cleanly but file is tiny — interrupted or no data
+            segment.status = "skipped"
+            segment.error = f"Archivo muy chico ({file_size} bytes). Probablemente el stream se cortó."
+            print(f"[Stream] Segment {segment_index} skipped ({file_size} bytes)")
 
         if stop_event.is_set():
+            break
+
+        # Single-shot mode: one segment then stop.
+        if session.single_shot:
+            print(f"[Stream] Single-shot complete — stopping session")
             break
 
         segment_index += 1
 
     session.status = "stopped"
-    print(f"[Stream] Session {session.session_id} stopped after {segment_index + 1} segments")
+    print(f"[Stream] Session {session.session_id} stopped after {segment_index + 1} segment(s)")
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
@@ -182,8 +275,15 @@ def _recording_loop(session: StreamSession, stop_event: threading.Event) -> None
 def start_session(url: str, segment_minutes: int = 10,
                   clips_per_segment: int = 5,
                   resolution: str = "720p",
-                  start_offset_minutes: int = 0) -> StreamSession:
+                  start_offset_minutes: int = 0,
+                  single_shot: bool = False,
+                  start_offset_seconds: int = 0,
+                  duration_seconds: int = 0) -> StreamSession:
     session_id = uuid.uuid4().hex[:8]
+    vod = is_vod_url(url)
+    # VOD implies single-shot (downloading a finite past slice, not looping live).
+    if vod:
+        single_shot = True
     session = StreamSession(
         session_id=session_id,
         url=url,
@@ -192,6 +292,10 @@ def start_session(url: str, segment_minutes: int = 10,
         clips_per_segment=clips_per_segment,
         resolution=resolution,
         start_offset_minutes=start_offset_minutes,
+        is_vod=vod,
+        single_shot=single_shot,
+        start_offset_seconds=start_offset_seconds,
+        duration_seconds=duration_seconds,
         status="starting",
         created_at=datetime.now(timezone.utc).isoformat(),
     )

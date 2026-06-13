@@ -303,7 +303,124 @@ export function getInstagramPreviewUrl(projectId, clipId) {
 
 // ─── Live Stream API ──────────────────────────────────────────────────────────
 
-export async function startStream(url, segmentMinutes, clipsPerSegment, resolution = "720p", startOffsetMinutes = 0) {
+// ─── Universal video downloader (yt-dlp) ─────────────────────────────────────
+
+export async function startDownload(url, quality = "max", audioOnly = false) {
+    const res = await fetch(`${API_BASE}/downloader/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, quality, audio_only: audioOnly }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to start download");
+    }
+    return res.json();
+}
+
+export async function getDownloadStatus(jobId) {
+    const res = await fetch(`${API_BASE}/downloader/status/${jobId}`);
+    if (!res.ok) throw new Error("Failed to get download status");
+    return res.json();
+}
+
+export async function listDownloads() {
+    const res = await fetch(`${API_BASE}/downloader/list`);
+    if (!res.ok) throw new Error("Failed to list downloads");
+    return res.json();
+}
+
+export async function deleteDownload(jobId) {
+    const res = await fetch(`${API_BASE}/downloader/${jobId}`, { method: "DELETE" });
+    return res.ok;
+}
+
+export function getDownloadFileUrl(jobId) {
+    return `${API_BASE}/downloader/file/${jobId}`;
+}
+
+export async function processTwitchClipsBatch(clips, broadcasterName = "", geminiModel = "") {
+    // clips: [{ slug, title }, ...]  — One project with N clips.
+    const res = await fetch(`${API_BASE}/stream/twitch-clips-batch-to-project`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            clips, broadcaster_name: broadcasterName, gemini_model: geminiModel,
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to process clips batch");
+    }
+    return res.json();
+}
+
+export async function processTwitchClip(clipSlug, clipTitle, broadcasterName = "", geminiModel = "") {
+    // Downloads a Twitch clip + creates a project + spawns Gemini caption job.
+    // Returns immediately with project_id; poll /status/{id} until "ready".
+    const res = await fetch(`${API_BASE}/stream/twitch-clip-to-project`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            clip_slug: clipSlug,
+            clip_title: clipTitle,
+            broadcaster_name: broadcasterName,
+            gemini_model: geminiModel,
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to process clip");
+    }
+    return res.json();
+}
+
+export async function getProjectStatus(projectId) {
+    const res = await fetch(`${API_BASE}/status/${projectId}`);
+    if (!res.ok) throw new Error("Failed to get status");
+    return res.json();
+}
+
+export async function startTwitchChatVelocity(url) {
+    // Kick off a background job that downloads + buckets the VOD chat.
+    const qs = new URLSearchParams({ url }).toString();
+    const res = await fetch(`${API_BASE}/stream/twitch-chat-velocity/start?${qs}`, {
+        method: "POST",
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to start chat velocity");
+    }
+    return res.json();
+}
+
+export async function getTwitchChatVelocity(videoId) {
+    // Poll for the chat-velocity job's status / result.
+    const res = await fetch(`${API_BASE}/stream/twitch-chat-velocity/status/${videoId}`);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to get chat velocity");
+    }
+    return res.json();
+}
+
+export async function getTwitchClips(url, limit = 50) {
+    // Returns the top viewer-made clips of a Twitch VOD, sorted by views.
+    // Each clip has vod_offset_seconds so the UI can autopopulate HH:MM:SS.
+    const qs = new URLSearchParams({ url, limit: String(limit) }).toString();
+    const res = await fetch(`${API_BASE}/stream/twitch-clips?${qs}`);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to fetch Twitch clips");
+    }
+    return res.json();
+}
+
+export async function startStream(url, segmentMinutes, clipsPerSegment, resolution = "720p",
+                                  startOffsetMinutes = 0, opts = {}) {
+    // opts: { singleShot, startOffsetSeconds, durationSeconds } — when set,
+    // backend ignores segment_minutes / start_offset_minutes and downloads
+    // a single HH:MM:SS slice with -c copy (no re-encode).
     const res = await fetch(`${API_BASE}/stream/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -313,6 +430,9 @@ export async function startStream(url, segmentMinutes, clipsPerSegment, resoluti
             clips_per_segment: clipsPerSegment,
             resolution,
             start_offset_minutes: startOffsetMinutes,
+            single_shot: !!opts.singleShot,
+            start_offset_seconds: opts.startOffsetSeconds || 0,
+            duration_seconds: opts.durationSeconds || 0,
         }),
     });
     if (!res.ok) {
