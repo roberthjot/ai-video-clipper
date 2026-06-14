@@ -93,6 +93,22 @@ class ClipData(BaseModel):
     # None = inherit the project style (default).
     style_override: Optional["StyleConfig"] = None
 
+    # Spanish translation cache. Populated by the "Generar versión en español"
+    # button. Empty = not translated yet. When export runs with language="es"
+    # it uses caption_es as the PIL caption text and words_es as the transcript
+    # passed to subtitle generation. Keeps the English export untouched.
+    caption_es: str = ""
+    words_es: list[dict] = []
+
+    # Auto-reframe / face-tracking cache. Populated by POST /analyze-faces.
+    # Empty dict = not analyzed yet. Shape mirrors face_track_service.analyze_clip:
+    #   { fps, width, height, start_time, end_time,
+    #     samples: [{t, faces: [{id, x, y, w, h, confidence}]}],
+    #     people:  [{id, first_t, thumb_t, thumb_box, appearance_count}] }
+    # The trajectory itself is recomputed on demand from face_track + mode/follow_face_id
+    # (cheap math, no need to cache) so the user can switch modes without re-analyzing.
+    face_track: dict = {}
+
     def model_post_init(self, __context):
         if self.duration == 0.0:
             self.duration = self.end_time - self.start_time
@@ -197,6 +213,18 @@ class StyleConfig(BaseModel):
     # Image overlays (editor mode) — images painted on top of the video for a
     # time range. Empty by default. Burned in at export.
     image_overlays: list[ImageOverlay] = []
+
+    # Auto-reframe (face-tracking). When enabled, the export pipeline replaces
+    # the static fg crop with a dynamic crop window that follows the face
+    # trajectory computed from clip.face_track. Off by default — must be
+    # explicitly enabled per clip from the editor's "🎯 Auto-encuadre" panel.
+    # Incompatible with split_screen (both stack vertical regions); the UI
+    # blocks both being on simultaneously.
+    auto_reframe_enabled: bool = False
+    auto_reframe_mode: str = "all"          # "all" | "biggest" | "follow"
+    auto_reframe_follow_id: int | None = None   # face id when mode=="follow"
+    auto_reframe_padding: float = 0.30      # 0..1 — headroom around faces
+    auto_reframe_smoothing: float = 0.85    # 0..0.99 — EMA factor (higher = smoother camera)
 
     # Anti-detect / uniquify (export only, not applied to preview)
     strip_metadata: bool = False

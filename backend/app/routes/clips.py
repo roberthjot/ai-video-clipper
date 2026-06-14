@@ -596,6 +596,90 @@ async def preview_clip_frame(project_id: str, clip_id: int):
     return FileResponse(preview_path, media_type="image/jpeg")
 
 
+@router.get("/{project_id}/{clip_id}/preview-es")
+async def preview_clip_frame_es(project_id: str, clip_id: int):
+    """Same as /preview but renders the white caption box with caption_es text.
+    The static frame has no burned-in Whisper subs, so this only differs from
+    /preview in the caption text it paints."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    clip = next((c for c in project.clips if c.id == clip_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    caption_es = (getattr(clip, "caption_es", "") or "").strip()
+    if not caption_es:
+        raise HTTPException(status_code=404, detail="Clip not translated yet")
+
+    os.makedirs(project.output_dir, exist_ok=True)
+    preview_path = os.path.join(project.output_dir, f"preview_clip_{clip_id}_es.jpg")
+    timestamp = clip.start_time + (clip.duration / 2)
+    style = clip.style_override or project.style
+
+    _kfs = getattr(clip, 'keyframes', []) or []
+    if _kfs:
+        _interp = video_service.interpolate_keyframes(_kfs, clip.duration / 2)
+        _ez = _interp["zoom"]
+        _epx = max(-50.0, min(50.0, _interp["pan_x"] / 2))
+        _epy = max(-50.0, min(50.0, _interp["pan_y"] / 2))
+    else:
+        _ez = getattr(clip, 'edit_zoom', 1.0)
+        _epx = getattr(clip, 'edit_pan_x', 0.0)
+        _epy = getattr(clip, 'edit_pan_y', 0.0)
+
+    try:
+        await asyncio.to_thread(
+            video_service.generate_preview_frame,
+            video_path=project.video_path,
+            timestamp=timestamp,
+            output_path=preview_path,
+            caption_text=caption_es,
+            text_x=style.text_x,
+            text_y=style.text_y,
+            font_size=style.font_size,
+            text_color=style.text_color,
+            text_stroke_color=style.text_stroke_color,
+            text_stroke_width=style.text_stroke_width,
+            watermark_path=style.watermark_path,
+            watermark_x=style.watermark_x,
+            watermark_y=style.watermark_y,
+            watermark_scale=style.watermark_scale,
+            watermark_opacity=style.watermark_opacity,
+            fill_mode=style.fill_mode,
+            split_screen_enabled=style.split_screen_enabled,
+            split_image_path=style.split_image_path,
+            split_ratio=style.split_ratio,
+            flip_horizontal=style.flip_horizontal,
+            boost_contrast=style.boost_contrast,
+            caption_style=getattr(style, 'caption_style', 'box'),
+            background_style=getattr(style, 'background_style', 'blur'),
+            no_text=getattr(style, 'no_text', False),
+            caption_font=getattr(style, 'caption_font', 'calibri'),
+            caption_box_radius=getattr(style, 'caption_box_radius', 0.28),
+            caption_box_opacity=getattr(style, 'caption_box_opacity', 0.95),
+            caption_box_color=getattr(style, 'caption_box_color', '#FFFFFF'),
+            caption_box_pad_x=getattr(style, 'caption_box_pad_x', 14),
+            caption_box_pad_y=getattr(style, 'caption_box_pad_y', 14),
+            no_emojis=getattr(style, 'no_emojis', False),
+            edit_zoom=_ez,
+            edit_pan_x=_epx,
+            edit_pan_y=_epy,
+            fill_mode_scale=getattr(style, 'fill_mode_scale', 1.0),
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Spanish preview failed: {str(e)}")
+
+    if not os.path.exists(preview_path):
+        raise HTTPException(status_code=500, detail="Preview file not generated")
+
+    return FileResponse(preview_path, media_type="image/jpeg")
+
+
 @router.get("/{project_id}/{clip_id}/video-preview")
 async def preview_clip_video(project_id: str, clip_id: int):
     """Generate and return a short video preview of a clip for playback."""
@@ -617,6 +701,30 @@ async def preview_clip_video(project_id: str, clip_id: int):
     video_preview_path = os.path.join(project.output_dir, f"preview_clip_{clip_id}.mp4")
 
     style = clip.style_override or project.style
+
+    # Auto-reframe routing: the fast `generate_preview_clip` path doesn't
+    # know about face tracking. When the user has it enabled on this clip,
+    # route through the real export pipeline instead — that's what makes
+    # "Play clip" show the actual reframed output. Slower than the regular
+    # preview (preset=fast vs ultrafast) but it's the only way to render
+    # the dynamic crop correctly here.
+    if (getattr(style, "auto_reframe_enabled", False)
+            and getattr(clip, "face_track", None)
+            and clip.face_track.get("samples")):
+        from ..services import export_service as _ex
+        try:
+            await asyncio.to_thread(
+                _ex.export_clip_with_style,
+                project.video_path, clip, style, video_preview_path,
+                getattr(project, "transcript", None), "en",
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Reframe preview failed: {str(e)}")
+        if not os.path.exists(video_preview_path):
+            raise HTTPException(status_code=500, detail="Video preview not generated")
+        return FileResponse(video_preview_path, media_type="video/mp4")
 
     try:
         await asyncio.to_thread(
@@ -683,6 +791,214 @@ async def preview_clip_video(project_id: str, clip_id: int):
     return FileResponse(video_preview_path, media_type="video/mp4")
 
 
+@router.post("/{project_id}/{clip_id}/translate-only")
+async def translate_clip_only(project_id: str, clip_id: int):
+    """Translate a single clip's caption + Whisper words to Spanish and cache
+    them on the clip. Does NOT trigger any export — used by the Visual Editor
+    when the user wants to preview the ES version of the clip they're styling.
+
+    Returns the translated data so the UI can show it immediately.
+    """
+    from ..config import settings as _settings
+
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    clip = None
+    for c in project.clips:
+        if c.id == clip_id:
+            clip = c
+            break
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    # Idempotent — if already translated, just return the cache.
+    if getattr(clip, "caption_es", "") and getattr(clip, "words_es", []):
+        return {
+            "status": "cached",
+            "caption_es": clip.caption_es,
+            "words_es": clip.words_es,
+        }
+
+    transcript = getattr(project, "transcript", None) or {}
+    all_words = transcript.get("words", []) if isinstance(transcript, dict) else []
+
+    clip_en_words = []
+    for w in all_words:
+        try:
+            ws, we = float(w.get("start", 0.0)), float(w.get("end", 0.0))
+        except Exception:
+            continue
+        if we < clip.start_time:
+            continue
+        if ws > clip.end_time:
+            break
+        wtxt = str(w.get("word", "")).strip()
+        if wtxt:
+            clip_en_words.append({"word": wtxt, "start": ws, "end": we})
+
+    if not clip_en_words:
+        # No Whisper words in range → translate the caption only so the white
+        # box shows in Spanish; subtitles will be empty in the ES preview.
+        clip_en_words = [{"word": "placeholder", "start": clip.start_time, "end": clip.end_time}]
+
+    target_model = getattr(project, "gemini_model", None) or _settings.GEMINI_MODEL
+    try:
+        result = gemini_service.translate_clip_to_spanish(
+            clip.viral_caption, clip_en_words, model=target_model,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
+
+    if not result:
+        raise HTTPException(status_code=500, detail="Translation returned empty")
+
+    clip.caption_es = result.get("caption_es", "") or clip.viral_caption
+    clip.words_es = result.get("words_es", []) or []
+
+    # Invalidate any cached ES previews so the next preview reflects the new
+    # translation (e.g. user re-translated after editing the original caption).
+    for fname in (f"preview_clip_{clip_id}_es.mp4", f"preview_clip_{clip_id}_es.jpg"):
+        fp = os.path.join(project.output_dir, fname)
+        if os.path.exists(fp):
+            try:
+                os.remove(fp)
+            except Exception:
+                pass
+
+    return {
+        "status": "translated",
+        "caption_es": clip.caption_es,
+        "words_es": clip.words_es,
+    }
+
+
+@router.get("/{project_id}/{clip_id}/video-preview-es")
+async def preview_clip_video_es(project_id: str, clip_id: int):
+    """Generate the same 10s preview as /video-preview but using the cached
+    Spanish translation: caption_es as the white-box text + words_es as the
+    burned-in subtitles. Lets the user verify the translation visually
+    without exporting the full clip.
+
+    Returns 404 if the clip hasn't been translated yet.
+    """
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    clip = None
+    for c in project.clips:
+        if c.id == clip_id:
+            clip = c
+            break
+
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    caption_es = (getattr(clip, "caption_es", "") or "").strip()
+    words_es = getattr(clip, "words_es", None) or []
+    if not caption_es and not words_es:
+        raise HTTPException(status_code=404, detail="Clip not translated yet")
+
+    os.makedirs(project.output_dir, exist_ok=True)
+    video_preview_path = os.path.join(project.output_dir, f"preview_clip_{clip_id}_es.mp4")
+
+    style = clip.style_override or project.style
+
+    # Auto-reframe routing: same idea as /video-preview — when the user has
+    # face tracking enabled, the only way to render it correctly is through
+    # the real export pipeline (which handles language="es" + reframe).
+    if (getattr(style, "auto_reframe_enabled", False)
+            and getattr(clip, "face_track", None)
+            and clip.face_track.get("samples")):
+        from ..services import export_service as _ex
+        try:
+            await asyncio.to_thread(
+                _ex.export_clip_with_style,
+                project.video_path, clip, style, video_preview_path,
+                getattr(project, "transcript", None), "es",
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"ES reframe preview failed: {str(e)}")
+        if not os.path.exists(video_preview_path):
+            raise HTTPException(status_code=500, detail="Video preview not generated")
+        return FileResponse(video_preview_path, media_type="video/mp4")
+
+    # Build a fake transcript dict from words_es so generate_preview_clip's
+    # subtitle path picks up the Spanish words (it only reads transcript["words"]).
+    es_transcript = {"words": list(words_es)} if words_es else None
+
+    # Caption text: prefer caption_es, fall back to viral_caption if the user
+    # somehow asks for a preview before the caption translation landed.
+    caption_text = caption_es or clip.viral_caption
+
+    try:
+        await asyncio.to_thread(
+            video_service.generate_preview_clip,
+            video_path=project.video_path,
+            start_time=clip.start_time,
+            duration=clip.duration,
+            output_path=video_preview_path,
+            caption_text=caption_text,
+            text_x=style.text_x,
+            text_y=style.text_y,
+            font_size=style.font_size,
+            text_color=style.text_color,
+            text_stroke_color=style.text_stroke_color,
+            text_stroke_width=style.text_stroke_width,
+            watermark_path=style.watermark_path,
+            watermark_x=style.watermark_x,
+            watermark_y=style.watermark_y,
+            watermark_scale=style.watermark_scale,
+            watermark_opacity=style.watermark_opacity,
+            fill_mode=style.fill_mode,
+            split_screen_enabled=style.split_screen_enabled,
+            split_image_path=style.split_image_path,
+            split_ratio=style.split_ratio,
+            flip_horizontal=style.flip_horizontal,
+            boost_contrast=style.boost_contrast,
+            caption_style=getattr(style, 'caption_style', 'box'),
+            subtitle_style=getattr(style, 'subtitle_style', 'none'),
+            transcript=es_transcript,
+            visual_filter=getattr(style, 'visual_filter', 'none'),
+            subtitle_size_scale=getattr(style, 'subtitle_size_scale', 1.0),
+            subtitle_y=getattr(style, 'subtitle_y', 0.0),
+            background_style=getattr(style, 'background_style', 'blur'),
+            no_text=getattr(style, 'no_text', False),
+            caption_font=getattr(style, 'caption_font', 'calibri'),
+            caption_box_radius=getattr(style, 'caption_box_radius', 0.28),
+            caption_box_opacity=getattr(style, 'caption_box_opacity', 0.95),
+            caption_box_color=getattr(style, 'caption_box_color', '#FFFFFF'),
+            caption_box_pad_x=getattr(style, 'caption_box_pad_x', 14),
+            caption_box_pad_y=getattr(style, 'caption_box_pad_y', 14),
+            no_emojis=getattr(style, 'no_emojis', False),
+            edit_zoom=getattr(clip, 'edit_zoom', 1.0),
+            edit_pan_x=getattr(clip, 'edit_pan_x', 0.0),
+            edit_pan_y=getattr(clip, 'edit_pan_y', 0.0),
+            fill_mode_scale=getattr(style, 'fill_mode_scale', 1.0),
+            keyframes=getattr(clip, 'keyframes', []) or [],
+            mirror_cyclic_enabled=getattr(style, 'mirror_cyclic_enabled', False),
+            mirror_cyclic_interval=getattr(style, 'mirror_cyclic_interval', 5.0),
+            sway_enabled=getattr(style, 'sway_enabled', False),
+            sway_period=getattr(style, 'sway_period', 3.0),
+            sway_amplitude=getattr(style, 'sway_amplitude', 40),
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Spanish video preview failed: {str(e)}")
+
+    if not os.path.exists(video_preview_path):
+        raise HTTPException(status_code=500, detail="Spanish video preview not generated")
+
+    return FileResponse(video_preview_path, media_type="video/mp4")
+
+
 @router.get("/{project_id}/{clip_id}/instagram-preview")
 async def preview_clip_instagram_frame(project_id: str, clip_id: int):
     """Generate a static JPEG in Instagram post format: white bg + caption text + video below."""
@@ -730,6 +1046,167 @@ async def preview_clip_instagram_frame(project_id: str, clip_id: int):
 
     if not os.path.exists(ig_frame_path):
         raise HTTPException(status_code=500, detail="Instagram preview not generated")
+
+    return FileResponse(ig_frame_path, media_type="image/jpeg")
+
+
+@router.post("/{project_id}/{clip_id}/analyze-faces")
+async def clip_analyze_faces(project_id: str, clip_id: int):
+    """Run MediaPipe face detection over a specific AI-detected clip's range
+    and cache the result on that clip. Same idea as editor/analyze-faces
+    but works per-clip from the Visual Editor / Paso 3.
+
+    Synchronous — typical clip < 90s takes 10–30s on CPU.
+    """
+    from ..services import face_track_service
+
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+    clip = next((c for c in project.clips if c.id == clip_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    if clip.end_time - clip.start_time < 0.5:
+        raise HTTPException(status_code=400, detail="Clip range too short")
+
+    try:
+        face_track = await asyncio.to_thread(
+            face_track_service.analyze_clip,
+            project.video_path,
+            float(clip.start_time),
+            float(clip.end_time),
+            5.0,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Face analysis failed: {str(e)}")
+
+    clip.face_track = face_track
+    return {
+        "status": "ok",
+        "sample_count": len(face_track.get("samples", [])),
+        "people": face_track.get("people", []),
+        "width": face_track.get("width"),
+        "height": face_track.get("height"),
+        "start_time": face_track.get("start_time"),
+        "end_time": face_track.get("end_time"),
+        "samples": face_track.get("samples", []),
+    }
+
+
+@router.get("/{project_id}/{clip_id}/preview-reframe")
+async def clip_preview_reframe(project_id: str, clip_id: int, seconds: float = 10.0):
+    """10s MP4 sample with auto-reframe applied so the user can verify the
+    framing before exporting all clips. Mirrors editor's preview-reframe but
+    for a specific AI-detected clip."""
+    from ..services import export_service as _ex
+
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+    clip = next((c for c in project.clips if c.id == clip_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    ft = getattr(clip, "face_track", None) or {}
+    if not ft.get("samples"):
+        raise HTTPException(status_code=400, detail="Analyze faces first")
+
+    samples = ft["samples"]
+    def _score(s):
+        return (len(s.get("faces", [])), sum(f.get("confidence", 0) for f in s.get("faces", [])))
+    anchor = max(samples, key=_score) if samples else None
+    anchor_t = float(anchor.get("t", clip.start_time)) if anchor else float(clip.start_time)
+    half = max(2.0, min(30.0, seconds / 2))
+    sample_start = max(float(clip.start_time), anchor_t - half)
+    sample_end = min(float(clip.end_time), sample_start + seconds)
+    if sample_end - sample_start < 1.0:
+        sample_start = float(clip.start_time)
+        sample_end = min(float(clip.end_time), sample_start + seconds)
+
+    sample_clip = clip.model_copy(deep=True)
+    sample_clip.start_time = sample_start
+    sample_clip.end_time = sample_end
+    sample_clip.duration = sample_end - sample_start
+    sample_clip.segments = []
+    # Force reframe ON regardless of saved style — this endpoint always renders
+    # the auto-reframe so the user can compare. Pull the in-effect knobs from
+    # the per-clip override if any, else from project style.
+    base_style = clip.style_override or project.style
+    sample_style = base_style.model_copy(deep=True)
+    sample_style.auto_reframe_enabled = True
+    sample_style.split_screen_enabled = False
+
+    os.makedirs(project.output_dir, exist_ok=True)
+    output_path = os.path.join(project.output_dir, f"preview_reframe_clip_{clip_id}_{uuid.uuid4().hex[:8]}.mp4")
+
+    try:
+        await asyncio.to_thread(
+            _ex.export_clip_with_style,
+            project.video_path, sample_clip, sample_style, output_path,
+            getattr(project, "transcript", None), "en",
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Reframe preview failed: {str(e)}")
+
+    if not os.path.exists(output_path):
+        raise HTTPException(status_code=500, detail="Preview not generated")
+    return FileResponse(output_path, media_type="video/mp4")
+
+
+@router.get("/{project_id}/{clip_id}/instagram-preview-es")
+async def preview_clip_instagram_frame_es(project_id: str, clip_id: int):
+    """Spanish variant of /instagram-preview — same IG layout but with the
+    translated caption painted on the white panel."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    clip = next((c for c in project.clips if c.id == clip_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    caption_es = (getattr(clip, "caption_es", "") or "").strip()
+    if not caption_es:
+        raise HTTPException(status_code=404, detail="Clip not translated yet")
+
+    os.makedirs(project.output_dir, exist_ok=True)
+    ig_frame_path = os.path.join(project.output_dir, f"ig_preview_clip_{clip_id}_es.jpg")
+    timestamp = clip.start_time + (clip.duration / 2)
+    style = clip.style_override or project.style
+
+    try:
+        await asyncio.to_thread(
+            video_service.generate_instagram_preview_frame,
+            video_path=project.video_path,
+            timestamp=timestamp,
+            output_path=ig_frame_path,
+            caption_text=caption_es,
+            fill_mode=style.ig_fill_mode,
+            ig_top_padding=style.ig_top_padding,
+            watermark_path=style.watermark_path,
+            watermark_x=style.watermark_x,
+            watermark_y=style.watermark_y,
+            ig_watermark_y=style.ig_watermark_y,
+            watermark_scale=style.watermark_scale,
+            watermark_opacity=style.watermark_opacity,
+            flip_horizontal=style.flip_horizontal,
+            boost_contrast=style.boost_contrast,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Spanish IG preview failed: {str(e)}")
+
+    if not os.path.exists(ig_frame_path):
+        raise HTTPException(status_code=500, detail="Spanish IG preview not generated")
 
     return FileResponse(ig_frame_path, media_type="image/jpeg")
 

@@ -61,3 +61,9 @@ backend/nul
 Thumbs.db
 .DS_Store
 *.log
+
+# MediaPipe face detection model — auto-downloaded on first use by
+# face_track_service.py; not worth committing the binary blob.
+_blaze_face.tflite
+backend/_blaze_face.tflite
+backend/app/services/_blaze_face.tflite

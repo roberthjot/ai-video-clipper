@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, Fragment } from "react";
 import "./App.css";
 import * as api from "./services/api";
 import { useTheme } from "./ThemeContext.jsx";
@@ -1399,6 +1399,19 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   const [reanalyzingClip, setReanalyzingClip] = useState(null);
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
+  // Spanish translation/export: per-clip translation data keyed by clip.id.
+  // Each value is { caption_es, transcript_es, transcript_en }. Empty caption_es
+  // means "not translated yet" (don't render the sub-row).
+  const [translatedClips, setTranslatedClips] = useState(new Set());
+  const [translationData, setTranslationData] = useState({});  // {clipId: {caption_es, transcript_es, transcript_en}}
+  const [spanishBatchRunning, setSpanishBatchRunning] = useState(false);
+  const [spanishBatchProgress, setSpanishBatchProgress] = useState({ current: 0, total: 0 });
+  // 📄 Guión ES modal — null when closed
+  const [scriptEsClip, setScriptEsClip] = useState(null);
+  // ▶ Play ES modal — null when closed
+  const [playingEsClip, setPlayingEsClip] = useState(null);
+  const [videoEsUrl, setVideoEsUrl] = useState(null);
+  const [loadingVideoEs, setLoadingVideoEs] = useState(false);
   // Creator name (loaded from project on mount, editable, saved on blur/Enter)
   const [creatorName, setCreatorName] = useState("");
   const [creatorSaving, setCreatorSaving] = useState(false);
@@ -1491,6 +1504,12 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     setVideoUrl(api.getVideoPreviewUrl(projectId, clip.id));
   };
 
+  const handlePlayClipEs = async (clip) => {
+    setPlayingEsClip(clip);
+    setLoadingVideoEs(true);
+    setVideoEsUrl(api.getVideoPreviewEsUrl(projectId, clip.id));
+  };
+
   const handleImagePreview = (clip) => {
     setImagePreviewClip(clip);
     setImageLoading(true);
@@ -1524,6 +1543,65 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
       .then((p) => setCreatorName(p?.creator_name || ""))
       .catch(() => { /* project may not exist after backend restart */ });
   }, [projectId]);
+
+  // Load which clips already have a cached Spanish version so the 🌐ES sub-row
+  // shows up immediately on mount, AND grab the translated text so we can
+  // render it inline / in the Guión modal without extra round-trips.
+  useEffect(() => {
+    if (!projectId) return;
+    api.getTranslationStatus(projectId)
+      .then((r) => {
+        const ids = Object.entries(r?.translated || {})
+          .filter(([, v]) => v)
+          .map(([k]) => Number(k));
+        setTranslatedClips(new Set(ids));
+        // Normalize string keys → number keys so lookups by clip.id work.
+        const dataObj = {};
+        for (const [k, v] of Object.entries(r?.data || {})) dataObj[Number(k)] = v;
+        setTranslationData(dataObj);
+      })
+      .catch(() => { /* no-op: endpoint missing or project not found */ });
+  }, [projectId]);
+
+  // Spanish batch export: translates the selected clips (if not already cached)
+  // and exports them as separate _es.mp4 files. The English versions are
+  // never touched. Polls /export/progress until done.
+  const handleSpanishBatch = async () => {
+    if (selectedClips.size === 0 || spanishBatchRunning) return;
+    const ids = Array.from(selectedClips);
+    setSpanishBatchRunning(true);
+    setSpanishBatchProgress({ current: 0, total: ids.length });
+    try {
+      const start = await api.startSpanishExport(projectId, ids);
+      if (start?.translation_errors?.length) {
+        console.warn("[ES] translation warnings:", start.translation_errors);
+      }
+      // Poll progress until finished
+      while (true) {
+        await new Promise(r => setTimeout(r, 1500));
+        const p = await api.getExportProgress(projectId);
+        setSpanishBatchProgress({ current: p.current || 0, total: p.total || ids.length });
+        if (p.status === "completed" || p.status === "idle") break;
+      }
+      // Refresh translation cache marker + translated text so the ES sub-rows
+      // appear immediately with the new captions/transcripts.
+      try {
+        const s = await api.getTranslationStatus(projectId);
+        const newIds = Object.entries(s?.translated || {})
+          .filter(([, v]) => v)
+          .map(([k]) => Number(k));
+        setTranslatedClips(new Set(newIds));
+        const dataObj = {};
+        for (const [k, v] of Object.entries(s?.data || {})) dataObj[Number(k)] = v;
+        setTranslationData(dataObj);
+      } catch (_) {}
+    } catch (e) {
+      alert("Falló la generación en español: " + e.message);
+    } finally {
+      setSpanishBatchRunning(false);
+      setSpanishBatchProgress({ current: 0, total: 0 });
+    }
+  };
 
   // Save creator_name (called on blur or Enter). Saves silently and flashes
   // a "✓ guardado" indicator for 1.5s.
@@ -1706,10 +1784,22 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
             <span style={{ fontSize: 12.5, color: "var(--st-text)", fontFamily: "var(--st-mono)" }}>
               Analizando {batchProgress.current}/{batchProgress.total}…
             </span>
+          ) : spanishBatchRunning ? (
+            <span style={{ fontSize: 12.5, color: "var(--st-text)", fontFamily: "var(--st-mono)" }}>
+              🇪🇸 Traduciendo + exportando {spanishBatchProgress.current}/{spanishBatchProgress.total}…
+            </span>
           ) : (
             <>
               <button className="btn btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={handleReanalyzeBatch}>
                 <RefreshCw size={13} /> Re-analizar
+              </button>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: "5px 12px", fontSize: 12 }}
+                onClick={handleSpanishBatch}
+                title="Genera una segunda versión con caption y subtítulos traducidos al español. La versión en inglés no se toca."
+              >
+                🇪🇸 Generar versión en español
               </button>
               <button className="btn btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => setSelectedClips(new Set())}>
                 Deseleccionar
@@ -1751,9 +1841,10 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
           const isBeingAnalyzed = reanalyzingBatch && batchProgress.currentId === clip.id;
           const isDragOver = dragOverId === clip.id;
           const isDragging = draggedId === clip.id;
+          const hasSpanish = translatedClips.has(clip.id);
           return (
+            <Fragment key={clip.id}>
             <div
-              key={clip.id}
               draggable
               onDragStart={(e) => handleDragStart(e, clip.id)}
               onDragOver={(e) => handleDragOver(e, clip.id)}
@@ -1810,6 +1901,52 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                 ))}
               </div>
             </div>
+            {/* Spanish sub-row — appears only after a clip has been translated.
+                Visually nested under the English row so the pairing is obvious;
+                clicking it does NOT toggle selection (own onClick stops bubbling). */}
+            {hasSpanish && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  display: "flex", alignItems: "center", gap: 16,
+                  padding: "8px 12px 10px 56px",   // indent under the EN row's content
+                  borderBottom: i < filteredClips.length - 1 ? "1px solid var(--st-line)" : "none",
+                  background: "var(--st-soft)",
+                  borderRadius: 10,
+                  marginTop: -6, marginBottom: 4,
+                  cursor: "default",
+                }}
+              >
+                <span style={{
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  fontSize: 11, fontWeight: 700, fontFamily: "var(--st-mono)",
+                  padding: "3px 8px", borderRadius: 6,
+                  background: "var(--st-accent, #d4a64a)", color: "var(--st-on-accent, #1a1a1a)",
+                  flexShrink: 0,
+                }}>
+                  🌐 ES
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, color: "var(--st-text)", fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    “{translationData[clip.id]?.caption_es || "(caption en español no disponible)"}”
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                  {[
+                    { ic: <Play size={16} />, title: "Reproducir versión en español (10s)", fn: () => handlePlayClipEs(clip) },
+                    { ic: <FileText size={16} />, title: "Ver guión traducido vs original", fn: () => setScriptEsClip(clip) },
+                  ].map((a, k) => (
+                    <span key={k} title={a.title} onClick={a.fn}
+                      style={{ width: 30, height: 30, display: "grid", placeItems: "center", borderRadius: 8, color: "var(--st-muted)", cursor: "pointer" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--st-alt)"; e.currentTarget.style.color = "var(--st-text)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--st-muted)"; }}>
+                      {a.ic}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            </Fragment>
           );
         })}
       </div>
@@ -1916,6 +2053,89 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
         </div>
       )}
 
+      {/* Spanish Transcript / Script Modal — side-by-side English vs Spanish
+          so the user can verify the translation without opening the .mp4. */}
+      {scriptEsClip && (
+        <div className="modal-overlay" onClick={() => setScriptEsClip(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 620 }}>
+            <h3>📄 Guión ES · Clip {scriptEsClip.id}</h3>
+            <p style={{ color: "var(--text-secondary)", marginBottom: 14, fontSize: 13 }}>
+              {formatTime(scriptEsClip.start_time)} — {formatTime(scriptEsClip.end_time)}
+              {" · "}
+              <span style={{ color: "#aaa" }}>{scriptEsClip.description}</span>
+            </p>
+
+            {/* Caption side-by-side */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+              <div style={{
+                background: "#111", border: "1px solid #2a2a2a",
+                borderRadius: 10, padding: "12px 14px",
+              }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
+                  🇬🇧 Caption (EN)
+                </div>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#fff", lineHeight: 1.4 }}>
+                  "{scriptEsClip.viral_caption}"
+                </p>
+              </div>
+              <div style={{
+                background: "#111", border: "2px solid var(--st-accent, #d4a64a)",
+                borderRadius: 10, padding: "12px 14px",
+              }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
+                  🇪🇸 Caption (ES)
+                </div>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#fff", lineHeight: 1.4 }}>
+                  "{translationData[scriptEsClip.id]?.caption_es || "(no disponible)"}"
+                </p>
+              </div>
+            </div>
+
+            {/* Whisper transcript side-by-side */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+              <div style={{
+                background: "#0a0a0a", border: "1px solid #2a2a2a",
+                borderRadius: 10, padding: "12px 14px",
+              }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
+                  🎙️ Subtítulos (EN — Whisper)
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: "#ddd", lineHeight: 1.6, fontStyle: "italic" }}>
+                  {translationData[scriptEsClip.id]?.transcript_en || scriptEsClip.transcript_snippet || "(sin diálogo detectado)"}
+                </p>
+              </div>
+              <div style={{
+                background: "#0a0a0a", border: "1px solid var(--st-accent, #d4a64a)",
+                borderRadius: 10, padding: "12px 14px",
+              }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
+                  🎙️ Subtítulos (ES — traducido)
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: "#ddd", lineHeight: 1.6, fontStyle: "italic" }}>
+                  {translationData[scriptEsClip.id]?.transcript_es || "(sin subtítulos — la traducción solo cubre el caption)"}
+                </p>
+              </div>
+            </div>
+
+            <div className="btn-group">
+              <button className="btn btn-secondary" onClick={() => setScriptEsClip(null)}>
+                Cerrar
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  const c = scriptEsClip;
+                  setScriptEsClip(null);
+                  handlePlayClipEs(c);
+                }}
+              >
+                ▶ Reproducir ES (10s)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Clip Editor Modal — zoom, pan, trim (live preview via CSS transform).
           Style is unknown at this step (user hasn't picked one yet), so the
           modal preview uses the StyleConfig defaults: fit + blur. */}
@@ -1932,6 +2152,46 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
             setEditorClip(null);
           }}
         />
+      )}
+
+      {/* Video Player Modal — Spanish version preview */}
+      {playingEsClip && (
+        <div className="modal-overlay" onClick={() => { setPlayingEsClip(null); setVideoEsUrl(null); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
+            <h3>🇪🇸 Clip {playingEsClip.id} (ES): {playingEsClip.description}</h3>
+            <p style={{ color: "var(--text-secondary)", marginBottom: 12, fontSize: 13 }}>
+              {formatTime(playingEsClip.start_time)} — {formatTime(playingEsClip.end_time)} ({playingEsClip.duration.toFixed(0)}s)
+              {" · "}
+              <span style={{ color: "var(--st-accent, #d4a64a)", fontWeight: 600 }}>caption + subtítulos en español</span>
+            </p>
+            {loadingVideoEs && (
+              <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-muted)" }}>
+                <div className="loading-spinner" style={{ margin: "0 auto 12px" }}></div>
+                <p style={{ fontSize: 13 }}>Generando preview en español… (primera vez ~15s)</p>
+              </div>
+            )}
+            {videoEsUrl && (
+              <video
+                key={videoEsUrl}
+                controls
+                autoPlay
+                style={{ width: "100%", borderRadius: 10, background: "black", maxHeight: 400, display: loadingVideoEs ? "none" : "block" }}
+                src={videoEsUrl}
+                onCanPlay={() => setLoadingVideoEs(false)}
+                onError={() => {
+                  setLoadingVideoEs(false);
+                  alert("No se pudo generar el preview en español. ¿Está traducido el clip?");
+                  setVideoEsUrl(null);
+                }}
+              />
+            )}
+            <div className="btn-group">
+              <button className="btn btn-secondary" onClick={() => { setPlayingEsClip(null); setVideoEsUrl(null); }}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Video Player Modal */}
@@ -2043,6 +2303,13 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     background_style: "blur",
     no_text: false,
     no_emojis: false,
+    // Auto-reframe (face tracking). Off by default — user enables per-clip
+    // from the 🎯 Auto-encuadre panel after analyzing faces.
+    auto_reframe_enabled: false,
+    auto_reframe_mode: "all",           // "all" | "biggest" | "follow"
+    auto_reframe_follow_id: null,
+    auto_reframe_padding: 0.30,
+    auto_reframe_smoothing: 0.85,
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [exportMode, setExportMode] = useState("tiktok"); // "tiktok" | "instagram"
@@ -2058,6 +2325,106 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(false);
   const [selectedClipIds, setSelectedClipIds] = useState(new Set(clips.map(c => c.id)));
+  // Visual Editor preview language. "en" (default) shows the original caption +
+  // burned-in Whisper subs. "es" switches the preview to caption_es + words_es
+  // so the user can adjust subtitle style / position / size while seeing the
+  // translated version directly. Toggle does NOT change StyleConfig — it only
+  // routes preview requests to the _es endpoint variants.
+  const [previewLanguage, setPreviewLanguage] = useState("en");
+  // Which clip IDs already have a cached Spanish translation (caption_es +
+  // words_es). Powers the "Play ES" buttons and the inline "Traducir este clip"
+  // call-to-action when the user toggles ES on an untranslated clip.
+  const [editorTranslated, setEditorTranslated] = useState(new Set());
+  const [translatingNow, setTranslatingNow] = useState(false);
+
+  // ── Auto-reframe per-clip state ─────────────────────────────────────────
+  // Each AI clip has its own face_track because each clip covers a different
+  // range of the source video. clipFaceTracks is keyed by clip_id and stores
+  // { people, samples, width, height } as returned by /analyze-faces.
+  // The reframe knobs (mode/padding/smoothing/follow_id/enabled) live on the
+  // central `style` state below — written through `setStyle` so the existing
+  // debounced persist effect picks them up and saves them to backend.
+  // Preview is delivered through the existing Play clip flow: when
+  // style.auto_reframe_enabled is on, the backend's /video-preview endpoint
+  // routes through the real export pipeline instead of the fast preview path.
+  const [clipFaceTracks, setClipFaceTracks] = useState({});  // {clipId: {people, samples, width, height}}
+  const [analyzingFacesId, setAnalyzingFacesId] = useState(null);  // clipId being analyzed
+  const [analyzeFacesError, setAnalyzeFacesError] = useState(null);
+
+  // Load translation status once on mount so we know which clips already
+  // have an ES cache (lets the EN/ES toggle Just Work for those clips).
+  useEffect(() => {
+    if (!projectId) return;
+    api.getTranslationStatus(projectId)
+      .then((r) => {
+        const ids = Object.entries(r?.translated || {})
+          .filter(([, v]) => v)
+          .map(([k]) => Number(k));
+        setEditorTranslated(new Set(ids));
+      })
+      .catch(() => {});
+  }, [projectId]);
+
+  // Translate the currently selected clip on demand (when user toggles ES on
+  // a clip that doesn't have a cached translation yet). Idempotent — backend
+  // returns cached data if already translated.
+  // ── Auto-reframe handlers (Visual Editor / Paso 3) ───────────────────────
+  // Each AI clip is analyzed independently because each covers a different
+  // range of the source video. After analysis, the resulting face_track lives
+  // server-side on the clip; we also keep a lightweight copy in
+  // clipFaceTracks for the UI (people grid + thumbnails).
+  const handleAnalyzeClipFaces = async (clip) => {
+    if (!clip || analyzingFacesId === clip.id) return;
+    setAnalyzingFacesId(clip.id);
+    setAnalyzeFacesError(null);
+    try {
+      const r = await api.clipAnalyzeFaces(projectId, clip.id);
+      setClipFaceTracks((prev) => ({
+        ...prev,
+        [clip.id]: {
+          people: r.people || [],
+          samples: r.samples || [],
+          width: r.width || 0,
+          height: r.height || 0,
+        },
+      }));
+      // If exactly one person was detected, default-pick them for follow mode.
+      if ((r.people || []).length === 1) {
+        setStyle((s) => ({ ...s, auto_reframe_follow_id: r.people[0].id }));
+      }
+    } catch (e) {
+      setAnalyzeFacesError(e.message || "Falló el análisis de caras");
+    } finally {
+      setAnalyzingFacesId(null);
+    }
+  };
+
+  const handleTranslateCurrentClip = async () => {
+    if (!selectedClip || translatingNow) return;
+    setTranslatingNow(true);
+    try {
+      await api.translateClipOnly(projectId, selectedClip.id);
+      setEditorTranslated((prev) => {
+        const next = new Set(prev);
+        next.add(selectedClip.id);
+        return next;
+      });
+      // Force any open preview to refresh now that ES data exists.
+      if (previewUrl) {
+        const isIg = previewUrl.includes("instagram-preview");
+        setPreviewUrl(isIg
+          ? api.getInstagramPreviewEsUrl(projectId, selectedClip.id)
+          : api.getPreviewEsUrl(projectId, selectedClip.id));
+      }
+      if (videoPreviewUrl) {
+        setVideoPreviewUrl(api.getVideoPreviewEsUrl(projectId, selectedClip.id));
+      }
+    } catch (e) {
+      alert("Traducción falló: " + e.message);
+    } finally {
+      setTranslatingNow(false);
+    }
+  };
 
   const toggleClipSelection = (clipId) => {
     setSelectedClipIds(prev => {
@@ -2159,6 +2526,11 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     setStyle(s => ({ ...s, split_screen_enabled: false }));
   };
 
+  // Helper: pick EN vs ES preview URL based on previewLanguage state.
+  // If user selected ES but the clip hasn't been translated yet, falls back to
+  // EN — the UI shows a "Traducir este clip" button so they can fix that.
+  const _useEs = () => previewLanguage === "es" && selectedClip && editorTranslated.has(selectedClip.id);
+
   const handlePreview = async () => {
     if (!selectedClip) {
       alert("Please select a clip first");
@@ -2167,10 +2539,10 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     setLoadingPreview(true);
     setVideoPreviewUrl(null);
     try {
-      console.log("Updating style for project:", projectId);
       await persistStyle(style);
-      console.log("Generating preview for clip:", selectedClip.id);
-      setPreviewUrl(api.getPreviewUrl(projectId, selectedClip.id));
+      setPreviewUrl(_useEs()
+        ? api.getPreviewEsUrl(projectId, selectedClip.id)
+        : api.getPreviewUrl(projectId, selectedClip.id));
     } catch (err) {
       console.error("Preview failed:", err);
       alert("Preview failed: " + err.message);
@@ -2183,7 +2555,9 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     setLoadingVideo(true);
     setPreviewUrl(null);
     await persistStyle(style);
-    setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
+    setVideoPreviewUrl(_useEs()
+      ? api.getVideoPreviewEsUrl(projectId, selectedClip.id)
+      : api.getVideoPreviewUrl(projectId, selectedClip.id));
     // loadingVideo stays true until onCanPlay fires on the video element
   };
 
@@ -2193,7 +2567,9 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     setVideoPreviewUrl(null);
     try {
       await persistStyle(style);
-      setPreviewUrl(api.getInstagramPreviewUrl(projectId, selectedClip.id));
+      setPreviewUrl(_useEs()
+        ? api.getInstagramPreviewEsUrl(projectId, selectedClip.id)
+        : api.getInstagramPreviewUrl(projectId, selectedClip.id));
     } catch (err) {
       alert("Failed to generate IG preview: " + err.message);
     }
@@ -2213,21 +2589,24 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
           await persistStyle(style);
           loadedStyleRef.current = style;
         }
+        const useEs = _useEs();
         if (videoPreviewUrl) {
-          setVideoPreviewUrl(api.getVideoPreviewUrl(projectId, selectedClip.id));
+          setVideoPreviewUrl(useEs
+            ? api.getVideoPreviewEsUrl(projectId, selectedClip.id)
+            : api.getVideoPreviewUrl(projectId, selectedClip.id));
         }
         if (previewUrl) {
           const isIg = previewUrl.includes("instagram-preview");
           setPreviewUrl(
             isIg
-              ? api.getInstagramPreviewUrl(projectId, selectedClip.id)
-              : api.getPreviewUrl(projectId, selectedClip.id)
+              ? (useEs ? api.getInstagramPreviewEsUrl(projectId, selectedClip.id) : api.getInstagramPreviewUrl(projectId, selectedClip.id))
+              : (useEs ? api.getPreviewEsUrl(projectId, selectedClip.id) : api.getPreviewUrl(projectId, selectedClip.id))
           );
         }
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y, style.mirror_cyclic_enabled, style.mirror_cyclic_interval, style.sway_enabled, style.sway_period, style.sway_amplitude]);
+  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y, style.mirror_cyclic_enabled, style.mirror_cyclic_interval, style.sway_enabled, style.sway_period, style.sway_amplitude, style.auto_reframe_enabled, style.auto_reframe_mode, style.auto_reframe_follow_id, style.auto_reframe_padding, style.auto_reframe_smoothing, previewLanguage, editorTranslated]);
 
   // Poll progress
   useEffect(() => {
@@ -2622,11 +3001,57 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
 
           {/* Preview action buttons */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "0 0 16px", flexShrink: 0, flexWrap: "wrap" }}>
+            {/* EN / ES preview language toggle — only affects what's rendered
+                in the preview; does NOT modify StyleConfig or the export.
+                When ES is picked on an untranslated clip, the "Traducir este
+                clip" button appears to the right and offers to fix it. */}
+            <div style={{ display: "inline-flex", alignItems: "center", border: "1px solid var(--st-border)", borderRadius: 8, padding: 2, marginRight: 4 }}
+                 title="Idioma del preview · EN (original) o ES (traducido). Solo afecta el preview, no el export.">
+              {["en", "es"].map((lang) => (
+                <button
+                  key={lang}
+                  onClick={() => setPreviewLanguage(lang)}
+                  className="st-btn"
+                  style={{
+                    padding: "5px 10px", fontSize: 12, fontWeight: 600,
+                    background: previewLanguage === lang ? "var(--st-accent)" : "transparent",
+                    color: previewLanguage === lang ? "var(--st-on-accent)" : "var(--st-muted)",
+                    border: "none", borderRadius: 6,
+                  }}
+                >
+                  {lang === "en" ? "🇬🇧 EN" : "🇪🇸 ES"}
+                </button>
+              ))}
+            </div>
+            {/* Inline "Traducir este clip" CTA — shows only when user picked ES
+                but the selected clip has no cached translation yet. */}
+            {previewLanguage === "es" && selectedClip && !editorTranslated.has(selectedClip.id) && (
+              <button
+                onClick={handleTranslateCurrentClip}
+                disabled={translatingNow}
+                className="st-btn st-btn--ghost"
+                style={{ padding: "7px 12px", fontSize: 12, border: "1px dashed var(--st-accent)" }}
+                title="Traduce este clip con Gemini y actualiza el preview"
+              >
+                {translatingNow ? "Traduciendo…" : "🇪🇸 Traducir este clip"}
+              </button>
+            )}
             <button onClick={handlePreview} disabled={loadingPreview} className="st-btn st-btn--ghost" style={{ padding: "7px 12px" }}>
               {loadingPreview ? "Generando…" : <><Search size={14} /> Preview</>}
             </button>
-            <button onClick={handlePlayVideo} disabled={loadingVideo} className="st-btn st-btn--primary" style={{ padding: "8px 14px" }}>
+            <button onClick={handlePlayVideo} disabled={loadingVideo} className="st-btn st-btn--primary" style={{ padding: "8px 14px", position: "relative" }}>
               {loadingVideo ? "Cargando…" : <><Play size={14} fill="currentColor" /> Play clip</>}
+              {style.auto_reframe_enabled && selectedClip && clipFaceTracks[selectedClip.id] && (
+                <span title="Auto-encuadre activo — el preview muestra el resultado real (más lento)"
+                  style={{
+                    position: "absolute", top: -6, right: -6,
+                    background: "var(--st-accent)", color: "var(--st-on-accent)",
+                    fontSize: 9, fontWeight: 700, padding: "2px 5px", borderRadius: 99,
+                    border: "2px solid var(--st-surface)",
+                  }}>
+                  🎯
+                </span>
+              )}
             </button>
             <button onClick={handlePlayInstagram} disabled={loadingPreview} className="st-btn st-btn--ghost" style={{ padding: "7px 12px" }}>
               <ImageIcon size={14} /> IG
@@ -2788,6 +3213,173 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             )}
 
             <div style={{ height: 6 }} />
+
+            {/* Auto-encuadre (face tracking) — per-clip.
+                Each AI clip needs its own face analysis since each covers a
+                different range of the source video. We key UI state by
+                selectedClip.id; the saved face_track lives server-side on
+                the clip. The auto_reframe_* knobs live on `style` and follow
+                the global "Aplicar a" scope (Todos / Este clip / Varios). */}
+            <StSection icon={<Crosshair size={14} />}>Auto-encuadre</StSection>
+            {(() => {
+              const cur = selectedClip;
+              if (!cur) {
+                return (
+                  <p style={{ fontSize: 12, color: "var(--st-muted)", margin: "0 0 10px" }}>
+                    Elegí un clip en "Clip seleccionado" para analizar sus caras.
+                  </p>
+                );
+              }
+              const track = clipFaceTracks[cur.id];
+              const isAnalyzing = analyzingFacesId === cur.id;
+              const dur = (cur.end_time || 0) - (cur.start_time || 0);
+              const fmtDur = `${Math.floor(dur / 60)}:${String(Math.floor(dur % 60)).padStart(2, "0")}`;
+              if (!track) {
+                return (
+                  <>
+                    <p style={{ fontSize: 11.5, color: "var(--st-muted)", margin: "0 0 10px", lineHeight: 1.5 }}>
+                      MediaPipe detecta las caras del clip y FFmpeg hace un crop 9:16 dinámico que las sigue.
+                    </p>
+                    <button onClick={() => handleAnalyzeClipFaces(cur)} disabled={isAnalyzing}
+                      className="st-btn st-btn--primary"
+                      style={{ width: "100%", justifyContent: "center", padding: "9px 0" }}>
+                      {isAnalyzing ? "Analizando…" : `🎯 Analizar caras · ${fmtDur}`}
+                    </button>
+                    {analyzeFacesError && (
+                      <p style={{ color: "var(--st-live)", fontSize: 11.5, margin: "8px 0 0" }}>{analyzeFacesError}</p>
+                    )}
+                    <p style={{ fontSize: 11, color: "var(--st-faint)", margin: "10px 0 4px", lineHeight: 1.5 }}>
+                      Solo se analiza el rango de este clip ({fmtDur}). Estimado: ~{Math.max(8, Math.round(dur * 0.4))} seg en CPU.
+                    </p>
+                  </>
+                );
+              }
+              const people = track.people || [];
+              return (
+                <>
+                  <div style={{ fontSize: 11, color: "var(--st-faint)", marginBottom: 10, fontFamily: "var(--st-mono)" }}>
+                    ✓ {people.length} {people.length === 1 ? "persona detectada" : "personas detectadas"} · {track.samples?.length || 0} muestras
+                  </div>
+
+                  {/* Master toggle */}
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "8px 11px", marginBottom: 10,
+                    background: style.auto_reframe_enabled ? "var(--st-soft)" : "transparent",
+                    border: `1px solid ${style.auto_reframe_enabled ? "var(--st-accent)" : "var(--st-border)"}`,
+                    borderRadius: 8,
+                  }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>Aplicar al export</span>
+                    <button onClick={() => setStyle((s) => ({ ...s, auto_reframe_enabled: !s.auto_reframe_enabled, split_screen_enabled: !s.auto_reframe_enabled ? false : s.split_screen_enabled }))}
+                      style={{
+                        width: 38, height: 20, borderRadius: 99, border: "none",
+                        background: style.auto_reframe_enabled ? "var(--st-accent)" : "var(--st-border)",
+                        position: "relative", cursor: "pointer",
+                      }}>
+                      <span style={{
+                        position: "absolute", top: 2, left: style.auto_reframe_enabled ? 20 : 2,
+                        width: 16, height: 16, borderRadius: "50%", background: "#fff",
+                        transition: "left .15s",
+                      }} />
+                    </button>
+                  </div>
+
+                  {/* Mode picker */}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, color: "var(--st-muted)", marginBottom: 5, fontFamily: "var(--st-mono)", letterSpacing: ".05em" }}>MODO</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+                      {[["all", "🫂 Todos"], ["biggest", "🔍 Grande"], ["follow", "👤 Manual"]].map(([k, label]) => {
+                        const active = (style.auto_reframe_mode || "all") === k;
+                        const disabled = k === "follow" && people.length === 0;
+                        return (
+                          <button key={k}
+                            onClick={() => !disabled && setStyle((s) => ({ ...s, auto_reframe_mode: k }))}
+                            disabled={disabled}
+                            style={{
+                              fontSize: 10.5, padding: "6px 3px",
+                              background: active ? "var(--st-accent)" : "transparent",
+                              color: active ? "var(--st-on-accent)" : "var(--st-muted)",
+                              border: `1px solid ${active ? "var(--st-accent)" : "var(--st-border)"}`,
+                              borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer",
+                              opacity: disabled ? 0.5 : 1,
+                            }}>{label}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Manual pick grid — uses the project's raw video as the
+                      thumbnail source, scaled with CSS object-position to
+                      crop onto each person's thumb_box. */}
+                  {style.auto_reframe_mode === "follow" && people.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 10, color: "var(--st-muted)", marginBottom: 5, fontFamily: "var(--st-mono)", letterSpacing: ".05em" }}>
+                        ELEGÍ A QUIÉN SEGUIR
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+                        {people.slice(0, 9).map((p) => {
+                          const sel = style.auto_reframe_follow_id === p.id;
+                          const srcW = track.width || 1, srcH = track.height || 1;
+                          return (
+                            <div key={p.id}
+                              onClick={() => setStyle((s) => ({ ...s, auto_reframe_follow_id: p.id }))}
+                              title={`Aparece en ${p.appearance_count} muestras`}
+                              style={{
+                                aspectRatio: "1/1",
+                                border: `2px solid ${sel ? "var(--st-accent)" : "var(--st-border)"}`,
+                                borderRadius: 7, overflow: "hidden", cursor: "pointer",
+                                background: "#000", position: "relative",
+                              }}>
+                              <video
+                                src={api.getRawVideoUrl(projectId)}
+                                muted
+                                preload="metadata"
+                                onLoadedMetadata={(e) => { try { e.currentTarget.currentTime = p.thumb_t || 0; } catch {} }}
+                                style={{
+                                  position: "absolute",
+                                  width: `${(srcW / Math.max(1, p.thumb_box.w)) * 100}%`,
+                                  height: `${(srcH / Math.max(1, p.thumb_box.h)) * 100}%`,
+                                  left: `${-(p.thumb_box.x / Math.max(1, p.thumb_box.w)) * 100}%`,
+                                  top: `${-(p.thumb_box.y / Math.max(1, p.thumb_box.h)) * 100}%`,
+                                  objectFit: "cover",
+                                }}
+                              />
+                              <span style={{
+                                position: "absolute", top: 3, left: 4,
+                                fontFamily: "var(--st-mono)", fontSize: 9.5, color: "#fff",
+                                background: "rgba(0,0,0,.6)", padding: "1px 4px", borderRadius: 3,
+                              }}>#{p.id}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <StSlider label="Suavidad" display={`${Math.round((style.auto_reframe_smoothing ?? 0.85) * 100)}%`}
+                    min={0} max={0.99} step={0.02} value={style.auto_reframe_smoothing ?? 0.85}
+                    onChange={(e) => setStyle((s) => ({ ...s, auto_reframe_smoothing: parseFloat(e.target.value) }))}
+                    onReset={() => setStyle((s) => ({ ...s, auto_reframe_smoothing: 0.85 }))} />
+                  <StSlider label="Aire" display={`${Math.round((style.auto_reframe_padding ?? 0.30) * 100)}%`}
+                    min={0} max={1} step={0.02} value={style.auto_reframe_padding ?? 0.30}
+                    onChange={(e) => setStyle((s) => ({ ...s, auto_reframe_padding: parseFloat(e.target.value) }))}
+                    onReset={() => setStyle((s) => ({ ...s, auto_reframe_padding: 0.30 }))} />
+
+                  <div style={{ marginTop: 10 }}>
+                    <button onClick={() => handleAnalyzeClipFaces(cur)} disabled={isAnalyzing}
+                      className="st-btn st-btn--ghost"
+                      style={{ width: "100%", justifyContent: "center", padding: "7px 0", fontSize: 12 }}>
+                      {isAnalyzing ? "..." : "Re-analizar caras"}
+                    </button>
+                  </div>
+                  <p style={{ fontSize: 10.5, color: "var(--st-faint)", margin: "10px 0 0", lineHeight: 1.5 }}>
+                    Mirá el resultado con <b style={{ color: "var(--st-text)" }}>▶ Play clip</b> abajo · Incompatible con split-screen.
+                  </p>
+                </>
+              );
+            })()}
+
+            <div style={{ height: 10 }} />
 
             {/* Text Overlay (expandable) */}
             <StRow icon={<Type size={15} />} label="Text Overlay" summary={`${Math.round(style.text_x * 100)}·${Math.round(style.text_y * 100)} · ${style.font_size}px`}>
@@ -5394,7 +5986,7 @@ function _currentGroup(words, t, groupSize) {
   return null;
 }
 
-function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
+function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset, onYOffsetChange, containerRef }) {
   if (!words || words.length === 0) return null;
   const groupSize = _groupSizeForStyle(style);
   const cur = _currentGroup(words, currentTime, groupSize);
@@ -5420,7 +6012,38 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
   const bottomFrac = Math.max(0.04, Math.min(0.96, baseBottomFrac + (yOffset || 0)));
   const bottomPct = bottomFrac * 100;
 
-  // Common positioning wrapper
+  // Drag-to-position: when onYOffsetChange is provided, the subtitle can be
+  // grabbed and dragged up/down in the preview. Maps Δy pixels → Δ yOffset by
+  // dividing by the container height (matches how bottomFrac is rendered).
+  // Hard-clamped to [-0.5, +0.5] just like the slider, so they stay in sync.
+  const draggable = typeof onYOffsetChange === "function";
+  const onPointerDown = (e) => {
+    if (!draggable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const container = containerRef?.current || e.currentTarget.parentElement;
+    const rect = container?.getBoundingClientRect();
+    if (!rect || rect.height <= 0) return;
+    const startY = e.clientY;
+    const startOffset = yOffset || 0;
+    const onMove = (ev) => {
+      const dy = ev.clientY - startY;            // px moved DOWN
+      const dFrac = dy / rect.height;            // fraction of container height
+      // yOffset positive = subtitle UP, so dragging DOWN subtracts from offset.
+      const next = Math.max(-0.5, Math.min(0.5, startOffset - dFrac));
+      onYOffsetChange(parseFloat(next.toFixed(3)));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  // Common positioning wrapper. When draggable, captures pointer events on the
+  // text itself (rest of the wrapper stays pointerEvents:none so the user can
+  // still scrub video / click overlays through the empty area).
   const wrapStyle = {
     position: "absolute",
     left: 0, right: 0,
@@ -5433,6 +6056,15 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
     textTransform: "uppercase",
     zIndex: 5,
   };
+  // Style additions + handlers merged into each style branch's outer text span.
+  // Kept as two separate objects so the existing per-style `style` can spread
+  // them cleanly: <span {...dragHandlers} style={{...existing, ...dragStyle}}>.
+  const dragStyle = draggable
+    ? { pointerEvents: "auto", cursor: "ns-resize", touchAction: "none" }
+    : {};
+  const dragHandlers = draggable
+    ? { onPointerDown, title: "Arrastrá arriba/abajo para mover el subtítulo" }
+    : {};
 
   // Mirror the heavy black outline ASS uses — stack drop-shadows for crispness
   const outline = "2px 2px 0 #000, -2px 2px 0 #000, 2px -2px 0 #000, -2px -2px 0 #000, 0 0 4px #000";
@@ -5442,7 +6074,7 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
     const text = group.map((w) => w.word).join(" ");
     return (
       <div style={wrapStyle}>
-        <span style={{ color: "#fff", fontSize: `${fontCqh}cqh`, textShadow: outline, padding: "0 0.4cqh" }}>{text}</span>
+        <span {...dragHandlers} style={{ color: "#fff", fontSize: `${fontCqh}cqh`, textShadow: outline, padding: "0 0.4cqh", ...dragStyle }}>{text}</span>
       </div>
     );
   }
@@ -5450,7 +6082,7 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
   if (style === "karaoke") {
     return (
       <div style={wrapStyle}>
-        <span style={{ fontSize: `${fontCqh}cqh`, textShadow: outline, padding: "0 0.4cqh" }}>
+        <span {...dragHandlers} style={{ fontSize: `${fontCqh}cqh`, textShadow: outline, padding: "0 0.4cqh", ...dragStyle }}>
           {group.map((w, i) => (
             <span key={i} style={{ color: w === active ? "#fde047" : "#fff", transition: "color 0.08s" }}>
               {w.word}{i < group.length - 1 ? " " : ""}
@@ -5467,11 +6099,13 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
       <div style={wrapStyle}>
         <span
           key={`${active.start}`}  // re-mount on word change → re-trigger animation
+          {...dragHandlers}
           style={{
             display: "inline-block",
             color: "#fff", fontSize: `${fontCqh}cqh`,
             textShadow: outline,
             animation: "subPopup 180ms cubic-bezier(.34,1.56,.64,1)",
+            ...dragStyle,
           }}
         >
           {active?.word || ""}
@@ -5485,7 +6119,7 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
     // Submagic-style — full group visible, active word on yellow box
     return (
       <div style={wrapStyle}>
-        <span style={{ fontSize: `${fontCqh}cqh`, padding: "0 0.4cqh", textShadow: outline }}>
+        <span {...dragHandlers} style={{ fontSize: `${fontCqh}cqh`, padding: "0 0.4cqh", textShadow: outline, ...dragStyle }}>
           {group.map((w, i) => (
             <span key={i} style={{
               color: w === active ? "#000" : "#fff",
@@ -5506,9 +6140,10 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
     // Huge single word at vertical centre regardless of bottom margin
     return (
       <div style={{ ...wrapStyle, bottom: "auto", top: "50%", transform: "translateY(-50%)" }}>
-        <span key={`${active.start}`} style={{
+        <span key={`${active.start}`} {...dragHandlers} style={{
           color: "#fff", fontSize: `${fontCqh}cqh`, textShadow: outline,
           display: "inline-block", animation: "subPopup 150ms ease-out",
+          ...dragStyle,
         }}>{active?.word || ""}</span>
       </div>
     );
@@ -5518,9 +6153,10 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
     const text = group.map((w) => w.word).join(" ");
     return (
       <div style={wrapStyle}>
-        <span key={`${cur.gStart}`} style={{
+        <span key={`${cur.gStart}`} {...dragHandlers} style={{
           color: "#fff", fontSize: `${fontCqh}cqh`, textShadow: outline,
           display: "inline-block", animation: "subPopup 140ms ease-out",
+          ...dragStyle,
         }}>{text}</span>
       </div>
     );
@@ -5529,9 +6165,10 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
   if (style === "bounce") {
     return (
       <div style={wrapStyle}>
-        <span key={`${active.start}`} style={{
+        <span key={`${active.start}`} {...dragHandlers} style={{
           color: "#fff", fontSize: `${fontCqh}cqh`, textShadow: outline,
           display: "inline-block", animation: "subBounce 320ms cubic-bezier(.5,1.6,.4,1)",
+          ...dragStyle,
         }}>{active?.word || ""}</span>
         <style>{`@keyframes subBounce { 0%{transform:translateY(40%) scale(0.6);opacity:0} 60%{transform:translateY(-12%) scale(1.18)} 80%{transform:translateY(4%) scale(0.96)} 100%{transform:translateY(0) scale(1);opacity:1} }`}</style>
       </div>
@@ -5542,7 +6179,7 @@ function SubtitleOverlay({ words, currentTime, style, sizeScale, yOffset }) {
     // Show full group, but the active word reveals letter-by-letter
     return (
       <div style={wrapStyle}>
-        <span style={{ fontSize: `${fontCqh}cqh`, color: "#fff", textShadow: outline, padding: "0 0.4cqh" }}>
+        <span {...dragHandlers} style={{ fontSize: `${fontCqh}cqh`, color: "#fff", textShadow: outline, padding: "0 0.4cqh", ...dragStyle }}>
           {group.map((w, i) => {
             if (w === active) {
               const cut = Math.max(1, Math.ceil(w.word.length * letterFrac));
@@ -6158,6 +6795,102 @@ function SubThumb({ styleKey, label, selected, onClick }) {
 // EDITOR MODE — standalone manual editor (no AI clip detection)
 // Upload → cut timeline → on-demand Whisper → subtitles → export
 // ================================================
+// ReframeViewfinder — paints the auto-reframe crop window as a rectangle on
+// top of the raw video preview. Reads faceSamples and interpolates between
+// adjacent samples for smooth motion. Source-pixel coords are normalized to
+// the preview box via faceSrcSize. Pure CSS, no canvas.
+function ReframeViewfinder({ samples, srcSize, currentTime, mode, followId, padding, smoothing }) {
+  if (!samples || samples.length === 0 || !srcSize?.w || !srcSize?.h) return null;
+  const t = Math.max(0, currentTime || 0);
+  // Find the bracketing samples for `t`
+  let i = 0;
+  while (i < samples.length - 1 && samples[i + 1].t <= t) i++;
+  const s = samples[i];
+  if (!s) return null;
+
+  // Pick the relevant faces by mode
+  let faces = s.faces || [];
+  if (mode === "follow" && followId != null) {
+    faces = faces.filter((f) => f.id === followId);
+  } else if (mode === "biggest" && faces.length > 0) {
+    faces = [faces.reduce((a, b) => (a.w * a.h >= b.w * b.h ? a : b))];
+  }
+  if (faces.length === 0) {
+    // Show a faint hint that nothing is detected at this moment
+    return (
+      <span style={{
+        position: "absolute", left: 8, bottom: 8, zIndex: 6,
+        fontFamily: "var(--st-mono)", fontSize: 9, color: "rgba(255,255,255,.65)",
+        background: "rgba(0,0,0,.5)", padding: "2px 6px", borderRadius: 4,
+      }}>sin cara</span>
+    );
+  }
+
+  // Union bbox of selected faces
+  const x1 = Math.min(...faces.map((f) => f.x));
+  const y1 = Math.min(...faces.map((f) => f.y));
+  const x2 = Math.max(...faces.map((f) => f.x + f.w));
+  const y2 = Math.max(...faces.map((f) => f.y + f.h));
+  const bw = x2 - x1, bh = y2 - y1;
+  const pad = (padding || 0.30) * Math.max(bw, bh);
+  let px1 = x1 - pad, py1 = y1 - pad, px2 = x2 + pad, py2 = y2 + pad;
+  // Expand to 9:16 (always grow, never shrink)
+  const targetAr = 9 / 16;
+  const pw = px2 - px1, ph = py2 - py1;
+  const curAr = pw / Math.max(1, ph);
+  if (curAr < targetAr) {
+    const newW = ph * targetAr;
+    const cx = (px1 + px2) / 2;
+    px1 = cx - newW / 2; px2 = cx + newW / 2;
+  } else if (curAr > targetAr) {
+    const newH = pw / targetAr;
+    const cy = (py1 + py2) / 2;
+    py1 = cy - newH / 2; py2 = cy + newH / 2;
+  }
+  // Clamp to source frame
+  const W = srcSize.w, H = srcSize.h;
+  let cw = px2 - px1, ch = py2 - py1;
+  if (cw > W) { const k = W / cw; cw *= k; ch *= k; }
+  if (ch > H) { const k = H / ch; cw *= k; ch *= k; }
+  let cx = (px1 + px2) / 2, cy = (py1 + py2) / 2;
+  cx = Math.max(cw / 2, Math.min(W - cw / 2, cx));
+  cy = Math.max(ch / 2, Math.min(H - ch / 2, cy));
+  const left = (cx - cw / 2) / W * 100;
+  const top = (cy - ch / 2) / H * 100;
+  const wPct = cw / W * 100;
+  const hPct = ch / H * 100;
+
+  return (
+    <>
+      {/* Crop window outline */}
+      <div style={{
+        position: "absolute",
+        left: `${left}%`, top: `${top}%`,
+        width: `${wPct}%`, height: `${hPct}%`,
+        border: "2px solid var(--st-accent, #e6c270)",
+        borderRadius: 4,
+        boxShadow: "0 0 0 9999px rgba(0,0,0,.35)",
+        pointerEvents: "none",
+        zIndex: 6,
+        transition: "all .12s linear",
+      }} />
+      {/* Faint face boxes so the user sees what's detected */}
+      {faces.map((f, k) => (
+        <div key={k} style={{
+          position: "absolute",
+          left: `${f.x / W * 100}%`, top: `${f.y / H * 100}%`,
+          width: `${f.w / W * 100}%`, height: `${f.h / H * 100}%`,
+          border: "1px solid rgba(230,194,112,.55)",
+          borderRadius: 2,
+          pointerEvents: "none",
+          zIndex: 6,
+        }} />
+      ))}
+    </>
+  );
+}
+
+
 function EditorMode({ onExit }) {
   // ─── Upload state ───────────────────────────────────────────────────────
   const [projectId, setProjectId] = useState(null);
@@ -6214,6 +6947,35 @@ function EditorMode({ onExit }) {
   const [subStyle, setSubStyle] = useState("clean");
   const [subSize, setSubSize] = useState(1.0);
   const [subY, setSubY] = useState(0.0);
+  // Subtitle language: "en" = original Whisper words, "es" = Gemini-translated.
+  // SubtitleOverlay always reads from `activeWords` below (derived).
+  // Toggle does not touch any other style — only swaps which array is rendered
+  // and what `language` is passed to the export call.
+  const [subLanguage, setSubLanguage] = useState("en");
+  const [transcriptWordsEs, setTranscriptWordsEs] = useState([]);
+  const [translatingSubs, setTranslatingSubs] = useState(false);
+  const [translateSubsError, setTranslateSubsError] = useState(null);
+
+  // ── Auto-reframe (face tracking) state ──────────────────────────────────
+  // After "Analizar caras" runs once, faceSamples + facePeople are populated.
+  // The live viewfinder reads faceSamples; the Manual-pick grid reads facePeople.
+  // Knobs (enabled/mode/padding/smoothing/follow_id) live as separate state +
+  // sync to the backend style on debounce so export/preview see them.
+  const [analyzingFaces, setAnalyzingFaces] = useState(false);
+  const [analyzeFacesError, setAnalyzeFacesError] = useState(null);
+  const [faceSamples, setFaceSamples] = useState([]);    // [{t, faces: [...]}]
+  const [facePeople, setFacePeople] = useState([]);      // [{id, thumb_t, thumb_box, ...}]
+  const [faceSrcSize, setFaceSrcSize] = useState({ w: 0, h: 0 });
+  const [reframeOn, setReframeOn] = useState(false);
+  const [reframeMode, setReframeMode] = useState("all");      // "all" | "biggest" | "follow"
+  const [reframeFollowId, setReframeFollowId] = useState(null);
+  const [reframePadding, setReframePadding] = useState(0.30);
+  const [reframeSmoothing, setReframeSmoothing] = useState(0.85);
+  // Preview-MP4 modal state (the 10-second exported sample, kept separate
+  // from the inline live preview overlay)
+  const [reframePreviewing, setReframePreviewing] = useState(false);
+  const [reframePreviewUrl, setReframePreviewUrl] = useState(null);
+  const [reframePreviewLoading, setReframePreviewLoading] = useState(false);
 
   // Live currentTime updated at 60Hz while playing (timeupdate only fires
   // ~4Hz which makes the overlay laggy for fast-cadence styles like Two-Word).
@@ -6783,6 +7545,10 @@ function EditorMode({ onExit }) {
       setSubWordCount(result.word_count);
       setTranscribedRange({ start: result.trim_start, end: result.trim_end });
       setTranscriptWords(result.words || []);  // for the live overlay
+      // Invalidate any stale ES translation — the user just re-ran Whisper, so
+      // word boundaries may have changed. They can re-translate on demand.
+      setTranscriptWordsEs([]);
+      setSubLanguage("en");
     } catch (e) {
       setTranscribeError(e.message || "Transcription failed");
     } finally {
@@ -6790,10 +7556,86 @@ function EditorMode({ onExit }) {
     }
   };
 
+  // Translate the current Whisper transcript to Spanish via Gemini and cache
+  // the resulting word list locally so SubtitleOverlay can switch to it.
+  // Idempotent on the backend — re-clicking after a successful translation
+  // returns the cache instantly.
+  const handleTranslateSubsEs = async () => {
+    if (!projectId || translatingSubs) return;
+    setTranslatingSubs(true);
+    setTranslateSubsError(null);
+    try {
+      const result = await api.editorTranslateSpanish(projectId);
+      setTranscriptWordsEs(result.words || []);
+      setSubLanguage("es");
+    } catch (e) {
+      setTranslateSubsError(e.message || "Translation failed");
+    } finally {
+      setTranslatingSubs(false);
+    }
+  };
+
   const deactivateSubtitles = () => {
     setSubtitlesOn(false);  // central style useEffect persists subtitle_style:none
     setTranscriptWords([]);
+    setTranscriptWordsEs([]);
+    setSubLanguage("en");
   };
+
+  // ── Auto-reframe handlers ───────────────────────────────────────────────
+  const handleAnalyzeFaces = async () => {
+    if (!projectId || analyzingFaces) return;
+    setAnalyzingFaces(true);
+    setAnalyzeFacesError(null);
+    try {
+      const r = await api.editorAnalyzeFaces(projectId);
+      setFaceSamples(r.samples || []);
+      setFacePeople(r.people || []);
+      setFaceSrcSize({ w: r.width || 0, h: r.height || 0 });
+      // If exactly one person detected, default-pick them for follow mode.
+      if ((r.people || []).length === 1) setReframeFollowId(r.people[0].id);
+    } catch (e) {
+      setAnalyzeFacesError(e.message || "Falló el análisis de caras");
+    } finally {
+      setAnalyzingFaces(false);
+    }
+  };
+
+  // Push reframe knobs to backend on debounced change so export + preview
+  // see them. Uses a ref to skip the initial mount call.
+  const _reframeFirstRunRef = useRef(true);
+  useEffect(() => {
+    if (!projectId || faceSamples.length === 0) return;
+    if (_reframeFirstRunRef.current) { _reframeFirstRunRef.current = false; return; }
+    const timer = setTimeout(() => {
+      api.editorUpdateReframeStyle(projectId, {
+        auto_reframe_enabled: reframeOn,
+        auto_reframe_mode: reframeMode,
+        auto_reframe_follow_id: reframeFollowId,
+        auto_reframe_padding: reframePadding,
+        auto_reframe_smoothing: reframeSmoothing,
+      }).catch(() => {});
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [projectId, faceSamples.length, reframeOn, reframeMode, reframeFollowId, reframePadding, reframeSmoothing]);
+
+  const openReframePreview = async () => {
+    if (!projectId || faceSamples.length === 0) return;
+    setReframePreviewing(true);
+    setReframePreviewLoading(true);
+    setReframePreviewUrl(api.getReframePreviewUrl(projectId, 10));
+  };
+  const closeReframePreview = () => {
+    setReframePreviewing(false);
+    setReframePreviewUrl(null);
+    setReframePreviewLoading(false);
+  };
+
+  // Words actually rendered by SubtitleOverlay — derives from the language
+  // toggle so the live preview switches instantly without re-fetching.
+  const activeWords = subLanguage === "es" && transcriptWordsEs.length > 0
+    ? transcriptWordsEs
+    : transcriptWords;
 
   // ─── Playback driver (60Hz RAF) — plays segments in ARRAY order ─────────
   // The raw <video> is the source. We let it play within the current segment;
@@ -6861,12 +7703,20 @@ function EditorMode({ onExit }) {
   }, [playing, segments]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Export ─────────────────────────────────────────────────────────────
+  // Routes to the Spanish export endpoint when the ES toggle is active AND
+  // there's a cached translation — that produces a {clip}_es.mp4 with
+  // translated subtitles burned in. Otherwise normal English export.
   const handleExport = async () => {
     if (!projectId) return;
     setExporting(true);
     setExportFiles([]);
+    const useEs = subLanguage === "es" && transcriptWordsEs.length > 0;
     try {
-      await api.startExport(projectId, [clipObj.id]);
+      if (useEs) {
+        await api.startSpanishExport(projectId, [clipObj.id]);
+      } else {
+        await api.startExport(projectId, [clipObj.id]);
+      }
     } catch (e) {
       alert(`Export failed: ${e.message}`);
       setExporting(false);
@@ -6905,7 +7755,12 @@ function EditorMode({ onExit }) {
     histRef.current = { past: [], future: [] }; lastDocRef.current = null;
     setAspectRatio("9:16");
     setSubtitlesOn(false); setTranscribedRange(null); setSubWordCount(0);
-    setTranscriptWords([]);
+    setTranscriptWords([]); setTranscriptWordsEs([]); setSubLanguage("en"); setTranslateSubsError(null);
+    setFaceSamples([]); setFacePeople([]); setFaceSrcSize({ w: 0, h: 0 });
+    setReframeOn(false); setReframeMode("all"); setReframeFollowId(null);
+    setReframePadding(0.30); setReframeSmoothing(0.85);
+    setReframePreviewing(false); setReframePreviewUrl(null); setAnalyzeFacesError(null);
+    _reframeFirstRunRef.current = true;
     setExporting(false); setExportFiles([]); setExportProgress({ current: 0, total: 0 });
   };
 
@@ -6975,9 +7830,10 @@ function EditorMode({ onExit }) {
     ["frame", <ZoomIn size={20} />, "Encuadre"],
     ["subs", <Type size={20} />, "Subtítulos"],
     ["overlay", <ImageIcon size={20} />, "Imágenes"],
+    ["reframe", <Crosshair size={20} />, "Auto-encuadre"],
     ["keys", <Wand2 size={20} />, "Keyframes"],
   ];
-  const inspectorTabs = [["frame", "Encuadre"], ["subs", "Subtítulos"], ["overlay", "Imágenes"]];
+  const inspectorTabs = [["frame", "Encuadre"], ["subs", "Subtítulos"], ["overlay", "Imágenes"], ["reframe", "Auto-encuadre"]];
   const SUB_STYLES = [
     ["standard", "Estándar"],
     ["clean", "Limpio"], ["karaoke", "Karaoke"], ["popup", "Pop-up"], ["highlight", "Highlight"],
@@ -7144,14 +8000,37 @@ function EditorMode({ onExit }) {
                     </div>
                   );
                 })}
-                {/* Live subtitle overlay */}
-                {subtitlesOn && transcriptWords.length > 0 && (
+                {/* Live subtitle overlay — reads activeWords, which is the
+                    EN transcript by default and the ES transcript when the
+                    user toggles ES (and has translated).
+                    Draggable: pointer-drag on the text updates subY directly
+                    (keeps the "Posición" slider in sync). previewBoxRef points
+                    to the 9:16 preview container — drag math divides Δy by
+                    its height. */}
+                {subtitlesOn && activeWords.length > 0 && (
                   <SubtitleOverlay
-                    words={transcriptWords}
+                    words={activeWords}
                     currentTime={livePlayheadTime}
                     style={subStyle}
                     sizeScale={subSize}
                     yOffset={subY}
+                    onYOffsetChange={setSubY}
+                    containerRef={previewBoxRef}
+                  />
+                )}
+                {/* Live auto-reframe viewfinder — only shown while the user is
+                    in the Reframe tab, so the rectangle doesn't clutter the
+                    preview during normal edits. The shaded area outside the
+                    rectangle is what the export crops out. */}
+                {activeRailTool === "reframe" && faceSamples.length > 0 && (
+                  <ReframeViewfinder
+                    samples={faceSamples}
+                    srcSize={faceSrcSize}
+                    currentTime={currentTime}
+                    mode={reframeMode}
+                    followId={reframeFollowId}
+                    padding={reframePadding}
+                    smoothing={reframeSmoothing}
                   />
                 )}
                 {/* Aspect badge */}
@@ -7324,6 +8203,64 @@ function EditorMode({ onExit }) {
                           </button>
                         </div>
                       )}
+
+                      {/* ── Idioma de los subtítulos (EN / ES) ──────────────────
+                          El toggle solo cambia QUÉ palabras se renderizan en el
+                          preview y QUÉ idioma se exporta. No toca el estilo, ni
+                          el tamaño, ni la posición. */}
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
+                          <span className="st-eyebrow" style={{ fontSize: 10 }}>Idioma</span>
+                          <div style={{ flex: 1 }} />
+                          {subLanguage === "es" && transcriptWordsEs.length > 0 && (
+                            <span style={{ fontFamily: "var(--st-mono)", fontSize: 10, color: "var(--st-faint)" }}>{transcriptWordsEs.length} palabras ES</span>
+                          )}
+                        </div>
+                        <div style={{ display: "inline-flex", width: "100%", border: "1px solid var(--st-border)", borderRadius: 8, padding: 2 }}>
+                          {[["en", "🇬🇧 EN"], ["es", "🇪🇸 ES"]].map(([k, label]) => {
+                            const active = subLanguage === k;
+                            const disabled = k === "es" && transcriptWordsEs.length === 0;
+                            return (
+                              <button
+                                key={k}
+                                onClick={() => !disabled && setSubLanguage(k)}
+                                disabled={disabled}
+                                title={disabled ? "Primero traduce los subtítulos al español" : `Mostrar y exportar subtítulos en ${k.toUpperCase()}`}
+                                style={{
+                                  flex: 1, padding: "6px 0", fontSize: 12, fontWeight: 600,
+                                  background: active ? "var(--st-accent)" : "transparent",
+                                  color: active ? "var(--st-on-accent)" : (disabled ? "var(--st-faint)" : "var(--st-muted)"),
+                                  border: "none", borderRadius: 6,
+                                  cursor: disabled ? "not-allowed" : "pointer",
+                                  opacity: disabled ? 0.6 : 1,
+                                }}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {/* Translate CTA — appears when ES isn't cached yet */}
+                        {transcriptWordsEs.length === 0 && (
+                          <button
+                            onClick={handleTranslateSubsEs}
+                            disabled={translatingSubs || transcriptWords.length === 0}
+                            className="st-btn st-btn--ghost"
+                            style={{
+                              width: "100%", marginTop: 8, padding: "7px 0",
+                              justifyContent: "center", fontSize: 12,
+                              border: "1px dashed var(--st-accent)",
+                            }}
+                            title="Traduce los subtítulos al español con Gemini (~2s)"
+                          >
+                            {translatingSubs ? "Traduciendo…" : "🇪🇸 Traducir subtítulos al español"}
+                          </button>
+                        )}
+                        {translateSubsError && (
+                          <p style={{ color: "var(--st-live)", fontSize: 11.5, margin: "8px 0 0" }}>{translateSubsError}</p>
+                        )}
+                      </div>
+
                       {/* Style preview grid (CapCut-style thumbnails) */}
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 18 }}>
                         {SUB_STYLES.map(([v, label]) => (
@@ -7405,6 +8342,171 @@ function EditorMode({ onExit }) {
                   )}
                 </>
               )}
+
+              {/* ── AUTO-REFRAME panel ── */}
+              {activeRailTool === "reframe" && (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14 }}>
+                    <Crosshair size={14} style={{ color: "var(--st-muted)" }} />
+                    <span className="st-eyebrow">Auto-encuadre</span>
+                    <div style={{ flex: 1 }} />
+                    {faceSamples.length > 0 && (
+                      <span style={{ fontFamily: "var(--st-mono)", fontSize: 10, color: "var(--st-faint)" }}>
+                        {facePeople.length} {facePeople.length === 1 ? "persona" : "personas"}
+                      </span>
+                    )}
+                  </div>
+
+                  {faceSamples.length === 0 ? (
+                    <>
+                      <p style={{ fontSize: 11.5, color: "var(--st-muted)", margin: "0 0 12px", lineHeight: 1.5 }}>
+                        Detectá las caras del clip para que el encuadre 9:16 las siga automáticamente. El audio queda intacto.
+                      </p>
+                      <button onClick={handleAnalyzeFaces} disabled={analyzingFaces || trimDuration < 0.5}
+                        className="st-btn st-btn--primary" style={{ width: "100%", justifyContent: "center", padding: "10px 0" }}>
+                        {analyzingFaces ? "Analizando…" : `🎯 Analizar caras · ${formatT(trimDuration)}`}
+                      </button>
+                      {analyzeFacesError && (
+                        <p style={{ color: "var(--st-live)", fontSize: 11.5, margin: "8px 0 0" }}>{analyzeFacesError}</p>
+                      )}
+                      <p style={{ fontSize: 11, color: "var(--st-faint)", margin: "10px 0 0", lineHeight: 1.5 }}>
+                        Estimado: {trimDuration > 300
+                          ? `~${Math.round(trimDuration / 60 * 0.4)} min`
+                          : `~${Math.max(10, Math.round(trimDuration * 0.4))} seg`} en CPU.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      {/* Master enable toggle */}
+                      <div style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "10px 12px", marginBottom: 12,
+                        background: reframeOn ? "var(--st-soft)" : "transparent",
+                        border: `1px solid ${reframeOn ? "var(--st-accent)" : "var(--st-border)"}`,
+                        borderRadius: 9,
+                      }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-text)" }}>
+                          Aplicar al export
+                        </span>
+                        <button onClick={() => setReframeOn((v) => !v)}
+                          style={{
+                            width: 40, height: 22, borderRadius: 99, border: "none",
+                            background: reframeOn ? "var(--st-accent)" : "var(--st-border)",
+                            position: "relative", cursor: "pointer",
+                          }}
+                          title={reframeOn ? "Desactivar auto-encuadre" : "Activar auto-encuadre"}>
+                          <span style={{
+                            position: "absolute", top: 2, left: reframeOn ? 20 : 2,
+                            width: 18, height: 18, borderRadius: "50%", background: "#fff",
+                            transition: "left .15s",
+                          }} />
+                        </button>
+                      </div>
+
+                      {/* Mode picker */}
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 10.5, color: "var(--st-muted)", marginBottom: 6, fontFamily: "var(--st-mono)", letterSpacing: ".06em" }}>
+                          MODO
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                          {[
+                            ["all", "🫂 Todos"],
+                            ["biggest", "🔍 Más grande"],
+                            ["follow", "👤 Manual"],
+                          ].map(([k, label]) => {
+                            const active = reframeMode === k;
+                            const disabled = k === "follow" && facePeople.length === 0;
+                            return (
+                              <button key={k}
+                                onClick={() => !disabled && setReframeMode(k)}
+                                disabled={disabled}
+                                style={{
+                                  fontSize: 11, padding: "7px 4px",
+                                  background: active ? "var(--st-accent)" : "transparent",
+                                  color: active ? "var(--st-on-accent)" : "var(--st-muted)",
+                                  border: `1px solid ${active ? "var(--st-accent)" : "var(--st-border)"}`,
+                                  borderRadius: 7, cursor: disabled ? "not-allowed" : "pointer",
+                                  opacity: disabled ? 0.5 : 1,
+                                }}>{label}</button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Manual pick grid */}
+                      {reframeMode === "follow" && facePeople.length > 0 && (
+                        <div style={{ marginBottom: 14 }}>
+                          <div style={{ fontSize: 10.5, color: "var(--st-muted)", marginBottom: 6, fontFamily: "var(--st-mono)", letterSpacing: ".06em" }}>
+                            ELEGÍ A QUIÉN SEGUIR
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                            {facePeople.slice(0, 9).map((p) => {
+                              const sel = reframeFollowId === p.id;
+                              const srcW = faceSrcSize.w || 1;
+                              const srcH = faceSrcSize.h || 1;
+                              // Render thumbnail by drawing the raw video frame at thumb_t with
+                              // CSS background-position to focus on the bounding box.
+                              return (
+                                <div key={p.id} onClick={() => setReframeFollowId(p.id)}
+                                  title={`Aparece en ${p.appearance_count} muestras`}
+                                  style={{
+                                    aspectRatio: "1/1",
+                                    border: `2px solid ${sel ? "var(--st-accent)" : "var(--st-border)"}`,
+                                    borderRadius: 9, overflow: "hidden", cursor: "pointer",
+                                    background: "#000", position: "relative",
+                                  }}>
+                                  <video
+                                    src={rawVideoUrl}
+                                    muted
+                                    preload="metadata"
+                                    onLoadedMetadata={(e) => { try { e.currentTarget.currentTime = p.thumb_t || 0; } catch {} }}
+                                    style={{
+                                      position: "absolute",
+                                      width: `${(srcW / Math.max(1, p.thumb_box.w)) * 100}%`,
+                                      height: `${(srcH / Math.max(1, p.thumb_box.h)) * 100}%`,
+                                      left: `${-(p.thumb_box.x / Math.max(1, p.thumb_box.w)) * 100}%`,
+                                      top: `${-(p.thumb_box.y / Math.max(1, p.thumb_box.h)) * 100}%`,
+                                      objectFit: "cover",
+                                    }}
+                                  />
+                                  <span style={{
+                                    position: "absolute", top: 3, left: 4,
+                                    fontFamily: "var(--st-mono)", fontSize: 10, color: "#fff",
+                                    background: "rgba(0,0,0,.6)", padding: "1px 5px", borderRadius: 4,
+                                  }}>#{p.id}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      <FrameSlider label="Suavidad" val={`${Math.round(reframeSmoothing * 100)}%`}
+                        min={0} max={0.99} step={0.02} value={reframeSmoothing}
+                        onChange={(n) => setReframeSmoothing(n)} />
+                      <FrameSlider label="Aire" val={`${Math.round(reframePadding * 100)}%`}
+                        min={0} max={1} step={0.02} value={reframePadding}
+                        onChange={(n) => setReframePadding(n)} />
+
+                      <div style={{ height: 1, background: "var(--st-line)", margin: "10px 0 12px" }} />
+
+                      <button onClick={openReframePreview}
+                        className="st-btn st-btn--ghost"
+                        style={{ width: "100%", justifyContent: "center", padding: "9px 0", marginBottom: 6 }}>
+                        <Play size={13} fill="currentColor" /> Ver muestra (10s)
+                      </button>
+                      <button onClick={handleAnalyzeFaces} disabled={analyzingFaces}
+                        className="st-btn st-btn--ghost"
+                        style={{ width: "100%", justifyContent: "center", padding: "7px 0", fontSize: 12 }}>
+                        {analyzingFaces ? "Re-analizando…" : "Re-analizar"}
+                      </button>
+                      <p style={{ fontSize: 10.5, color: "var(--st-faint)", margin: "10px 0 0", lineHeight: 1.5 }}>
+                        Incompatible con split-screen y keyframes — se desactiva en esos casos.
+                      </p>
+                    </>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -7450,6 +8552,42 @@ function EditorMode({ onExit }) {
         onChange={(e) => { addImageClip(e.target.files[0]); e.target.value = ""; }} />
       <input ref={overlayFileRef} type="file" accept="image/*" style={{ display: "none" }}
         onChange={(e) => { handleOverlayUpload(e.target.files[0]); e.target.value = ""; }} />
+
+      {/* Auto-reframe MP4 preview modal — 10s sample with reframe baked in
+          so the user can verify the framing before exporting the full clip. */}
+      {reframePreviewing && (
+        <div className="modal-overlay" onClick={closeReframePreview}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <h3>🎯 Muestra con auto-encuadre (10s)</h3>
+            <p style={{ color: "var(--text-secondary)", marginBottom: 12, fontSize: 13 }}>
+              Renderizado con los ajustes actuales · {reframeMode === "all" ? "Todos" : reframeMode === "biggest" ? "Más grande" : `Sigue a #${reframeFollowId}`}
+            </p>
+            {reframePreviewLoading && (
+              <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-muted)" }}>
+                <div className="loading-spinner" style={{ margin: "0 auto 12px" }}></div>
+                <p style={{ fontSize: 13 }}>Generando muestra… (~10–25s)</p>
+              </div>
+            )}
+            {reframePreviewUrl && (
+              <video
+                key={reframePreviewUrl}
+                controls autoPlay
+                style={{ width: "100%", borderRadius: 10, background: "black", maxHeight: 460, display: reframePreviewLoading ? "none" : "block" }}
+                src={reframePreviewUrl}
+                onCanPlay={() => setReframePreviewLoading(false)}
+                onError={() => {
+                  setReframePreviewLoading(false);
+                  alert("No se pudo generar la muestra. ¿Analizaste caras primero?");
+                  closeReframePreview();
+                }}
+              />
+            )}
+            <div className="btn-group">
+              <button className="btn btn-secondary" onClick={closeReframePreview}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Export overlay (interim — full export-flow screen comes later) */}
       {(exporting || exportFiles.length > 0) && (

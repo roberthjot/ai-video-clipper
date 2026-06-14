@@ -1,9 +1,10 @@
 import os
 import subprocess
 import threading
+import uuid
 from ..config import settings
 from ..models.clip import ClipData, StyleConfig
-from . import video_service, subtitle_service
+from . import video_service, subtitle_service, face_track_service
 
 FFMPEG_EXE = video_service.FFMPEG_EXE
 
@@ -34,6 +35,7 @@ def export_clip_with_style(
     style: StyleConfig,
     output_path: str,
     transcript: dict = None,
+    language: str = "en",
 ) -> str:
     """Export clip with blur + rounded box + text + watermark + optional split-screen + subtitles.
 
@@ -63,8 +65,27 @@ def export_clip_with_style(
             # burned-in subtitles line up with the cut video (and words inside
             # removed gaps disappear).
             remapped_transcript = video_service.remap_transcript_to_segments(transcript, seg_dicts) if transcript else None
+            # IMPORTANT: the cached Spanish words (clip.words_es) are also in
+            # SOURCE time — they must be remapped the same way as the English
+            # transcript, otherwise the ES subs land at the wrong moments in
+            # the concatenated video (off by however much was cut out). Apply
+            # the SAME segment remap before recursing.
+            if getattr(clip_copy, "words_es", None):
+                remapped_es = video_service.remap_transcript_to_segments(
+                    {"words": clip_copy.words_es}, seg_dicts,
+                )
+                clip_copy.words_es = remapped_es.get("words", []) if remapped_es else []
+            # Same idea for the face_track used by auto-reframe: its sample
+            # timestamps are in source time, so when we recurse on the
+            # concatenated video they must be remapped to land at the right
+            # moments. Otherwise the dynamic crop follows faces by the wrong
+            # offset (off by however many seconds were cut out before it).
+            if getattr(clip_copy, "face_track", None) and clip_copy.face_track.get("samples"):
+                clip_copy.face_track = face_track_service.remap_face_track_to_segments(
+                    clip_copy.face_track, seg_dicts,
+                )
             print(f"[Export] Clip {clip.id}: {len(seg_dicts)} segments concatenated -> {total:.1f}s, running pipeline on temp")
-            return export_clip_with_style(concat_path, clip_copy, style, output_path, remapped_transcript)
+            return export_clip_with_style(concat_path, clip_copy, style, output_path, remapped_transcript, language=language)
         finally:
             if os.path.exists(concat_path):
                 try:
@@ -107,6 +128,34 @@ def export_clip_with_style(
     clip_keyframes = getattr(clip, 'keyframes', None) or []
     use_keyframes = len(clip_keyframes) > 0
 
+    # Auto-reframe (face tracking): when enabled, replace the static fg crop
+    # with a dynamic crop that follows the face trajectory. Incompatible with
+    # split-screen (both manipulate the FG region) and with keyframes (both
+    # want to control the FG transform) — those win if both are set, but we
+    # warn rather than fail.
+    auto_reframe_active = (
+        getattr(style, 'auto_reframe_enabled', False)
+        and getattr(clip, 'face_track', None)
+        and clip.face_track.get('samples')
+        and not use_split
+        and not use_keyframes
+    )
+    # sendcmd file path (kept in scope so we can clean up in `finally` later).
+    # We need TWO paths because FFmpeg's filter_complex parser on Windows breaks
+    # when sendcmd's `f=` contains a drive-letter colon (e.g. `C:`). The fix is
+    # the same as the `subtitles=` filter: write the real file in temp/, then
+    # COPY it to the current working dir and pass only the basename to FFmpeg.
+    rfm_traj_path = None       # full path (kept for our own cleanup)
+    rfm_traj_cwd_path = None   # cwd copy (the one FFmpeg actually reads)
+
+    if getattr(style, 'auto_reframe_enabled', False):
+        if use_split:
+            print(f"[Export] Clip {clip.id}: auto_reframe IGNORED — split-screen is active")
+        elif use_keyframes:
+            print(f"[Export] Clip {clip.id}: auto_reframe IGNORED — keyframes are active")
+        elif not auto_reframe_active:
+            print(f"[Export] Clip {clip.id}: auto_reframe enabled but face_track empty — analyze first")
+
     # Build fg_filter based on fill_mode and target height, multiplied by zoom
     fm = style.fill_mode
     base_height_pct = (
@@ -117,7 +166,77 @@ def export_clip_with_style(
         0.5  if fm == "mini"   else
         1.0  # fit (handled by width scale below)
     )
-    if use_keyframes:
+    if auto_reframe_active:
+        # Build the dynamic crop trajectory from the cached face track. The
+        # trajectory's `t` values are in source seconds; FFmpeg's filter time
+        # starts at 0 after the input -ss fast_seek, so we offset every `t`
+        # by -fast_seek when writing the sendcmd file.
+        _aspect_str = getattr(style, 'aspect_ratio', '9:16')
+        traj = face_track_service.compute_crop_trajectory(
+            face_track=clip.face_track,
+            mode=getattr(style, 'auto_reframe_mode', 'all'),
+            follow_id=getattr(style, 'auto_reframe_follow_id', None),
+            target_aspect=_aspect_str,
+            padding=float(getattr(style, 'auto_reframe_padding', 0.30)),
+            smoothing=float(getattr(style, 'auto_reframe_smoothing', 0.85)),
+        )
+        if not traj:
+            print(f"[Export] Clip {clip.id}: auto_reframe trajectory empty — falling back to fit")
+            fg_filter = f"scale={W}:-2"
+        else:
+            # Shift trajectory timestamps from SOURCE time to filter time. The
+            # fast-seek is computed below this block (we need it here too).
+            _fast_seek_rfm = max(0.0, clip.start_time - 4.0)
+            shifted = [{**p, "t": max(0.0, p["t"] - _fast_seek_rfm)} for p in traj]
+            # FIXED crop dimensions: use the LARGEST cw/ch across the whole
+            # trajectory. Only x/y vary. This is crucial — when crop changes
+            # output size mid-stream, FFmpeg has to renegotiate downstream
+            # buffers every frame which on Windows ends in "Cannot allocate
+            # memory" from libavfilter. With a fixed window, the source-side
+            # crop only "pans" around the frame, no buffer reallocation.
+            # Loses the close-up zoom effect (we always show the widest
+            # window the trajectory ever needed) but the system stays solid.
+            fixed_cw = max(p["cw"] for p in shifted)
+            fixed_ch = max(p["ch"] for p in shifted)
+            # Re-clamp x/y so the fixed window fits the source frame at every
+            # sample (cx/cy may have been chosen for a smaller window).
+            src_w = int(clip.face_track.get("width") or W)
+            src_h = int(clip.face_track.get("height") or H)
+            for p in shifted:
+                p["cw"] = fixed_cw
+                p["ch"] = fixed_ch
+                p["cx"] = max(fixed_cw / 2, min(src_w - fixed_cw / 2, p["cx"]))
+                p["cy"] = max(fixed_ch / 2, min(src_h - fixed_ch / 2, p["cy"]))
+
+            tmp_dir = os.path.join(os.path.dirname(__file__), "temp")
+            os.makedirs(tmp_dir, exist_ok=True)
+            rfm_traj_path = os.path.join(tmp_dir, f"rfm_traj_{clip.id}_{uuid.uuid4().hex[:8]}.cmd")
+            face_track_service.build_sendcmd_file(shifted, rfm_traj_path, label="rfm")
+            # Copy to cwd and pass only the basename — same Windows workaround
+            # as the subtitles= filter. The drive-letter colon in absolute paths
+            # is interpreted as a filter option separator otherwise.
+            import shutil as _shutil
+            rfm_basename = os.path.basename(rfm_traj_path)
+            rfm_traj_cwd_path = os.path.join(os.getcwd(), rfm_basename)
+            _shutil.copy2(rfm_traj_path, rfm_traj_cwd_path)
+
+            # Initial crop values (sendcmd will overwrite as soon as the first
+            # timestamped instruction fires, but we need valid params on the
+            # crop filter spec so FFmpeg can parse it).
+            p0 = shifted[0]
+            x0 = max(0, int(p0["cx"] - p0["cw"] / 2))
+            y0 = max(0, int(p0["cy"] - p0["ch"] / 2))
+            # The crop already targets the canvas aspect ratio; scaling to W
+            # gives us exactly W×target_h with no letterboxing or extra fit.
+            fg_filter = (
+                f"sendcmd=f={rfm_basename},"
+                f"crop@rfm={p0['cw']}:{p0['ch']}:{x0}:{y0},"
+                f"scale={W}:{target_h}"
+            )
+            print(f"[Export] Clip {clip.id}: auto_reframe ACTIVE — {len(shifted)} crop pts, "
+                  f"mode={getattr(style, 'auto_reframe_mode', 'all')}, "
+                  f"smooth={getattr(style, 'auto_reframe_smoothing', 0.85)}")
+    elif use_keyframes:
         fg_filter = video_service.build_zoompan_filter(
             clip_keyframes, duration, W, target_h, fps=30,
         )
@@ -201,7 +320,26 @@ def export_clip_with_style(
                 f"(W-w)/2+({_pan_x_pct})*W{sway_x_add}:"
                 f"(H-h)/2+({_pan_y_pct})*H"
             )
-        filter_complex = f"{_bg(H)}[bg];[0:v]{fg_chain}[fg];[bg][fg]overlay={_ov_full}[v]"
+        # Auto-reframe bypass: the dynamic crop already fills the 9:16 canvas
+        # exactly (compute_crop_trajectory expands to target_aspect every
+        # sample). Running it through the bg/fg/overlay machinery causes
+        # FFmpeg to renegotiate buffers every time the crop dimensions tick —
+        # which on Windows ends in "Cannot allocate memory" from libavfilter.
+        # When auto-reframe is on, emit a single linear chain:
+        #     [0:v] sendcmd, crop@rfm, scale, (mirror_cyclic) -> [v]
+        # The downstream caption/watermark/subtitle/anti-detect stages
+        # operate on [v] as before. Cheaper AND more stable.
+        if auto_reframe_active:
+            ar_chain = fg_chain
+            if sway_x_add:
+                # Sway shifts the overlaid foreground when not using auto-reframe;
+                # with reframe there's no separate fg layer to shift, so we
+                # approximate by adding the sway as an overlay-on-self via pad.
+                # Skipped for v1 — sway+reframe is a niche combo.
+                pass
+            filter_complex = f"[0:v]{ar_chain}[v]"
+        else:
+            filter_complex = f"{_bg(H)}[bg];[0:v]{fg_chain}[fg];[bg][fg]overlay={_ov_full}[v]"
 
     current_label = "v"
     rounded_box_path = None
@@ -210,10 +348,17 @@ def export_clip_with_style(
     no_text = getattr(style, 'no_text', False)
     no_emojis = getattr(style, 'no_emojis', False)
 
+    # Language swap: when exporting the Spanish version, use the cached
+    # translated caption (falls back to English if not translated yet).
+    _lang_es = (language or "en").lower().startswith("es")
+    _caption_text = clip.viral_caption
+    if _lang_es and getattr(clip, "caption_es", ""):
+        _caption_text = clip.caption_es
+
     # Caption overlay — Y relative to video portion in split mode
-    if clip.viral_caption and not no_text:
+    if _caption_text and not no_text:
         import re as _re
-        _caption = clip.viral_caption
+        _caption = _caption_text
         if no_emojis:
             _caption = video_service._EMOJI_RE.sub("", _caption)
             _caption = _re.sub(r"\s+", " ", _caption).strip()
@@ -303,11 +448,17 @@ def export_clip_with_style(
         filter_complex += f";[{current_label}]{','.join(extra_vf)}[uniquified]"
         current_label = "uniquified"
 
-    # Burn-in subtitles from Whisper transcript (if requested)
+    # Burn-in subtitles from Whisper transcript (if requested).
+    # For Spanish exports we swap in the cached translated word list — the ASS
+    # generator only reads {"words": [...]} so every subtitle style works
+    # automatically without any per-style change.
+    _effective_transcript = transcript
+    if _lang_es and getattr(clip, "words_es", None):
+        _effective_transcript = {"words": list(clip.words_es)}
     ass_subtitle_path = None
     ass_subtitle_path_extra = None  # cwd copy for relative-path workaround
     sub_style = getattr(style, 'subtitle_style', 'none')
-    if sub_style and sub_style != 'none' and transcript and not no_text:
+    if sub_style and sub_style != 'none' and _effective_transcript and not no_text:
         try:
             # The export uses fast-seek (clip.start - 4s) + output trim.
             # Subtitles must be shifted by `buffer` so they appear at the
@@ -316,7 +467,7 @@ def export_clip_with_style(
             _buffer = clip.start_time - _fast_seek
             temp_dir = os.path.join(os.path.dirname(__file__), "temp")
             ass_subtitle_path = subtitle_service.generate_ass_for_clip(
-                transcript=transcript,
+                transcript=_effective_transcript,
                 clip_start=clip.start_time,
                 clip_end=clip.end_time,
                 style=sub_style,
@@ -385,12 +536,19 @@ def export_clip_with_style(
     cmd_qsv = cmd + qsv_codec + tail_args
     cmd_cpu = cmd + cpu_codec + tail_args
 
+    # Timeout scales with output duration. The fixed 600s timeout was fine for
+    # 30–60s TikTok clips, but Editor-mode exports can run an entire hour of
+    # source video with blur+subs+caption that take ~30–50 min to encode even
+    # with QSV. Use a generous 5× realtime safety margin (so a 60-min export
+    # gets ~5 h) — failure-by-timeout for legitimate long jobs is worse than
+    # waiting longer for a hung process.
+    _export_timeout = max(600, int(duration * 5))
     try:
-        print(f"[Export] Clip {clip.id}: Exporting... split={use_split}, qsv={video_service._qsv_supported()}")
-        result = subprocess.run(cmd_qsv, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        print(f"[Export] Clip {clip.id}: Exporting... split={use_split}, qsv={video_service._qsv_supported()}, duration={duration:.1f}s, timeout={_export_timeout}s")
+        result = subprocess.run(cmd_qsv, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_export_timeout)
         if result.returncode != 0 and video_service._qsv_supported():
             print(f"[Export] Clip {clip.id}: QSV failed, retrying with libx264. stderr: {result.stderr[-200:]}")
-            result = subprocess.run(cmd_cpu, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+            result = subprocess.run(cmd_cpu, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_export_timeout)
         elif result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd_cpu, output=result.stdout, stderr=result.stderr)
         print(f"[Export] Clip {clip.id}: Success!")
@@ -411,6 +569,16 @@ def export_clip_with_style(
         if ass_subtitle_path_extra and os.path.exists(ass_subtitle_path_extra):
             try:
                 os.remove(ass_subtitle_path_extra)
+            except:
+                pass
+        if rfm_traj_path and os.path.exists(rfm_traj_path):
+            try:
+                os.remove(rfm_traj_path)
+            except:
+                pass
+        if rfm_traj_cwd_path and os.path.exists(rfm_traj_cwd_path):
+            try:
+                os.remove(rfm_traj_cwd_path)
             except:
                 pass
 
@@ -438,8 +606,19 @@ def export_all_clips_background(
     style: StyleConfig,
     output_dir: str,
     transcript: dict = None,
+    language: str = "en",
 ):
-    """Run export in background thread with progress tracking."""
+    """Run export in background thread with progress tracking.
+
+    `language` controls the burned-in caption + subtitle language. "en"
+    (default) keeps current behaviour. "es" uses each clip's cached
+    caption_es + words_es (populated by translate_clip_to_spanish) and
+    appends an "_es" suffix to filenames so the two versions can co-exist
+    in the same exported/ folder.
+    """
+
+    _lang_es = (language or "en").lower().startswith("es")
+    _suffix = "_es" if _lang_es else ""
 
     def _run():
         os.makedirs(output_dir, exist_ok=True)
@@ -455,14 +634,14 @@ def export_all_clips_background(
         for i, clip in enumerate(clips):
             try:
                 title_safe = getattr(clip, 'title', f'clip_{clip.id}').replace(' ', '_').lower()[:30]
-                filename = f"clip_{clip.id:02d}_{title_safe}.mp4"
+                filename = f"clip_{clip.id:02d}_{title_safe}{_suffix}.mp4"
                 filepath = os.path.join(output_dir, filename)
 
                 export_progress[project_id]["current"] = i + 1
                 export_progress[project_id]["current_file"] = filename
 
                 eff_style = getattr(clip, "style_override", None) or style
-                export_clip_with_style(video_path, clip, eff_style, filepath, transcript=transcript)
+                export_clip_with_style(video_path, clip, eff_style, filepath, transcript=transcript, language=language)
                 export_progress[project_id]["files"].append(filename)
 
             except Exception as e:
@@ -608,9 +787,12 @@ def export_instagram_clip(
         cmd.extend(["-map_metadata", "-1"])
     cmd.extend(["-ss", str(buffer), "-t", str(duration), "-y", "-loglevel", "warning", output_path])
 
+    # Same duration-aware timeout as the TikTok export — IG uses libx264 so
+    # long clips need plenty of room.
+    _ig_timeout = max(600, int(duration * 5))
     try:
-        print(f"[Instagram Export] Clip {clip.id}: Exporting (ig_fill_mode={ig_fill_mode}, ig_top_padding={ig_top_padding})...")
-        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        print(f"[Instagram Export] Clip {clip.id}: Exporting (ig_fill_mode={ig_fill_mode}, ig_top_padding={ig_top_padding}, duration={duration:.1f}s, timeout={_ig_timeout}s)...")
+        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_ig_timeout)
         print(f"[Instagram Export] Clip {clip.id}: Done!")
     except subprocess.CalledProcessError as e:
         print(f"[Instagram Export] Clip {clip.id} FAILED: {e.stderr[:500] if e.stderr else 'no stderr'}")

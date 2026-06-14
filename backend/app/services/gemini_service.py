@@ -319,6 +319,196 @@ def validate_caption_against_transcript(caption: str, clip_start: float, clip_en
     return (transcript_snippet, "match" if ratio >= 0.4 else "mismatch")
 
 
+def _split_words_into_phrases(
+    words: list[dict],
+    gap_threshold: float = 0.4,
+    max_words_per_phrase: int = 10,
+) -> list[list[dict]]:
+    """Group consecutive Whisper words into phrases so each phrase can be
+    translated and time-aligned independently.
+
+    Boundaries: any silence gap >= gap_threshold seconds between consecutive
+    words OR `max_words_per_phrase` words reached, whichever comes first.
+
+    Why: speech naturally has pauses at clause/sentence boundaries. Aligning
+    Spanish words to phrase-sized windows (vs the WHOLE clip) collapses the
+    "drift" caused by word-order differences and length mismatches between
+    EN and ES from ~5–15s down to ~0.3–1s — Spanish words now land in the
+    SAME time window as the equivalent English phrase, not somewhere else
+    in the clip.
+    """
+    if not words:
+        return []
+    phrases: list[list[dict]] = []
+    current: list[dict] = [words[0]]
+    for w in words[1:]:
+        try:
+            gap = float(w.get("start", 0)) - float(current[-1].get("end", 0))
+        except Exception:
+            gap = 0.0
+        if gap >= gap_threshold or len(current) >= max_words_per_phrase:
+            phrases.append(current)
+            current = [w]
+        else:
+            current.append(w)
+    if current:
+        phrases.append(current)
+    return phrases
+
+
+def _redistribute_phrase_timing(en_phrase: list[dict], es_tokens: list[str]) -> list[dict]:
+    """Map a list of Spanish tokens onto the time window of an English phrase.
+
+    Each Spanish token is given a slice of [phrase_start..phrase_end] weighted
+    by character length so multi-syllable words get more on-screen time than
+    short particles ("y", "es"). Returns list of {word, start, end} dicts.
+    """
+    if not es_tokens or not en_phrase:
+        return []
+    start = float(en_phrase[0].get("start", 0.0))
+    end = float(en_phrase[-1].get("end", start))
+    dur = max(0.01, end - start)
+    weights = [max(1, len(t)) for t in es_tokens]
+    total_w = sum(weights)
+    out: list[dict] = []
+    t = start
+    for tok, w in zip(es_tokens, weights):
+        seg = dur * (w / total_w)
+        out.append({"word": tok, "start": round(t, 3), "end": round(t + seg, 3)})
+        t += seg
+    # Snap the last word's end to the phrase end (avoid float drift across
+    # phrases — if every phrase ends slightly early, subs drift backward).
+    out[-1]["end"] = round(end, 3)
+    return out
+
+
+def translate_clip_to_spanish(
+    caption: str,
+    words: list[dict],
+    model: str = None,
+) -> dict:
+    """Translate a clip's English caption + Whisper word list to Spanish,
+    aligning subtitle timing PHRASE-BY-PHRASE so Spanish subs stay close
+    to the moment the equivalent English was actually spoken.
+
+    Returns: { "caption_es": "...", "words_es": [{"word","start","end"}, ...] }
+
+    How it stays in sync:
+    1. Split Whisper words into phrases at silence gaps (>= 0.4s) or 10-word
+       chunks via `_split_words_into_phrases`.
+    2. ONE Gemini call sends all phrases as a parallel array and asks for a
+       parallel Spanish array (same length, one ES phrase per EN phrase).
+    3. For each ES phrase, redistribute time WITHIN the matching EN phrase's
+       window. Spanish words can't drift outside their phrase's start/end.
+
+    Fallback: if Gemini returns a mismatched phrase count (rare — usually
+    means it ignored the structure), we treat the whole transcript as one
+    bucket — that's the previous (worse but still working) behaviour, so
+    we never produce zero subs.
+
+    Returns {} on failure so the caller can fall back to the English version.
+    """
+    if not words:
+        return {}
+
+    target_model = (model or settings.GEMINI_MODEL).strip()
+    # Drop empty Whisper tokens (Whisper sometimes emits "" for false detections).
+    en_words = [w for w in words if str(w.get("word", "")).strip()]
+    if not en_words:
+        return {}
+
+    en_phrases = _split_words_into_phrases(en_words)
+    # Pre-serialize phrases as plain strings; we keep the timing on our side.
+    en_phrase_strs = [" ".join(str(w.get("word", "")).strip() for w in p) for p in en_phrases]
+
+    safe_emojis_str = " ".join(sorted(SAFE_EMOJIS))
+    # NOTE the prompt asks for a PARALLEL array — same length, one ES phrase
+    # per EN phrase. Empty ES strings allowed for phrases that translate to
+    # nothing (e.g. filler-only phrases like "you know like uh").
+    prompt_text = (
+        "Translate the following English clip content to natural Latin-American Spanish.\n"
+        "Return ONLY a JSON object with these EXACT keys, no other text:\n"
+        '  { "caption_es": "<translated caption>", "phrases_es": ["<es phrase 1>", "<es phrase 2>", ...] }\n\n'
+        "RULES for caption_es:\n"
+        "- Max 20 words total.\n"
+        "- No punctuation except apostrophes.\n"
+        "- All lowercase EXCEPT the first letter of the caption.\n"
+        "- Must end with EXACTLY ONE emoji from this whitelist (pick the most fitting one):\n"
+        f"  {safe_emojis_str}\n"
+        "- Keep proper names (people, brands) in their original spelling.\n"
+        "- Natural-sounding Spanish, not literal word-for-word.\n\n"
+        "RULES for phrases_es (CRITICAL — read carefully):\n"
+        "- It is a PARALLEL array: same length as ENGLISH_PHRASES below, item i is the translation of EN phrase i.\n"
+        "- DO NOT merge phrases. DO NOT split phrases. DO NOT reorder them.\n"
+        "- If an English phrase is just filler (\"you know\", \"uh\", \"like\") the ES phrase can be an EMPTY string \"\" — preferred over inventing words.\n"
+        "- No punctuation inside phrases (no commas, periods, ¿?, ¡!). Apostrophes OK.\n"
+        "- Keep proper names as-is.\n"
+        "- Each ES phrase should be the natural spoken equivalent of its EN phrase — don't pad to match word count.\n\n"
+        f"ORIGINAL ENGLISH CAPTION:\n{caption}\n\n"
+        "ENGLISH_PHRASES (translate each into the same index of phrases_es):\n"
+        + json.dumps(en_phrase_strs, ensure_ascii=False)
+    )
+
+    try:
+        response = client.models.generate_content(
+            model=target_model,
+            contents=prompt_text,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.5,    # lower temp → more parallel-array discipline
+            ),
+        )
+        raw = (response.text or "").strip()
+        if raw.startswith("```json"):
+            raw = raw[7:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+        data = json.loads(raw)
+    except Exception as e:
+        print(f"[Gemini] Spanish translation failed: {e}")
+        return {}
+
+    caption_es = str(data.get("caption_es", "")).strip()
+    es_phrases_raw = data.get("phrases_es", None)
+
+    # Normalize the caption the same way English captions are normalized.
+    caption_es = caption_es.replace("’", "'").replace("‘", "'")
+    caption_es = re.sub(r"\s+", " ", caption_es).strip()
+    caption_es = filter_emojis_to_whitelist(caption_es)
+    if caption_es:
+        caption_es = caption_es[:1].upper() + caption_es[1:]
+
+    words_es: list[dict] = []
+
+    if isinstance(es_phrases_raw, list) and len(es_phrases_raw) == len(en_phrases):
+        # Happy path: parallel arrays line up. Time-align each ES phrase
+        # within its own EN phrase window.
+        print(f"[Gemini] ES translation: phrase-aligned ({len(en_phrases)} phrases)")
+        for en_phrase, es_text in zip(en_phrases, es_phrases_raw):
+            es_str = str(es_text or "").strip()
+            es_str = re.sub(r"[¿¡!?,.;:]+", "", es_str)
+            es_tokens = [t for t in re.split(r"\s+", es_str) if t]
+            words_es.extend(_redistribute_phrase_timing(en_phrase, es_tokens))
+    else:
+        # Fallback: Gemini ignored the structure. Treat the whole transcript
+        # as one bucket — this is the older (less accurate) behaviour, but
+        # still gives the user something to look at.
+        es_blob = ""
+        if isinstance(es_phrases_raw, list):
+            es_blob = " ".join(str(x or "") for x in es_phrases_raw)
+        elif isinstance(es_phrases_raw, str):
+            es_blob = es_phrases_raw
+        es_blob = re.sub(r"[¿¡!?,.;:]+", "", es_blob)
+        es_tokens = [t for t in re.split(r"\s+", es_blob) if t]
+        if es_tokens:
+            print(f"[Gemini] ES translation: FALLBACK whole-clip alignment "
+                  f"(expected {len(en_phrases)} phrases, got "
+                  f"{len(es_phrases_raw) if isinstance(es_phrases_raw, list) else 'non-list'})")
+            words_es = _redistribute_phrase_timing(en_words, es_tokens)
+
+    return {"caption_es": caption_es, "words_es": words_es}
+
+
 def filter_transcript_for_range(transcript: dict, start: float, end: float) -> dict:
     """Return a transcript dict containing only the words within [start..end],
     with timestamps shifted so the chunk starts at 0. Used when analyzing a chunk."""

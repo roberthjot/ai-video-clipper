@@ -2,6 +2,218 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🇪🇸 Spanish translation track (separate EN / ES exports)
+
+Captions and burned-in subtitles can now be exported in Spanish as a parallel
+track alongside the original English. The English flow stays untouched —
+Spanish is opt-in via a button.
+
+### Backend
+
+- `gemini_service.translate_clip_to_spanish(caption, words, model=None)` — one
+  Gemini call (JSON response) returns `{caption_es, words_es}`.
+  - Caption follows the same rules as English (≤20 words, ≤1 emoji from
+    SAFE_EMOJIS whitelist, first letter capital).
+  - Whisper word list translated **phrase-by-phrase**: `_split_words_into_phrases`
+    cuts at silence gaps (≥0.4s) or every 10 words; Gemini gets the EN
+    phrases as a parallel JSON array and returns ES phrases in the same
+    shape; each ES phrase is time-aligned WITHIN its EN phrase's window via
+    `_redistribute_phrase_timing` (char-length weighted, last word snapped to
+    phrase end). Brings drift from ~5–15s (whole-clip alignment) down to
+    ~0.3–1s. If Gemini ignores the parallel-array structure, falls back to
+    whole-clip alignment so we never return zero subs.
+- `ClipData.caption_es: str + words_es: list[dict]` cache so re-exports skip
+  the Gemini call.
+- `export_service.export_clip_with_style(..., language="en")` and
+  `export_all_clips_background(..., language="en")` — when `"es"`, the export
+  swaps `clip.viral_caption → clip.caption_es` for the PIL caption overlay
+  and uses `{"words": clip.words_es}` as the transcript for ASS subtitle
+  generation. Filenames get an `_es` suffix so EN and ES co-exist in the
+  same `exported/` folder. Zero changes to the 26 subtitle styles — the ASS
+  generator only reads word strings + timestamps.
+- **Segments remap fix for ES**: when the user has cut segments in the
+  editor, the export concatenates the kept pieces and remaps the EN
+  transcript via `remap_transcript_to_segments` so subs land at the right
+  output time. The cached `words_es` now goes through the SAME remap before
+  the recursive call (`{"words": clip.words_es}`) — without it the ES subs
+  were off by the cumulative cut length.
+- New endpoints:
+  - `POST /api/export/render-spanish/{id}?clip_ids=...` — translates
+    uncached clips then runs background export with `language="es"`.
+  - `GET /api/export/translation-status/{id}` — returns
+    `{translated: {clip_id: bool}, data: {clip_id: {caption_es, transcript_es, transcript_en}}}`
+    so the UI knows which clips have ES + shows the translated text inline.
+  - `POST /api/clips/{pid}/{cid}/translate-only` — per-clip Gemini call that
+    caches without exporting (used by the Visual Editor's "Traducir este
+    clip" CTA).
+  - `GET /api/clips/{pid}/{cid}/video-preview-es` + `preview-es` +
+    `instagram-preview-es` — ES variants of the existing previews; clone the
+    same logic with caption + transcript swap.
+  - `POST /api/editor/{pid}/translate-spanish` — translates the editor's
+    Whisper transcript to Spanish and caches `words_es` on `clip[0]`.
+
+### Frontend
+
+- **ClipsStep batch bar**: "🇪🇸 Generar versión en español" button next to
+  "Re-analizar". Selects the same clip set the existing batch controls work
+  with; while running, shows "Traduciendo + exportando N/M…" with a polling
+  progress bar. ES sub-row appears under each translated clip with the
+  translated caption inline (italics, gold "🌐 ES" badge), a ▶ Play ES
+  button (opens a 10s baked-in preview modal), and a 📄 Guión ES button
+  (modal with side-by-side EN/ES caption + EN/ES Whisper transcript).
+- **Visual Editor (Paso 3)**: EN / ES toggle pill in the action bar (next to
+  Preview/Play clip). When ES is selected and the clip has a translation,
+  Preview / Play clip / IG buttons route to the `_es` variants. Inline
+  "🇪🇸 Traducir este clip" CTA appears when ES is picked on an untranslated
+  clip — calls `/translate-only` and refreshes any open preview.
+- **EditorMode (advanced timeline editor)**: EN | ES pill in the Subtítulos
+  inspector panel. Derived `activeWords = subLanguage === "es" &&
+  transcriptWordsEs.length ? transcriptWordsEs : transcriptWords` feeds
+  the live `SubtitleOverlay`. Dashed-border "🇪🇸 Traducir subtítulos al
+  español" CTA when ES isn't cached yet. `handleExport` chooses
+  `startSpanishExport` vs `startExport` based on the active language.
+  Re-transcribing wipes the ES cache + flips back to EN (Whisper word
+  boundaries change).
+- **Drag-to-position subtitles** (free improvement during this work):
+  `SubtitleOverlay` gained optional `onYOffsetChange` + `containerRef`
+  props. When both are set, the outer text span of every style becomes
+  draggable; pointerdown captures Δy/containerHeight and writes back to
+  the position state in real time. Wired in EditorMode so the "Posición"
+  slider stays in sync. Visual Editor stays slider-only (its preview is
+  a baked MP4 — drag would need a separate CSS overlay layer).
+
+## 🎯 Auto-encuadre (face-tracking dynamic crop)
+
+MediaPipe detects faces; FFmpeg `sendcmd` drives a dynamic crop window that
+follows them over time. Available in both the EditorMode (standalone manual
+editor, in its own inspector tab) and the Visual Editor / Paso 3 (per-clip,
+in the right inspector). Off by default; user clicks "🎯 Analizar caras"
+first, then toggles "Aplicar al export".
+
+### Backend
+
+- `services/face_track_service.py` (new module):
+  - **MediaPipe Tasks API** (`mp.solutions.*` was removed in MediaPipe
+    0.10.35 for Python 3.14 — only the Tasks API works).
+  - `_ensure_model()` downloads `blaze_face_short_range.tflite` (~225KB) on
+    first use; cached next to the module (gitignored — auto-downloads on
+    fresh checkouts).
+  - `analyze_clip(video_path, start, end, sample_fps=5.0)` — OpenCV reads
+    frames at 5 FPS, MediaPipe detects faces, IDs assigned by greedy IoU
+    matching (threshold 0.25) against the previous sample. Returns
+    `{fps, width, height, start_time, end_time, samples[], people[]}` —
+    `people[]` sorted by appearance_count desc.
+  - `compute_crop_trajectory(face_track, mode, follow_id, target_aspect,
+    padding, smoothing)` — per sample picks faces by mode (`all` /
+    `biggest` / `follow`), computes union bbox, adds padding, expands to
+    target aspect (always GROW so we never crop into the faces), clamps to
+    source frame, EMA-smooths across samples. Returns
+    `[{t, cx, cy, cw, ch}]` in source-pixel coords.
+  - `build_sendcmd_file(trajectory, path, label="rfm")` — writes FFmpeg
+    sendcmd lines: `<t> crop@rfm x <x1>, crop@rfm y <y1>;`. Only `x` and
+    `y` are updated; `w` and `h` are NOT touched (see OOM fix below).
+  - `remap_face_track_to_segments` — mirrors the transcript remap for
+    the segment-cut case.
+- `ClipData.face_track: dict` and `StyleConfig.auto_reframe_enabled / mode /
+  follow_id / padding / smoothing`.
+- `export_service.export_clip_with_style` integration:
+  - `auto_reframe_active = enabled && face_track.samples && !use_split &&
+    !use_keyframes`. Split-screen and keyframes both win; reframe is silently
+    skipped with a log when either is active.
+  - The fg_filter becomes
+    `sendcmd=f={basename},crop@rfm={W0}:{H0}:{X0}:{Y0},scale={W}:{target_h}`.
+  - The trajectory's `t` values are shifted by `-fast_seek` (the input -ss
+    makes filter t=0 correspond to fast_seek source time, not source t=0).
+  - **Windows path fix**: the `sendcmd=f=` filename CAN'T be an absolute
+    path because the drive-letter colon (`C:`) is interpreted as a filter
+    option separator. Same workaround as the `subtitles=` filter: write the
+    real `.cmd` in `services/temp/`, copy to cwd, pass only the basename.
+    Both files cleaned up in `finally`.
+  - **OOM fix #1 (bypass parallel pipeline)**: when auto-reframe is on, the
+    dynamic crop already fills the 9:16 canvas (the trajectory expands to
+    target_aspect every sample). Running the source through both a blurred
+    bg branch AND a sendcmd-driven fg branch — then overlaying — caused
+    FFmpeg to renegotiate buffers every tick and crash with "Cannot
+    allocate memory". Now reframe mode emits a single linear chain:
+    `[0:v] sendcmd, crop@rfm, scale -> [v]`. No bg/fg/overlay.
+  - **OOM fix #2 (fixed crop dimensions)**: changing the crop filter's
+    output size mid-stream also caused libavfilter to renegotiate downstream
+    buffers. Now the export picks `max(cw)/max(ch)` across the whole
+    trajectory and uses that as a FIXED crop size; only `cx/cy` vary per
+    sample. The camera "pans" but never "zooms". Trade-off: loses the
+    close-up effect when only one person is in frame, but the export
+    actually finishes.
+  - In the segments branch, `clip_copy.face_track` is also remapped through
+    `remap_face_track_to_segments` before recursing.
+- New endpoints (separate per editor mode):
+  - `POST /api/editor/{pid}/analyze-faces` — analyzes the editor's current
+    trim, caches on `clip[0]`. Returns the people list (for the manual-pick
+    grid) and the full samples list (for the live HTML viewfinder overlay).
+  - `POST /api/editor/{pid}/reframe-style` — updates the StyleConfig knobs.
+    Turning reframe ON force-disables split-screen.
+  - `POST /api/clips/{pid}/{cid}/analyze-faces` — per-AI-clip analysis
+    (only the clip's start_time..end_time range). Used by Visual Editor.
+  - `GET /api/editor/.../preview-reframe` and
+    `GET /api/clips/.../preview-reframe?seconds=10` — 10s sample MP4
+    anchored on the busiest moment of the trajectory.
+- `routes/clips.py` — `/video-preview` and `/video-preview-es` detect
+  `style.auto_reframe_enabled && clip.face_track.samples` and route through
+  `export_clip_with_style` (which knows about reframe) instead of the fast
+  `generate_preview_clip` path. Slower (preset=fast vs ultrafast) but the
+  only way to render the dynamic crop here.
+
+### Frontend
+
+- **EditorMode** (`Crosshair` icon tab in the rail + inspector):
+  - Empty state: "🎯 Analizar caras · M:SS" button with duration estimate.
+  - After analysis: pill toggle "Aplicar al export" (mutually exclusive
+    with split-screen), mode picker (🫂 Todos / 🔍 Cara grande / 👤 Manual),
+    Manual-pick grid showing up to 9 face thumbnails (CSS-positioned crops
+    of the raw video element seeked to each person's `thumb_t`), Suavidad +
+    Aire sliders, "▶ Ver muestra (10s)" + "Re-analizar".
+  - **Live viewfinder overlay** (`ReframeViewfinder` component): gold
+    rectangle painted over the live HTML video preview, animated by the
+    same math as the backend trajectory (minus the EMA smoothing). Outside
+    the rectangle is dimmed with `box-shadow: 0 0 0 9999px rgba(0,0,0,.35)`.
+    Faint gold rects on each detected face. Only renders while the user is
+    in the Reframe tab (keeps the normal preview uncluttered).
+- **Visual Editor (Paso 3)**: same panel UI added under the Subtítulos
+  section, per-clip via `clipFaceTracks` state keyed by clip id. Auto-reframe
+  knobs live on the central `style` state and follow the existing "Aplicar a"
+  scope (Todos / Este clip / Varios) so each AI clip can have its own settings.
+  - The "Muestra 10s" button was removed — the regular Play clip button now
+    renders the actual reframed result (because the backend `/video-preview`
+    endpoint routes through `export_clip_with_style` when reframe is on).
+    A gold 🎯 badge appears on the Play clip button when this is active to
+    hint that the preview will take longer than usual.
+- `frontend/src/services/api.js` gained `editorAnalyzeFaces`,
+  `editorUpdateReframeStyle`, `getReframePreviewUrl`, `clipAnalyzeFaces`.
+
+### Known limits (documented for v2)
+
+- "All" mode + 2 people on opposite sides produces a very wide crop that
+  persists for the whole clip (because of the fixed-dimension OOM fix). A
+  split-screen auto-fallback was discussed but not implemented.
+- IoU-based ID tracking swaps identities when two people are close or one
+  moves fast. Face embeddings would fix this.
+- 5 FPS sampling is fine for talking heads but choppy for fast gestures.
+- No shot-cut detection (PySceneDetect would help) — the trajectory smooths
+  across hard cuts which looks like camera wobble.
+- Active-speaker detection (audio-based) is the obvious v2 improvement for
+  podcasts. Not implemented.
+- Strict-profile face detections are weak with BlazeFace short-range; a
+  full-range or different model would help but costs CPU.
+
+## ⏱ Long-video export timeout fix
+
+`export_clip_with_style` and `export_instagram_clip` had a hardcoded
+`timeout=600` on the subprocess call. For 30–90s TikTok clips that's fine;
+for 1h+ podcast exports from the Editor (with blur + burned-in subs +
+caption) the encode legitimately takes 30–60 min and the call timed out
+after 10. Now: `_export_timeout = max(600, int(duration * 5))` — 5× realtime
+safety margin (a 60-min export gets a 5h timeout). Logged on start so the
+user can see it: `duration=3739.1s, timeout=18695s`.
+
 ## 🎤 Whisper for Twitch clip flows (subtitles now work)
 
 `process_clip_to_project` and `process_clips_batch_to_project` were skipping

@@ -265,8 +265,49 @@ export function getVideoPreviewUrl(projectId, clipId) {
     return `${API_BASE}/clips/${projectId}/${clipId}/video-preview?t=${Date.now()}`;
 }
 
+export function getVideoPreviewEsUrl(projectId, clipId) {
+    return `${API_BASE}/clips/${projectId}/${clipId}/video-preview-es?t=${Date.now()}`;
+}
+
+export function getPreviewEsUrl(projectId, clipId) {
+    return `${API_BASE}/clips/${projectId}/${clipId}/preview-es?t=${Date.now()}`;
+}
+
+export function getInstagramPreviewEsUrl(projectId, clipId) {
+    return `${API_BASE}/clips/${projectId}/${clipId}/instagram-preview-es?t=${Date.now()}`;
+}
+
+export async function translateClipOnly(projectId, clipId) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/translate-only`, { method: "POST" });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Translation failed");
+    }
+    return res.json();   // { status, caption_es, words_es }
+}
+
 export function getDownloadUrl(projectId, filename) {
     return `${API_BASE}/export/download/${projectId}/${filename}`;
+}
+
+export async function startSpanishExport(projectId, selectedClipIds = null) {
+    let url = `${API_BASE}/export/render-spanish/${projectId}`;
+    if (selectedClipIds && selectedClipIds.length > 0) {
+        const params = selectedClipIds.map(id => `clip_ids=${id}`).join("&");
+        url += `?${params}`;
+    }
+    const res = await fetch(url, { method: "POST" });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Spanish export failed");
+    }
+    return res.json();
+}
+
+export async function getTranslationStatus(projectId) {
+    const res = await fetch(`${API_BASE}/export/translation-status/${projectId}`);
+    if (!res.ok) throw new Error("Failed to get translation status");
+    return res.json();   // { translated: { clipId: bool } }
 }
 
 export async function startInstagramExport(projectId, selectedClipIds = null) {
@@ -620,6 +661,56 @@ export async function editorTranscribeTrim(projectId) {
         throw new Error(err.detail || "Transcription failed");
     }
     return res.json();
+}
+
+export async function editorTranslateSpanish(projectId) {
+    const res = await fetch(`${API_BASE}/editor/${projectId}/translate-spanish`, {
+        method: "POST",
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Translation failed");
+    }
+    return res.json();   // { status, words }
+}
+
+export async function clipAnalyzeFaces(projectId, clipId) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/analyze-faces`, {
+        method: "POST",
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Face analysis failed");
+    }
+    return res.json();
+}
+
+export async function editorAnalyzeFaces(projectId) {
+    const res = await fetch(`${API_BASE}/editor/${projectId}/analyze-faces`, {
+        method: "POST",
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Face analysis failed");
+    }
+    return res.json();   // { status, sample_count, people, width, height, samples }
+}
+
+export async function editorUpdateReframeStyle(projectId, payload) {
+    const res = await fetch(`${API_BASE}/editor/${projectId}/reframe-style`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Reframe style update failed");
+    }
+    return res.json();
+}
+
+export function getReframePreviewUrl(projectId, seconds = 10) {
+    return `${API_BASE}/editor/${projectId}/preview-reframe?seconds=${seconds}&t=${Date.now()}`;
 }
 
 export async function getEditorSession(projectId) {
