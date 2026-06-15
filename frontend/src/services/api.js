@@ -445,6 +445,95 @@ export async function getTwitchChatVelocity(videoId) {
     return res.json();
 }
 
+// ─── Kick (mirror of Twitch — same payload shapes) ────────────────────────
+
+export async function getKickClips(url, limit = 50) {
+    // Returns the top viewer-made clips of a Kick VOD, sorted by views.
+    // Same response shape as getTwitchClips so the UI can use the same render.
+    const qs = new URLSearchParams({ url, limit: String(limit) }).toString();
+    const res = await fetch(`${API_BASE}/stream/kick-clips?${qs}`);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to fetch Kick clips");
+    }
+    return res.json();
+}
+
+export async function processKickClip(clipSlug, clipTitle, broadcasterName = "", geminiModel = "") {
+    const res = await fetch(`${API_BASE}/stream/kick-clip-to-project`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            clip_slug: clipSlug,
+            clip_title: clipTitle,
+            broadcaster_name: broadcasterName,
+            gemini_model: geminiModel,
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to process Kick clip");
+    }
+    return res.json();
+}
+
+// ─── Live-clip pescador (Twitch + Kick) ───────────────────────────────────
+
+export async function startLiveClipsSession(platform, channel) {
+    const res = await fetch(`${API_BASE}/stream/live-clips/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, channel }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to start live-clip session");
+    }
+    return res.json();
+}
+
+export async function getLiveClipsStatus(sessionId) {
+    const res = await fetch(`${API_BASE}/stream/live-clips/status/${sessionId}`);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to poll session");
+    }
+    return res.json();
+}
+
+export async function stopLiveClipsSession(sessionId) {
+    const res = await fetch(`${API_BASE}/stream/live-clips/stop/${sessionId}`, { method: "POST" });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to stop session");
+    }
+    return res.json();
+}
+
+export async function clearLiveClipsSession(sessionId) {
+    const res = await fetch(`${API_BASE}/stream/live-clips/clear/${sessionId}`, { method: "POST" });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to clear session");
+    }
+    return res.json();
+}
+
+export async function processKickClipsBatch(clips, broadcasterName = "", geminiModel = "") {
+    const res = await fetch(`${API_BASE}/stream/kick-clips-batch-to-project`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            clips, broadcaster_name: broadcasterName, gemini_model: geminiModel,
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to process Kick clips batch");
+    }
+    return res.json();
+}
+
 export async function getTwitchClips(url, limit = 50) {
     // Returns the top viewer-made clips of a Twitch VOD, sorted by views.
     // Each clip has vod_offset_seconds so the UI can autopopulate HH:MM:SS.

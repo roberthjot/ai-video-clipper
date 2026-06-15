@@ -2,7 +2,7 @@ import os
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from ..models.clip import StreamStartRequest
-from ..services import stream_service, twitch_service, twitch_chat_service
+from ..services import stream_service, twitch_service, twitch_chat_service, kick_service, live_clips_service
 
 router = APIRouter()
 
@@ -103,6 +103,122 @@ def get_twitch_clips(url: str = "", video_id: str = "", limit: int = 500):
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return {"video_id": vid, "count": len(clips), "clips": clips}
+
+
+@router.get("/kick-clips")
+def get_kick_clips(url: str = "", video_id: str = "", limit: int = 500):
+    """List the top viewer-made clips of a Kick VOD, sorted by views.
+
+    Mirror of /twitch-clips. Accepts a full Kick VOD URL (kick.com/video/<uuid>
+    or kick.com/<channel>/videos/<uuid>) or a raw video_id. Returns the
+    clips list with `vod_offset_seconds` so the UI can show "where in the
+    VOD" each clip came from.
+    """
+    vid = video_id.strip() or kick_service.extract_video_id(url)
+    if not vid:
+        raise HTTPException(status_code=400, detail="Provide a Kick VOD URL or video_id")
+    try:
+        clips = kick_service.get_clips_for_video(vid, max_clips=max(10, min(2000, int(limit))))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"video_id": vid, "count": len(clips), "clips": clips}
+
+
+@router.post("/kick-clip-to-project")
+def kick_clip_to_project(payload: dict):
+    """One-click: download a Kick clip (via yt-dlp) + spawn Gemini caption
+    job + return project_id. Frontend polls /api/status/{id} until ready,
+    then jumps to Step 2 of the Video Clipper mode."""
+    slug = (payload.get("clip_slug") or payload.get("slug") or "").strip()
+    if not slug:
+        # Tolerate a raw URL too — extract the clip id ourselves.
+        u = (payload.get("url") or "").strip()
+        if u:
+            slug = kick_service.extract_clip_id(u) or u
+    title = (payload.get("clip_title") or payload.get("title") or "").strip() or "Kick clip"
+    broadcaster = (payload.get("broadcaster_name") or "").strip()
+    model = (payload.get("gemini_model") or "").strip()
+    if not slug:
+        raise HTTPException(status_code=400, detail="clip_slug or url required")
+    try:
+        project_id = kick_service.process_clip_to_project(
+            clip_slug=slug, clip_title=title,
+            broadcaster_name=broadcaster, gemini_model=model,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"project_id": project_id, "status": "analyzing"}
+
+
+@router.post("/kick-clips-batch-to-project")
+def kick_clips_batch_to_project(payload: dict):
+    """Batch: many Kick clips → ONE project with N ClipData entries.
+    Payload: { clips: [{slug, title}, ...], broadcaster_name, gemini_model }
+    """
+    items = payload.get("clips") or []
+    if not items or not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="`clips` array required")
+    broadcaster = (payload.get("broadcaster_name") or "").strip()
+    model = (payload.get("gemini_model") or "").strip()
+    try:
+        project_id = kick_service.process_clips_batch_to_project(
+            clips=items, broadcaster_name=broadcaster, gemini_model=model,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"project_id": project_id, "status": "analyzing", "count": len(items)}
+
+
+@router.post("/live-clips/start")
+def live_clips_start(payload: dict):
+    """Start a "pescador" session: poll the channel's clips API every ~60s
+    and accumulate every NEW clip (deduped by id). Returns the session
+    snapshot. Payload: {platform: 'twitch'|'kick', channel: 'name'}."""
+    platform = (payload.get("platform") or "").lower().strip()
+    channel = (payload.get("channel") or "").strip()
+    if platform not in ("twitch", "kick"):
+        raise HTTPException(status_code=400, detail="platform must be 'twitch' or 'kick'")
+    if not channel:
+        raise HTTPException(status_code=400, detail="channel required")
+    try:
+        return live_clips_service.start_session(platform, channel)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/live-clips/status/{session_id}")
+def live_clips_status(session_id: str):
+    """Poll the session — frontend hits this every 5s to update the list."""
+    snap = live_clips_service.get_session_public(session_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return snap
+
+
+@router.post("/live-clips/stop/{session_id}")
+def live_clips_stop(session_id: str):
+    """Stop pescando. Found clips stay in the session for the user to
+    process — call /clear if you want a clean slate without stopping."""
+    snap = live_clips_service.stop_session(session_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return snap
+
+
+@router.post("/live-clips/clear/{session_id}")
+def live_clips_clear(session_id: str):
+    """Empty the found_clips list while leaving the session running.
+    seen_ids stays so we don't re-pick clips that came in before the clear."""
+    snap = live_clips_service.clear_clips(session_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return snap
+
+
+@router.get("/live-clips")
+def live_clips_list():
+    """Lightweight overview of every live session (debug + multi-session UI)."""
+    return {"sessions": live_clips_service.list_sessions()}
 
 
 @router.post("/start")

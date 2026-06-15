@@ -1231,20 +1231,29 @@ async def reanalyze_clip(project_id: str, clip_id: int):
 
     FFMPEG_EXE = video_service.FFMPEG_EXE
     duration = clip.end_time - clip.start_time
+    # Encoder selection: prefer Intel QSV when available (much faster on
+    # Windows), fall back to libx264. CRF was 18 (near-lossless) — overkill
+    # for a Gemini-analysis input. 23 is visually identical for this purpose
+    # and ~2× faster on libx264.
+    codec_args = video_service.get_video_codec_args(preset="fast", crf=23, prefer_qsv=True)
     extract_cmd = [
         FFMPEG_EXE,
         "-ss", str(clip.start_time),
         "-i", project.video_path,
         "-t", str(duration),
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        *codec_args,
         "-c:a", "aac", "-y", segment_path
     ]
+
+    # Timeout scaled to duration — the fixed 120s killed reanalyze for clips
+    # > ~60s on CPU. Floor at 3 min so short clips still get plenty of room.
+    _extract_timeout = max(180, int(duration * 5))
 
     active_file = None
     try:
         result = await asyncio.to_thread(
             __import__("subprocess").run,
-            extract_cmd, capture_output=True, timeout=120
+            extract_cmd, capture_output=True, timeout=_extract_timeout
         )
         if not os.path.exists(segment_path):
             raise HTTPException(status_code=500, detail="Failed to extract clip segment")

@@ -658,3 +658,120 @@ def get_clips_for_video(video_id: str, max_clips: int = 500) -> list[dict]:
     # Sort by views desc (the viral signal) and cap
     out.sort(key=lambda c: c["view_count"], reverse=True)
     return out[:max_clips]
+
+
+# ─── Recent clips for a channel (live-clip pescador polling) ────────────────
+
+def _get_user_id_by_login(login: str) -> Optional[str]:
+    """Resolve a Twitch channel login (e.g. "adinross") to its user_id."""
+    if not login:
+        return None
+    data = _helix_get("users", {"login": login.lower()})
+    items = data.get("data", []) or []
+    return items[0].get("id") if items else None
+
+
+def get_current_live_stream(channel_login: str) -> Optional[dict]:
+    """If the channel is broadcasting right now, return {id, started_at,
+    title, game_name, user_id}. Otherwise None. Used by the live-clip
+    pescador to anchor polling to the stream's true start so clips made
+    earlier in the stream get caught on the first poll.
+
+    `started_at` is returned as an ISO 8601 UTC string (Helix's native
+    format), so it round-trips cleanly through JSON + datetime.fromisoformat.
+    """
+    if not channel_login:
+        return None
+    data = _helix_get("streams", {"user_login": channel_login.lower()})
+    items = data.get("data", []) or []
+    if not items:
+        return None
+    s = items[0]
+    return {
+        "id": s.get("id", ""),
+        "user_id": s.get("user_id", ""),
+        "started_at": s.get("started_at", ""),
+        "title": s.get("title", ""),
+        "game_name": s.get("game_name", ""),
+        "viewer_count": s.get("viewer_count", 0),
+    }
+
+
+def get_recent_clips_for_channel(channel_login: str, since_dt) -> list[dict]:
+    """List clips made for `channel_login` (e.g. 'adinross') AT OR AFTER
+    `since_dt` (datetime, UTC-aware). Used by the live-clip pescador every
+    poll tick — pass `since_dt` slightly behind your last poll to catch
+    clips that appeared during the gap.
+
+    Returns clip dicts in the same shape as `get_clips_for_video` (+
+    'platform' = 'twitch') so the live pescador can treat both platforms
+    uniformly.
+    """
+    if not channel_login:
+        return []
+    from datetime import datetime, timezone
+
+    if isinstance(since_dt, str):
+        try:
+            s = since_dt.replace(" ", "T").replace("Z", "+00:00")
+            since_dt = datetime.fromisoformat(s)
+        except Exception:
+            since_dt = None
+    if since_dt and since_dt.tzinfo is None:
+        since_dt = since_dt.replace(tzinfo=timezone.utc)
+
+    user_id = _get_user_id_by_login(channel_login)
+    if not user_id:
+        return []
+
+    # Helix requires started_at — use since_dt (or "10 minutes ago" as floor).
+    from datetime import timedelta
+    floor_dt = (since_dt or (datetime.now(timezone.utc) - timedelta(minutes=10)))
+    started_iso = floor_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    out = []
+    cursor = None
+    pages = 0
+    MAX_PAGES = 5     # 5 * 100 = 500 candidate clips per poll — plenty
+    while pages < MAX_PAGES:
+        params = {
+            "broadcaster_id": user_id,
+            "first": 100,
+            "started_at": started_iso,
+        }
+        if cursor:
+            params["after"] = cursor
+        data = _helix_get("clips", params)
+        clips = data.get("data", []) or []
+        if not clips:
+            break
+        for c in clips:
+            created = c.get("created_at") or ""
+            try:
+                cs = created.replace(" ", "T").replace("Z", "+00:00")
+                cdt = datetime.fromisoformat(cs)
+                if cdt.tzinfo is None:
+                    cdt = cdt.replace(tzinfo=timezone.utc)
+            except Exception:
+                cdt = None
+            if since_dt and cdt and cdt < since_dt:
+                continue
+            out.append({
+                "id": c.get("id"),
+                "slug": c.get("id"),
+                "url": c.get("url"),
+                "title": (c.get("title") or "").strip() or "(sin título)",
+                "creator_name": c.get("creator_name") or "",
+                "broadcaster_name": c.get("broadcaster_name") or channel_login,
+                "view_count": int(c.get("view_count") or 0),
+                "duration": float(c.get("duration") or 0),
+                "vod_offset_seconds": c.get("vod_offset") or 0,
+                "created_at": created,
+                "thumbnail_url": c.get("thumbnail_url") or "",
+                "platform": "twitch",
+            })
+        cursor = (data.get("pagination") or {}).get("cursor")
+        pages += 1
+        if not cursor:
+            break
+    return out

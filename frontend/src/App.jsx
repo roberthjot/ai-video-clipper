@@ -4610,6 +4610,23 @@ function HmsInput({ label, value, onChange }) {
 }
 
 function LiveStreamStep({ onClipToProject }) {
+  // Tab inside Live Stream: "record" (existing recording/VOD flow) or
+  // "pescar" (live-clip pescador — polls platform every 60s, accumulates
+  // every clip viewers create during the stream).
+  const [liveTab, setLiveTab] = useState("record");
+
+  // ── Pescador state ──────────────────────────────────────────────────────
+  const [pescPlatform, setPescPlatform] = useState("kick");   // "kick" | "twitch"
+  const [pescChannel, setPescChannel] = useState("");
+  const [pescSession, setPescSession] = useState(null);       // {session_id, status, found_clips, ...}
+  const [pescStarting, setPescStarting] = useState(false);
+  const [pescError, setPescError] = useState("");
+  const [pescSelected, setPescSelected] = useState(new Set());
+  const [pescSort, setPescSort] = useState("recent");          // "recent" | "views"
+  const [pescSearch, setPescSearch] = useState("");
+  const [pescProcessing, setPescProcessing] = useState(null);  // {phase, name, progress} during batch
+  const pescPollRef = useRef(null);
+
   const [url, setUrl] = useState("");
   const [segmentMinutes, setSegmentMinutes] = useState(10);
   const [resolution, setResolution] = useState("720p");
@@ -4625,6 +4642,11 @@ function LiveStreamStep({ onClipToProject }) {
   const isVod = /\/videos?\/[a-zA-Z0-9]+/i.test(url);
   // Twitch is the only platform we can hit Helix on for "top viewer clips".
   const isTwitchVod = isVod && /twitch\.tv/i.test(url);
+  // Kick mirrors Twitch with a different backend route — same UI flow.
+  const isKickVod = isVod && /kick\.com/i.test(url);
+  // Either platform → the viral-clips button is offered.
+  const isViralClipVod = isTwitchVod || isKickVod;
+  const vodPlatform = isKickVod ? "kick" : (isTwitchVod ? "twitch" : "");
   // Viral clips modal state
   const [viralOpen, setViralOpen] = useState(false);
   const [viralTab, setViralTab] = useState("clips");        // "clips" | "chat"
@@ -4652,7 +4674,11 @@ function LiveStreamStep({ onClipToProject }) {
     setViralError("");
     setViralOpen(true);
     try {
-      const data = await api.getTwitchClips(url.trim(), 500);
+      // Route to the right backend by platform — response shape matches so
+      // the rest of the modal renders identically.
+      const data = vodPlatform === "kick"
+        ? await api.getKickClips(url.trim(), 500)
+        : await api.getTwitchClips(url.trim(), 500);
       setViralClips(data.clips || []);
       if (!data.clips || data.clips.length === 0) {
         setViralError("Este VOD no tiene clips publicados por viewers (todavía).");
@@ -4691,11 +4717,20 @@ function LiveStreamStep({ onClipToProject }) {
       progress: `0/${picks.length}`,
     });
     try {
-      const start = await api.processTwitchClipsBatch(
-        picks.map((c) => ({ slug: c.id, title: c.title })),
-        picks[0].broadcaster_name || "",
-        ""
-      );
+      const start = vodPlatform === "kick"
+        ? await api.processKickClipsBatch(
+            // Send the full URL too — yt-dlp's Kick extractor needs the
+            // channel-prefixed form (kick.com/<channel>/clips/<id>) or it
+            // routes the URL to the wrong extractor and 403s.
+            picks.map((c) => ({ slug: c.id, title: c.title, url: c.url })),
+            picks[0].broadcaster_name || "",
+            "",
+          )
+        : await api.processTwitchClipsBatch(
+            picks.map((c) => ({ slug: c.id, title: c.title })),
+            picks[0].broadcaster_name || "",
+            "",
+          );
       const projectId = start.project_id;
       setProcessingClip({
         phase: "analyzing", name: `${picks.length} clips`, progress: `0/${picks.length}`,
@@ -4734,12 +4769,19 @@ function LiveStreamStep({ onClipToProject }) {
     setProcessingError("");
     setProcessingClip({ phase: "downloading", name: clip.title });
     try {
-      const start = await api.processTwitchClip(
-        clip.id,
-        clip.title,
-        clip.broadcaster_name || "",
-        ""    // gemini_model — backend will use project default
-      );
+      const start = vodPlatform === "kick"
+        ? await api.processKickClip(
+            clip.id,
+            clip.title,
+            clip.broadcaster_name || "",
+            "",
+          )
+        : await api.processTwitchClip(
+            clip.id,
+            clip.title,
+            clip.broadcaster_name || "",
+            "",     // gemini_model — backend will use project default
+          );
       const projectId = start.project_id;
       setProcessingClip({ phase: "analyzing", name: clip.title });
       // Poll until ready or error
@@ -4912,6 +4954,128 @@ function LiveStreamStep({ onClipToProject }) {
     return `${s}s`;
   };
 
+  // ── Pescador handlers ───────────────────────────────────────────────────
+  const startPesc = async () => {
+    const channel = pescChannel.trim();
+    if (!channel) { setPescError("Ingresá un nombre de canal"); return; }
+    setPescStarting(true);
+    setPescError("");
+    try {
+      const snap = await api.startLiveClipsSession(pescPlatform, channel);
+      setPescSession(snap);
+    } catch (e) {
+      setPescError(e.message || "No se pudo iniciar la sesión");
+    } finally {
+      setPescStarting(false);
+    }
+  };
+
+  const stopPesc = async () => {
+    if (!pescSession?.session_id) return;
+    try {
+      const snap = await api.stopLiveClipsSession(pescSession.session_id);
+      setPescSession(snap);
+    } catch (e) {
+      setPescError(e.message);
+    }
+  };
+
+  const resetPesc = () => {
+    setPescSession(null);
+    setPescChannel("");
+    setPescSelected(new Set());
+    setPescError("");
+    setPescSearch("");
+  };
+
+  // Auto-refresh the session status every 5s while running.
+  useEffect(() => {
+    if (!pescSession?.session_id) return;
+    if (pescSession.status === "stopped") return;
+    const id = pescSession.session_id;
+    pescPollRef.current = setInterval(async () => {
+      try {
+        const snap = await api.getLiveClipsStatus(id);
+        setPescSession(snap);
+        if (snap.status === "stopped") clearInterval(pescPollRef.current);
+      } catch (_) { /* keep trying */ }
+    }, 5000);
+    return () => clearInterval(pescPollRef.current);
+  }, [pescSession?.session_id, pescSession?.status]);
+
+  const togglePescSel = (id) => {
+    setPescSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const pescSelectAll = () => {
+    const ids = (pescSession?.found_clips || []).map((c) => c.id);
+    setPescSelected(new Set(ids));
+  };
+  const pescDeselectAll = () => setPescSelected(new Set());
+
+  // Filtered + sorted list shown to the user.
+  const pescFilteredClips = (() => {
+    let arr = pescSession?.found_clips || [];
+    if (pescSearch.trim()) {
+      const q = pescSearch.toLowerCase();
+      arr = arr.filter((c) => (c.title || "").toLowerCase().includes(q) ||
+                              (c.creator_name || "").toLowerCase().includes(q));
+    }
+    if (pescSort === "views") {
+      arr = [...arr].sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
+    } else {
+      arr = [...arr].sort((a, b) => (b.discovered_at || "").localeCompare(a.discovered_at || ""));
+    }
+    return arr;
+  })();
+
+  // Process selected pescador clips with the existing Kick/Twitch batch flow.
+  const processPescSelected = async () => {
+    if (!pescSession || pescSelected.size === 0) return;
+    const platform = pescSession.platform;
+    const picks = (pescSession.found_clips || []).filter((c) => pescSelected.has(c.id));
+    if (picks.length === 0) return;
+    setPescProcessing({
+      phase: "downloading",
+      name: `${picks.length} clips`,
+      progress: `0/${picks.length}`,
+    });
+    try {
+      const items = picks.map((c) => ({ slug: c.id, title: c.title, url: c.url }));
+      const start = platform === "kick"
+        ? await api.processKickClipsBatch(items, picks[0].broadcaster_name || "", "")
+        : await api.processTwitchClipsBatch(items, picks[0].broadcaster_name || "", "");
+      const projectId = start.project_id;
+      setPescProcessing({ phase: "analyzing", name: `${picks.length} clips`, progress: `0/${picks.length}` });
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const s = await api.getProjectStatus(projectId).catch(() => null);
+        if (!s) continue;
+        if (s.analyze_progress) {
+          setPescProcessing((prev) => prev ? { ...prev, progress: s.analyze_progress } : prev);
+        }
+        if (s.status === "ready") {
+          const data = await api.getClips(projectId);
+          if (onClipToProject) {
+            onClipToProject(projectId, data.clips || [], `${picks.length} clips pescados`);
+          }
+          setPescProcessing(null);
+          setPescSelected(new Set());
+          return;
+        }
+        if (s.status === "error") throw new Error("Gemini falló al analizar");
+      }
+      throw new Error("Tiempo agotado esperando el análisis");
+    } catch (e) {
+      setPescError(e.message || "No se pudo procesar el batch");
+      setPescProcessing(null);
+    }
+  };
+
   const isActive = sessionData && (sessionData.status === "recording" || sessionData.status === "starting");
   const segments = sessionData?.segments ?? [];
   const readyCount = sessionData?.ready_count ?? 0;
@@ -4928,10 +5092,30 @@ function LiveStreamStep({ onClipToProject }) {
             </span>
           )}
         </div>
-        <p style={{ margin: "0 0 26px", fontSize: 14, color: "var(--st-muted)", lineHeight: 1.5 }}>
+        <p style={{ margin: "0 0 18px", fontSize: 14, color: "var(--st-muted)", lineHeight: 1.5 }}>
           Graba un stream de Twitch o Kick en segmentos. Descargalos y subilos al Clipper para extraer clips con Gemini.
         </p>
 
+        {/* Tabs inside Live Stream — "Grabar" (existing flow) and
+            "Pescar" (live-clip pescador, polls every ~60s). */}
+        <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--st-line)", marginBottom: 22 }}>
+          {[["record", "🔴 Grabar stream"], ["pescar", "👀 Pescar clips en vivo"]].map(([k, label]) => {
+            const active = liveTab === k;
+            return (
+              <div key={k} onClick={() => setLiveTab(k)}
+                style={{
+                  padding: "9px 16px", cursor: "pointer",
+                  fontFamily: "var(--st-ui)", fontSize: 13, fontWeight: active ? 600 : 500,
+                  color: active ? "var(--st-text)" : "var(--st-muted)",
+                  borderBottom: `2px solid ${active ? "var(--st-accent)" : "transparent"}`,
+                  marginBottom: -1, transition: "color .12s, border-color .12s",
+                }}>{label}</div>
+            );
+          })}
+        </div>
+
+        {liveTab === "record" && (
+          <>
         {!sessionId ? (
           /* ── Config card ── */
           <div className="st-card" style={{ padding: "22px 24px" }}>
@@ -4958,14 +5142,14 @@ function LiveStreamStep({ onClipToProject }) {
                   Detectamos un <b style={{ color: "var(--st-text)" }}>VOD</b>. Vamos a descargar solo el rango que pidas, sin re-encodear. Sale rápido.
                 </div>
 
-                {isTwitchVod && (
+                {isViralClipVod && (
                   <button
                     onClick={loadViralClips}
                     className="st-btn st-btn--ghost"
                     style={{ width: "100%", justifyContent: "center", padding: "10px 0", fontSize: 13, marginBottom: 16, gap: 8 }}
                     title="Lista los clips que más views tienen entre los que hicieron los viewers"
                   >
-                    🔍 Ver momentos virales del VOD
+                    🔍 Ver momentos virales del VOD {vodPlatform === "kick" ? "(Kick)" : "(Twitch)"}
                   </button>
                 )}
 
@@ -5157,11 +5341,13 @@ function LiveStreamStep({ onClipToProject }) {
                   </div>
                   <X size={18} style={{ cursor: "pointer", color: "var(--st-muted)" }} onClick={() => setViralOpen(false)} />
                 </div>
-                {/* Tabs */}
+                {/* Tabs — "Hype del chat" only on Twitch (it uses Twitch's
+                    chat replay endpoint). Kick doesn't expose chat in the
+                    same way, so we hide the tab cleanly. */}
                 <div style={{ display: "flex", gap: 4, marginTop: 14 }}>
                   {[
                     ["clips", "Top clips (viewers)"],
-                    ["chat", "★ Hype del chat"],
+                    ...(vodPlatform === "twitch" ? [["chat", "★ Hype del chat"]] : []),
                   ].map(([k, label]) => {
                     const active = viralTab === k;
                     return (
@@ -5203,7 +5389,7 @@ function LiveStreamStep({ onClipToProject }) {
                     }} />
                     <div style={{ fontSize: 14, fontWeight: 600, color: "var(--st-text)" }}>
                       {processingClip.phase === "downloading"
-                        ? "Bajando los clips de Twitch…"
+                        ? `Bajando los clips de ${vodPlatform === "kick" ? "Kick" : "Twitch"}…`
                         : "Gemini está escribiendo los captions…"}
                     </div>
                     <div style={{ fontSize: 12, color: "var(--st-muted)", maxWidth: 340 }}>
@@ -5230,7 +5416,7 @@ function LiveStreamStep({ onClipToProject }) {
                   <div style={{ padding: "8px 0" }}>
                     {viralLoading && (
                       <div style={{ padding: 40, textAlign: "center", color: "var(--st-muted)", fontSize: 13 }}>
-                        Cargando clips de Twitch…
+                        Cargando clips de {vodPlatform === "kick" ? "Kick" : "Twitch"}…
                       </div>
                     )}
                     {!viralLoading && viralError && (
@@ -5349,6 +5535,232 @@ function LiveStreamStep({ onClipToProject }) {
               )}
             </div>
           </div>
+        )}
+        </>
+        )}
+
+        {liveTab === "pescar" && (
+          <>
+            {/* Empty state: ask for platform + channel */}
+            {!pescSession ? (
+              <div className="st-card" style={{ padding: "22px 24px" }}>
+                <div className="st-eyebrow" style={{ marginBottom: 8 }}>Plataforma</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 18 }}>
+                  {[["kick", "🟢 Kick"], ["twitch", "💜 Twitch"]].map(([k, label]) => {
+                    const on = pescPlatform === k;
+                    return (
+                      <button key={k} onClick={() => setPescPlatform(k)}
+                        style={{
+                          fontSize: 13, padding: "9px 0",
+                          background: on ? "var(--st-accent)" : "transparent",
+                          color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                          border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                          borderRadius: 8, cursor: "pointer", fontWeight: 600,
+                        }}>{label}</button>
+                    );
+                  })}
+                </div>
+                <div className="st-eyebrow" style={{ marginBottom: 8 }}>Canal</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, background: "var(--st-soft)", border: `1px solid ${pescChannel ? "var(--st-accent)" : "var(--st-border)"}`, borderRadius: 10, padding: "11px 13px", marginBottom: 18, transition: "border-color .15s" }}>
+                  <Radio size={16} style={{ color: "var(--st-muted)", flexShrink: 0 }} />
+                  <input type="text"
+                    placeholder={pescPlatform === "kick" ? "ej. adinross" : "ej. shroud"}
+                    value={pescChannel}
+                    onChange={(e) => {
+                      let v = e.target.value.trim();
+                      v = v.replace(/^@/, "");
+                      v = v.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+                      v = v.replace(/^(m\.)?(twitch\.tv|kick\.com)\//i, "");
+                      v = v.split(/[\/?#]/)[0];
+                      setPescChannel(v.toLowerCase());
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && startPesc()}
+                    style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "var(--st-text)", fontFamily: "var(--st-mono)", fontSize: 13 }} />
+                </div>
+                <button onClick={startPesc} disabled={pescStarting || !pescChannel.trim()}
+                  className="st-btn st-btn--primary"
+                  style={{ width: "100%", justifyContent: "center", padding: "12px 0", fontSize: 14, fontWeight: 600 }}>
+                  {pescStarting ? "Iniciando…" : "🎣 Empezar a pescar"}
+                </button>
+                {pescError && (
+                  <p style={{ color: "var(--st-live)", fontSize: 12, margin: "10px 0 0" }}>{pescError}</p>
+                )}
+                <p style={{ fontSize: 11.5, color: "var(--st-faint)", margin: "14px 0 0", lineHeight: 1.5 }}>
+                  Polea cada 60s y suma cada clip nuevo que aparezca. Los clips suelen tardar 1-5 min en aparecer después de que el viewer los crea — esto es de la plataforma, no del sistema.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Running session header */}
+                <div className="st-card" style={{ padding: "16px 20px", marginBottom: 18, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <span style={{
+                      display: "inline-block", width: 9, height: 9, borderRadius: 99,
+                      background: pescSession.status === "running" ? "#22c55e" : "#888",
+                      animation: pescSession.status === "running" ? "pulse 2s infinite" : "none",
+                    }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--st-text)" }}>
+                      {pescSession.platform === "kick" ? "🟢" : "💜"} {pescSession.channel}
+                    </span>
+                  </div>
+                  <span style={{ fontFamily: "var(--st-mono)", fontSize: 11, color: "var(--st-faint)" }}>
+                    {pescSession.polls_done} poll{pescSession.polls_done !== 1 ? "s" : ""} ·
+                    {" "}{(pescSession.found_clips || []).length} clip{(pescSession.found_clips || []).length !== 1 ? "s" : ""} pescado{(pescSession.found_clips || []).length !== 1 ? "s" : ""}
+                  </span>
+                  <div style={{ flex: 1 }} />
+                  {pescSession.status !== "stopped" ? (
+                    <button onClick={stopPesc} className="st-btn st-btn--ghost"
+                      style={{ padding: "6px 12px", fontSize: 12 }}>
+                      Detener pesca
+                    </button>
+                  ) : (
+                    <span style={{ fontFamily: "var(--st-mono)", fontSize: 10.5, color: "var(--st-faint)" }}>DETENIDO</span>
+                  )}
+                  <button onClick={resetPesc} className="st-btn st-btn--ghost"
+                    style={{ padding: "6px 12px", fontSize: 12 }}>
+                    Nueva sesión
+                  </button>
+                </div>
+
+                {/* Live-stream anchor banner */}
+                {pescSession.is_live ? (
+                  <div style={{
+                    padding: "11px 14px", marginBottom: 12, borderRadius: 9,
+                    background: "rgba(34, 197, 94, 0.08)",
+                    border: "1px solid rgba(34, 197, 94, 0.25)",
+                    color: "var(--st-text)", fontSize: 12.5,
+                    display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                  }}>
+                    <span style={{ fontSize: 14 }}>🔴</span>
+                    <span>
+                      <b>En vivo desde hace {(() => {
+                        if (!pescSession.stream_started_at) return "—";
+                        const ms = Date.now() - new Date(pescSession.stream_started_at).getTime();
+                        if (ms < 0) return "ahora";
+                        const m = Math.floor(ms / 60000);
+                        const h = Math.floor(m / 60);
+                        return h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
+                      })()}</b>
+                      {" · pescando del stream completo"}
+                    </span>
+                    {pescSession.stream_title && (
+                      <span style={{ color: "var(--st-muted)", fontStyle: "italic", marginLeft: 4 }}>
+                        “{pescSession.stream_title.slice(0, 70)}{pescSession.stream_title.length > 70 ? "…" : ""}”
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: "10px 14px", marginBottom: 12, borderRadius: 9,
+                    background: "var(--st-soft)",
+                    border: "1px solid var(--st-border)",
+                    color: "var(--st-muted)", fontSize: 12.5,
+                    display: "flex", alignItems: "center", gap: 8,
+                  }}>
+                    <span>⚪</span>
+                    <span>Canal offline o no detectable · solo pescaré clips creados de ahora en adelante</span>
+                  </div>
+                )}
+
+                {pescError && (
+                  <div style={{ padding: "10px 13px", marginBottom: 12, borderRadius: 9, background: "rgba(192,57,43,0.08)", border: "1px solid rgba(192,57,43,0.25)", color: "var(--st-live)", fontSize: 12 }}>
+                    {pescError}
+                  </div>
+                )}
+
+                {/* Sort + search */}
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+                  <div style={{ display: "inline-flex", border: "1px solid var(--st-border)", borderRadius: 7, padding: 2 }}>
+                    {[["recent", "Recientes"], ["views", "Más vistos"]].map(([k, label]) => {
+                      const on = pescSort === k;
+                      return (
+                        <button key={k} onClick={() => setPescSort(k)} style={{
+                          fontSize: 11, padding: "5px 10px",
+                          background: on ? "var(--st-accent)" : "transparent",
+                          color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                          border: "none", borderRadius: 5, cursor: "pointer",
+                        }}>{label}</button>
+                      );
+                    })}
+                  </div>
+                  <input type="text" placeholder="Buscar por título o creador…"
+                    value={pescSearch} onChange={(e) => setPescSearch(e.target.value)}
+                    style={{
+                      flex: 1, minWidth: 180,
+                      background: "var(--st-soft)", border: "1px solid var(--st-border)",
+                      color: "var(--st-text)", borderRadius: 7, padding: "5px 11px",
+                      fontSize: 12, outline: "none",
+                    }} />
+                  {pescSelected.size > 0 && (
+                    <button onClick={pescDeselectAll} className="st-btn st-btn--ghost"
+                      style={{ padding: "5px 11px", fontSize: 11.5 }}>
+                      Deseleccionar
+                    </button>
+                  )}
+                  <button onClick={pescSelectAll} className="st-btn st-btn--ghost"
+                    style={{ padding: "5px 11px", fontSize: 11.5 }}>
+                    Seleccionar todos
+                  </button>
+                </div>
+
+                {/* Clip list */}
+                {pescFilteredClips.length === 0 ? (
+                  <div style={{ padding: 30, textAlign: "center", color: "var(--st-muted)", fontSize: 13 }}>
+                    {pescSession.polls_done === 0
+                      ? "Buscando clips… el primer poll demora hasta 60 segundos."
+                      : "Aún no apareció ningún clip nuevo. Esperá al próximo poll."}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+                    {pescFilteredClips.map((c) => {
+                      const sel = pescSelected.has(c.id);
+                      return (
+                        <div key={c.id} onClick={() => togglePescSel(c.id)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 11,
+                            padding: "8px 11px", cursor: "pointer",
+                            background: sel ? "var(--st-soft)" : "transparent",
+                            border: `1px solid ${sel ? "var(--st-accent)" : "var(--st-line)"}`,
+                            borderRadius: 8,
+                          }}>
+                          <input type="checkbox" checked={sel} onChange={() => togglePescSel(c.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ accentColor: "var(--st-accent)", flexShrink: 0 }} />
+                          {c.thumbnail_url && (
+                            <img src={c.thumbnail_url} alt="" style={{
+                              width: 64, height: 36, objectFit: "cover", borderRadius: 4, flexShrink: 0,
+                              background: "#000",
+                            }} />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, color: "var(--st-text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {c.title}
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--st-faint)", fontFamily: "var(--st-mono)", marginTop: 2 }}>
+                              👁 {c.view_count} · ⏱ {Math.round(c.duration)}s · {c.creator_name || "—"}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Process selected (sticky bottom action) */}
+                {pescSelected.size > 0 && (
+                  <div style={{ position: "sticky", bottom: 0, padding: "12px 0", background: "var(--st-bg)", borderTop: "1px solid var(--st-line)", marginTop: 8 }}>
+                    <button onClick={processPescSelected} disabled={!!pescProcessing}
+                      className="st-btn st-btn--primary"
+                      style={{ width: "100%", justifyContent: "center", padding: "12px 0", fontSize: 14, fontWeight: 600 }}>
+                      {pescProcessing
+                        ? `${pescProcessing.phase === "downloading" ? "Bajando" : "Analizando"} ${pescProcessing.name}… ${pescProcessing.progress || ""}`
+                        : `🤖 Procesar ${pescSelected.size} con Gemini`}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </>
         )}
       </div>
     </div>

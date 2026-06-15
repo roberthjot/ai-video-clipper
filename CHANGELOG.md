@@ -2,6 +2,138 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🟢 Kick.com integration
+
+Mirror of the Twitch VOD-clips flow for Kick: paste a Kick VOD URL → list
+viewer-made clips → multi-select → batch process with Gemini.
+
+### Backend (`services/kick_service.py`)
+
+- Unofficial Kick API client (`_kick_get`) hitting `/api/v1` and `/api/v2`
+  with realistic Chrome headers — Cloudflare is the failure surface, so
+  HTML responses raise a friendly RuntimeError instead of crashing JSON
+  decode.
+- `get_video_info(uuid)` reads `/v1/video/{uuid}` and tolerates shape drift
+  via `_safe_dict()` / `_pick_url()` helpers (thumbnail/channel fields are
+  sometimes dicts, sometimes bare strings, sometimes null).
+- `get_clips_for_video(video_id)` paginates `/v2/channels/<slug>/clips`
+  with `sort=date`, normalizes `livestream_id` to string on both sides for
+  comparison, and stops when the oldest clip drops past `vod.started_at -
+  2 days` so it doesn't deep-paginate channel history.
+- `download_clip_to_disk` uses `yt_dlp` as a Python module (not
+  subprocess) and passes the **channel-prefixed URL** (`kick.com/<chan>/
+  clips/<id>`) instead of the bare clip slug — yt-dlp's `[kick:live]`
+  extractor 403s on the slug-only form.
+- Same `process_clip_to_project` / `process_clips_batch_to_project`
+  surface as Twitch so the rest of the pipeline doesn't care which
+  platform a clip came from.
+
+### Frontend
+
+- `services/api.js`: `getKickClips`, `processKickClip`,
+  `processKickClipsBatch`.
+- `LiveStreamStep` (Grabar tab) detects Kick VOD URLs (`isKickVod`,
+  `vodPlatform`) and branches `loadViralClips` / `processSelectedClips` /
+  `useViralClip` accordingly. The "Hype del chat" tab is hidden on Kick
+  (no chat replay endpoint).
+
+### Caveats
+
+- Kick API is unofficial; Cloudflare occasionally serves a JS challenge.
+  Retries usually fix it. If it persists, the API shape may have shifted.
+
+## 🎣 Live-clip pescador (Twitch + Kick)
+
+Watch an ongoing stream and accumulate every viewer-made clip as they
+appear. Multi-select → batch process with Gemini, same as the VOD flow.
+
+### Backend (`services/live_clips_service.py`)
+
+- In-memory session store. Each session has its own thread polling the
+  platform's clips API every **60s**, with an exponential backoff ladder
+  (90s / 120s / 180s) on Cloudflare or rate-limit hits.
+- Dedupe via `seen_ids` set; new clips are tagged with `discovered_at` so
+  the frontend can sort by "newest pescado" instead of platform
+  `created_at`.
+- 1-second sleep slices in the polling thread → stop is responsive.
+- **Live-stream anchor:** at `start_session`, calls
+  `get_current_live_stream(channel)` on the platform service. If the
+  channel is live, stores `stream_id`, `stream_started_at`, `stream_title`
+  in the session and uses `stream_started_at` (with -30s overlap) as the
+  baseline for every poll — so the **first poll catches clips made
+  earlier in the stream**, not just from session start onward.
+- If offline / undetectable: falls back to forward-only (`since_dt =
+  session.started_at`) without raising — `is_live=false` lets the
+  frontend show the right banner.
+- `_normalize_channel(platform, raw)` defensively strips
+  `https://`, `www.`, `twitch.tv/`, `kick.com/` (+ mobile variants),
+  trailing path/query, and rejects VOD/clip URLs with a clear message
+  instead of letting them hit Helix as "Bad Identifiers".
+
+### Platform helpers
+
+- `twitch_service.get_current_live_stream(login)` → Helix `/streams?
+  user_login=X`. Returns `{id, started_at, title, game_name,
+  viewer_count}` or `None`.
+- `twitch_service.get_recent_clips_for_channel(login, since_dt)` →
+  resolves login → `user_id` via `/users`, then paginates `/clips?
+  broadcaster_id=X&started_at=ISO` (5 pages × 100 = 500 clips/poll cap).
+- `kick_service.get_current_live_stream(slug)` → `/v1/channels/<slug>`.
+  Reads the `livestream` field, returns the same shape (`id` coerced to
+  string so it round-trips with v2 clip's `livestream_id`).
+- `kick_service.get_recent_clips_for_channel(slug, since_dt, max_pages=
+  8)` → paginates `/v2/channels/<slug>/clips?sort=date`, stops on first
+  clip older than `since_dt` (8 pages × 24 ≈ 192 clips/poll cap).
+- **Kick safety filter:** if `session.stream_id` is set, drops clips
+  whose `livestream_id != stream_id` so we never include clips from a
+  previous stream that happen to share the time window.
+
+### Routes (`routes/stream.py`)
+
+- `POST /api/stream/live-clips/start` `{platform, channel}` → public
+  session snapshot.
+- `GET  /api/stream/live-clips/status/{id}` → snapshot incl. `found_
+  clips`, `polls_done`, `is_live`, `stream_*`.
+- `POST /api/stream/live-clips/stop/{id}` → signals the thread; returns
+  immediately (thread finishes after its current sleep).
+- `POST /api/stream/live-clips/clear/{id}` → empties `found_clips` but
+  keeps polling and keeps `seen_ids` (avoids re-pescando the same clips
+  you just processed).
+- `GET  /api/stream/live-clips` → list all sessions (debug / overview).
+
+### Frontend
+
+- `services/api.js`: `startLiveClipsSession`, `getLiveClipsStatus`,
+  `stopLiveClipsSession`, `clearLiveClipsSession`.
+- `LiveStreamStep` gained a tab bar: **🔴 Grabar stream** (existing flow)
+  and **👀 Pescar clips en vivo** (new). The "Grabar" content is wrapped
+  in `{liveTab === "record" && <>…</>}` so the file stays one component.
+- Pescar empty state: platform picker (Kick / Twitch), channel input that
+  strips URL prefixes / trailing path on the fly via `onChange`, "🎣
+  Empezar a pescar" button.
+- Pescar running state:
+  - Header: pulsing status dot, channel, poll/clip counts, Detener +
+    Nueva sesión buttons.
+  - **Live-stream banner:** green "🔴 En vivo desde hace 1h 23m ·
+    pescando del stream completo" + the stream title in italics; or gray
+    "⚪ Canal offline o no detectable · solo pescaré clips creados de
+    ahora en adelante" when `is_live=false`.
+  - Sort (Recientes / Más vistos) + search.
+  - Clip list: checkbox + thumbnail + title + stats (views / duration /
+    creator).
+  - Sticky bottom: "🤖 Procesar X con Gemini" → reuses the existing batch
+    project flow (Twitch or Kick service `process_clips_batch_to_project`).
+- Status auto-refresh every 5s while session is running (cleared on stop).
+
+### Caveats
+
+- Both platforms process clips for 1–5 minutes before they appear in
+  their APIs. So "live" really means "≈5 min behind live" — known
+  platform limitation, not a bug. UI explains this on the empty state.
+- Per-poll caps (500 Twitch / 192 Kick) only matter for hyper-popular
+  streamers with thousands of clips per stream; bump `MAX_PAGES` if that
+  becomes a real ceiling.
+
 ## 🎵 Background music in Visual Editor + ClipsStep
 
 Music mixing already worked in the standalone Editor (EditorMode); brought
