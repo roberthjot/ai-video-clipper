@@ -430,6 +430,88 @@ def export_clip_with_style(
         overlay_inputs.append(ov_path)
         input_index += 1
 
+    # Video overlays (B-roll picture-in-picture) — same position/timing model
+    # as image_overlays but each input is a real video that's trimmed to its
+    # broll_in..broll_out sub-range and time-shifted so its playback starts
+    # exactly at output_t = `start`. PIP audio is added via the audio chain
+    # below (collected here so the chain build can see all overlays at once).
+    video_overlay_inputs = []   # list of paths to append as plain -i inputs
+    audio_mix_chains = []       # list of completed [N:a]...[brollN_a] filter expressions
+    audio_mix_labels = []       # the labels we'll feed amix
+    video_overlays = getattr(style, 'video_overlays', None) or []
+    for ov in video_overlays:
+        ov_path = getattr(ov, 'path', None)
+        if not ov_path or not os.path.exists(ov_path):
+            continue
+        ov_w = max(40, int(W * float(getattr(ov, 'scale', 0.30))))
+        ov_x = int(float(getattr(ov, 'x', 0.80)) * W)
+        ov_y = int(float(getattr(ov, 'y', 0.18)) * H)
+        ov_op = max(0.0, min(1.0, float(getattr(ov, 'opacity', 1.0))))
+        ov_start = float(getattr(ov, 'start', 0.0))
+        ov_end = float(getattr(ov, 'end', 99999.0))
+        if ov_end <= ov_start:
+            continue
+        broll_in = max(0.0, float(getattr(ov, 'broll_in', 0.0)))
+        broll_out = float(getattr(ov, 'broll_out', 0.0))
+        if broll_out <= broll_in:
+            # 0 or invalid → derive from how long the user wants it visible
+            broll_out = broll_in + (ov_end - ov_start)
+        audio_mode = str(getattr(ov, 'audio_mode', 'mute') or 'mute')
+
+        idx = input_index   # this is the -i index FFmpeg will assign
+
+        # VIDEO chain:
+        # trim source range → reset PTS to 0 → shift so playback starts at output t=ov_start
+        # → scale + alpha → overlay onto current with enable in [ov_start..ov_end]
+        # setpts shift uses TB-relative arithmetic so it survives any input fps.
+        filter_complex += (
+            f";[{idx}:v]"
+            f"trim=start={broll_in}:end={broll_out},"
+            f"setpts=PTS-STARTPTS+{ov_start}/TB,"
+            f"scale={ov_w}:-2,"
+            f"format=rgba,colorchannelmixer=aa={ov_op}[broll{idx}]"
+        )
+        filter_complex += (
+            f";[{current_label}][broll{idx}]overlay="
+            f"{ov_x}-(overlay_w/2):{ov_y}-(overlay_h/2)"
+            f":enable='between(t,{ov_start},{ov_end})'[brollov{idx}]"
+        )
+        current_label = f"brollov{idx}"
+        video_overlay_inputs.append(ov_path)
+
+        # AUDIO chain (only for non-mute modes). "replace" falls back to mix
+        # in v1 — same chain, just maps differently for the user's intent.
+        if audio_mode in ("mix", "replace"):
+            # 0.5 default volume; gated by `enable` so silence outside the
+            # overlay window (amix has no enable so we mute via volume).
+            vol = 0.5 if audio_mode == "mix" else 0.9
+            audio_mix_chains.append(
+                f";[{idx}:a]"
+                f"atrim=start={broll_in}:end={broll_out},"
+                f"asetpts=PTS-STARTPTS+{ov_start}/TB,"
+                f"volume={vol}:enable='between(t,{ov_start},{ov_end})'"
+                f"[broll{idx}_a]"
+            )
+            audio_mix_labels.append(f"broll{idx}_a")
+
+        input_index += 1
+
+    # Build the final audio chain. If at least one B-roll wants mix/replace,
+    # amix it into the main audio. Otherwise leave the original `-map 0:a?`
+    # as-is (handled in tail_args below).
+    final_audio_label = None
+    if audio_mix_chains:
+        for ch in audio_mix_chains:
+            filter_complex += ch
+        # `[0:a]` + every broll audio label → amix duration=first so the
+        # output stops with the main video, not when amix runs out of inputs.
+        mix_inputs = "[0:a]" + "".join(f"[{lab}]" for lab in audio_mix_labels)
+        filter_complex += (
+            f";{mix_inputs}amix=inputs={1 + len(audio_mix_labels)}:"
+            f"duration=first:dropout_transition=0[outaudio]"
+        )
+        final_audio_label = "outaudio"
+
     # Anti-detect filters (optional, export only)
     extra_vf = []
     if style.flip_horizontal:
@@ -515,13 +597,24 @@ def export_clip_with_style(
     for ov_path in overlay_inputs:
         cmd.extend(["-loop", "1", "-t", str(loop_dur), "-i", ov_path])
 
+    # Video overlays (B-rolls) — plain -i (no loop). Indices match the
+    # `[N:v]` / `[N:a]` labels emitted above when input_index was the next
+    # free slot.
+    for vov_path in video_overlay_inputs:
+        cmd.extend(["-i", vov_path])
+
     # Codec args picked at runtime — try Intel QSV first, fall back to libx264 on failure
     qsv_codec = video_service.get_video_codec_args(preset="fast", crf=23, prefer_qsv=True)
     cpu_codec = video_service.get_video_codec_args(preset="fast", crf=23, prefer_qsv=False)
+    # Audio map: when any B-roll wants mix/replace, use the mixed [outaudio]
+    # label. Otherwise stream-copy the main input's audio (current behaviour).
+    audio_map_args = (
+        ["-map", f"[{final_audio_label}]"] if final_audio_label else ["-map", "0:a?"]
+    )
     tail_args = [
         "-filter_complex", filter_complex,
         "-map", "[out]",
-        "-map", "0:a?",
+        *audio_map_args,
         "-c:a", "aac",
         "-sar", "1:1",
         "-movflags", "+faststart",
@@ -591,6 +684,8 @@ def export_clip_with_style(
                 output_path, music_path,
                 music_volume=getattr(style, "music_volume", 0.8),
                 original_volume=getattr(style, "original_volume", 1.0),
+                music_start=float(getattr(style, "music_start", 0.0) or 0.0),
+                music_end=float(getattr(style, "music_end", 0.0) or 0.0),
             )
             print(f"[Export] Clip {clip.id}: mixed music {os.path.basename(music_path)}")
         except Exception as e:

@@ -216,22 +216,76 @@ def _wrap_text_px(text: str, font, max_width: int) -> list:
     return result[:4]  # max 4 lines
 
 
-def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int = 1920,
-                        text_y_ratio: float = 0.08, font_size: int = 60, text_x_ratio: float = 0.05) -> tuple:
-    """Create meme background PNG: solid color + meme text at given Y ratio.
-    Returns (png_path, text_bottom_y)."""
-    bg_rgb = (0, 0, 0) if bg_color == "black" else (255, 255, 255)
-    text_rgb = (255, 255, 255) if bg_color == "black" else (20, 20, 20)
+# Font key → TTF path (Windows). Defaults to Calibri Bold; falls back to
+# load_default() if the file is missing so non-Windows hosts keep working.
+_FONT_MAP_MEME = {
+    "calibri":     "C:/Windows/Fonts/calibrib.ttf",
+    "arial_black": "C:/Windows/Fonts/ariblk.ttf",
+    "trebuchet":   "C:/Windows/Fonts/trebucbd.ttf",
+    "comic":       "C:/Windows/Fonts/comicbd.ttf",
+    "impact":      "C:/Windows/Fonts/impact.ttf",
+}
 
-    font_path = "C:/Windows/Fonts/calibrib.ttf"
+
+def _hex_to_rgb(h: str, fallback=(255, 255, 255)) -> tuple:
+    """Parse '#RRGGBB' (or '#RGB') to (r, g, b). Returns fallback if invalid."""
+    if not h:
+        return fallback
+    s = str(h).strip().lstrip("#")
+    try:
+        if len(s) == 3:
+            s = "".join(c * 2 for c in s)
+        if len(s) != 6:
+            return fallback
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except Exception:
+        return fallback
+
+
+def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int = 1920,
+                        text_y_ratio: float = 0.08, font_size: int = 60, text_x_ratio: float = 0.05,
+                        font_family: str = "calibri", text_color: str = "",
+                        stroke_color: str = "", stroke_width: int = 0,
+                        transparent: bool = False,
+                        text_align: str = "left") -> tuple:
+    """Create meme background PNG: solid color + meme text at given Y ratio.
+
+    When `transparent=True`, returns an RGBA image with ONLY the text painted
+    (alpha 0 everywhere else). Used by the "blur" background mode, where the
+    bg is the source video blurred and the text is layered on top as its own
+    transparent PNG.
+
+    Other new params:
+    - font_family: key in _FONT_MAP_MEME ("calibri" default, "arial_black",
+      "trebuchet", "comic", "impact")
+    - text_color / stroke_color: "#RRGGBB"; empty string → derive from bg_color
+      (white text on black bg, black on white) — preserves prior behaviour.
+    - stroke_width: 0 = no outline (default). Larger values (4–8) make the
+      text readable on the "blur" background.
+
+    Returns (png_path, text_bottom_y).
+    """
+    bg_rgb = (0, 0, 0) if bg_color == "black" else (255, 255, 255)
+    default_text_rgb = (255, 255, 255) if bg_color == "black" else (20, 20, 20)
+    text_rgb = _hex_to_rgb(text_color, default_text_rgb)
+    stroke_rgb = _hex_to_rgb(stroke_color, (0, 0, 0))
+
+    font_path = _FONT_MAP_MEME.get(font_family, _FONT_MAP_MEME["calibri"])
     try:
         font = ImageFont.truetype(font_path, font_size)
     except Exception:
-        font = ImageFont.load_default()
+        # Try the calibri default if the requested font is missing
+        try:
+            font = ImageFont.truetype(_FONT_MAP_MEME["calibri"], font_size)
+        except Exception:
+            font = ImageFont.load_default()
 
     line_h = int(font_size * 1.35)
 
-    img = Image.new("RGB", (W, H), bg_rgb)
+    if transparent:
+        img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    else:
+        img = Image.new("RGB", (W, H), bg_rgb)
     draw = ImageDraw.Draw(img)
 
     x_start = int(W * text_x_ratio)
@@ -240,8 +294,26 @@ def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int
     lines = _wrap_text_px(text, font, max(available_width, 200))
 
     y = int(H * text_y_ratio)
+    stroke_kwargs = {}
+    if stroke_width and stroke_width > 0:
+        stroke_kwargs = {"stroke_width": int(stroke_width), "stroke_fill": stroke_rgb}
+    # text_align: "left" keeps the original behaviour (anchored at x_start).
+    # "center" centers each wrapped line on the canvas width — most memes
+    # want this. "right" anchors each line to the right margin.
+    align = (text_align or "left").lower()
     for line in lines:
-        draw.text((x_start, y), line, font=font, fill=text_rgb)
+        if align in ("center", "right"):
+            try:
+                lw = font.getlength(line) if hasattr(font, "getlength") else (font.getbbox(line)[2] - font.getbbox(line)[0])
+            except Exception:
+                lw = len(line) * font_size * 0.55
+            if align == "center":
+                tx = int((W - lw) / 2)
+            else:  # right
+                tx = int(W - right_margin - lw)
+        else:
+            tx = x_start
+        draw.text((tx, y), line, font=font, fill=text_rgb, **stroke_kwargs)
         y += line_h
 
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
@@ -269,51 +341,165 @@ def create_rounded_corner_blocker(W: int, H: int, radius: int, bg_color: str, ou
     return output_path
 
 
+# Visual filters — copied verbatim from video_service.get_visual_filter_chain
+# so memes get the same cinematic looks as the main editor. Keeping the table
+# local avoids a cross-module import here.
+_MEME_VISUAL_FILTERS = {
+    "none": "",
+    "cinematic": "eq=contrast=1.06:saturation=0.92,curves=master='0/0 0.5/0.45 1/1'",
+    "warm":      "colorbalance=rs=.06:gs=.02:bs=-.05:rm=.04:gm=.01:bm=-.03",
+    "vivid":     "eq=contrast=1.10:saturation=1.20",
+    "moody":     "eq=contrast=1.08:saturation=0.80,colorbalance=bs=.08",
+    "bw":        "hue=s=0,eq=contrast=1.05",
+}
+
+
 def export_meme_video(video_path: str, meme_text: str, output_path: str,
                       bg_color: str = "black", text_y: float = 0.08,
                       video_scale: float = 0.9, video_y: float = 0.6,
                       font_size: int = 60, text_x: float = 0.05,
-                      corner_radius: int = 0) -> None:
-    """Export full video (no cuts) overlaid on meme background."""
+                      corner_radius: int = 0,
+                      # New v2 controls — all default to "preserve old behaviour"
+                      bg_mode: str = "color",            # "color" | "blur"
+                      font_family: str = "calibri",
+                      text_color: str = "",
+                      stroke_color: str = "",
+                      stroke_width: int = 0,
+                      visual_filter: str = "none",
+                      trim_start: float = 0.0,
+                      trim_end: float = 0.0,             # 0 = whole video
+                      mirror_cyclic_enabled: bool = False,
+                      mirror_cyclic_interval: float = 5.0,
+                      boost_contrast: bool = False,
+                      text_align: str = "left",
+                      ) -> None:
+    """Export full video (no cuts) overlaid on meme background.
+
+    New params (v2 — meme editor parity with the Visual Editor):
+    - bg_mode="color" keeps the existing PIL-rendered solid background.
+      bg_mode="blur" generates a transparent text PNG and uses the SOURCE
+      video itself (scaled + blurred to canvas size) as the background — so
+      the meme "lives inside" the video instead of floating on a solid card.
+    - font_family / text_color / stroke_color / stroke_width — pass through to
+      create_meme_bg_png (PIL rendering).
+    - visual_filter — one of cinematic/warm/vivid/moody/bw/none, applied to the
+      foreground video right after the scale.
+    - trim_start / trim_end — input-side `-ss` / `-to` to cut the source.
+    - mirror_cyclic_enabled / interval — hflip toggling on/off every interval
+      seconds, same expression as the Visual Editor.
+    - boost_contrast — anti-detect contrast boost (same eq= values as elsewhere).
+    """
     W, H = 1080, 1920
+    bg_mode = (bg_mode or "color").lower()
 
-    bg_png, _text_bottom = create_meme_bg_png(meme_text, bg_color, W, H,
-                                               text_y_ratio=text_y, font_size=font_size,
-                                               text_x_ratio=text_x)
+    # PNG with text. transparent only for blur mode (so the blurred source
+    # video shows through behind the text).
+    bg_png, _text_bottom = create_meme_bg_png(
+        meme_text, bg_color, W, H,
+        text_y_ratio=text_y, font_size=font_size, text_x_ratio=text_x,
+        font_family=font_family, text_color=text_color,
+        stroke_color=stroke_color, stroke_width=stroke_width,
+        transparent=(bg_mode == "blur"),
+        text_align=text_align,
+    )
 
-    # Scale video to video_scale% of canvas width (maintain aspect ratio)
+    # Scale + visual filter + anti-detect chain on the source FG video.
     scale_w = int(W * video_scale)
-    fg_filter = f"scale={scale_w}:-2"
+    fg_chain_parts = [f"scale={scale_w}:-2"]
+    vf_chain = _MEME_VISUAL_FILTERS.get(visual_filter, "")
+    if vf_chain:
+        fg_chain_parts.append(vf_chain)
+    if boost_contrast:
+        fg_chain_parts.append("eq=contrast=1.05:brightness=0.02:saturation=1.05")
+    if mirror_cyclic_enabled:
+        m_int = max(0.5, min(20.0, float(mirror_cyclic_interval or 5.0)))
+        # Same expression as export_service. Backslash-escape the commas
+        # because they'd otherwise be interpreted as filter separators.
+        fg_chain_parts.append(
+            f"hflip=enable='lt(mod(t\\,{m_int * 2:.3f})\\,{m_int:.3f})'"
+        )
+    fg_filter = ",".join(fg_chain_parts)
 
-    # Center video horizontally; video_y controls where the video center sits (0.0=top, 1.0=bottom)
+    # Center video horizontally; video_y controls where the video center sits
     overlay_x = "(W-w)/2"
     overlay_y = f"{int(H * video_y)}-h/2"
 
     extra_inputs = []
     corner_png = None
 
-    if corner_radius > 0:
-        corner_png = os.path.join(TEMP_DIR, f"corners_{_uuid.uuid4().hex}.png")
-        create_rounded_corner_blocker(W, H, corner_radius, bg_color, corner_png)
-        extra_inputs = ["-loop", "1", "-i", corner_png]
-        filter_complex = (
-            f"[1:v]scale={W}:{H},setsar=1[bg];"
-            f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
-            f"[bg][fg]overlay={overlay_x}:{overlay_y}[comp];"
-            f"[comp][2:v]overlay=0:0[out]"
-        )
+    # Filter chain branches by bg_mode. "color" uses the static PNG bg; "blur"
+    # uses the source video itself (blurred + scaled) and overlays the text as
+    # a transparent PNG on top of the FG video.
+    if bg_mode == "blur":
+        # [0:v] is split: one branch becomes the blurred background, the other
+        # the foreground (scaled + filtered). Text PNG overlayed last.
+        if corner_radius > 0:
+            corner_png = os.path.join(TEMP_DIR, f"corners_{_uuid.uuid4().hex}.png")
+            create_rounded_corner_blocker(W, H, corner_radius, bg_color, corner_png)
+            extra_inputs = ["-loop", "1", "-i", corner_png]
+            filter_complex = (
+                f"[0:v]setpts=PTS-STARTPTS,split=2[fg_in][bg_in];"
+                f"[bg_in]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=14:2[bg];"
+                f"[fg_in]{fg_filter}[fg];"
+                f"[bg][fg]overlay={overlay_x}:{overlay_y}[comp];"
+                f"[comp][1:v]overlay=0:0[withtext];"
+                f"[withtext][2:v]overlay=0:0[out]"
+            )
+        else:
+            filter_complex = (
+                f"[0:v]setpts=PTS-STARTPTS,split=2[fg_in][bg_in];"
+                f"[bg_in]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=14:2[bg];"
+                f"[fg_in]{fg_filter}[fg];"
+                f"[bg][fg]overlay={overlay_x}:{overlay_y}[comp];"
+                f"[comp][1:v]overlay=0:0[out]"
+            )
+        cmd_inputs = [
+            "-i", video_path,
+            "-loop", "1", "-i", bg_png,         # [1] transparent text PNG
+            *extra_inputs,                        # [2] optional corner blocker
+        ]
     else:
-        filter_complex = (
-            f"[1:v]scale={W}:{H},setsar=1[bg];"
-            f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
-            f"[bg][fg]overlay={overlay_x}:{overlay_y}[out]"
-        )
+        # Original solid-bg behaviour — only the new params (font/color/stroke)
+        # propagate through create_meme_bg_png; everything else identical.
+        if corner_radius > 0:
+            corner_png = os.path.join(TEMP_DIR, f"corners_{_uuid.uuid4().hex}.png")
+            create_rounded_corner_blocker(W, H, corner_radius, bg_color, corner_png)
+            extra_inputs = ["-loop", "1", "-i", corner_png]
+            filter_complex = (
+                f"[1:v]scale={W}:{H},setsar=1[bg];"
+                f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
+                f"[bg][fg]overlay={overlay_x}:{overlay_y}[comp];"
+                f"[comp][2:v]overlay=0:0[out]"
+            )
+        else:
+            filter_complex = (
+                f"[1:v]scale={W}:{H},setsar=1[bg];"
+                f"[0:v]setpts=PTS-STARTPTS,{fg_filter}[fg];"
+                f"[bg][fg]overlay={overlay_x}:{overlay_y}[out]"
+            )
+        cmd_inputs = [
+            "-i", video_path,
+            "-loop", "1", "-i", bg_png,
+            *extra_inputs,
+        ]
 
+    # Input-side trim — `-ss` BEFORE `-i` is the fast keyframe seek; `-to`
+    # AFTER `-i` bounds the duration. trim_end=0 means "play to natural end".
+    trim_in_args = []
+    trim_out_args = []
+    if trim_start and trim_start > 0:
+        trim_in_args = ["-ss", str(round(float(trim_start), 3))]
+    if trim_end and trim_end > trim_start:
+        trim_out_args = ["-to", str(round(float(trim_end - trim_start), 3))]
+
+    # When we trim the source we need to NOT pass -shortest, because the bg PNG
+    # is looped indefinitely and -shortest would clip to the longest stream
+    # (still OK with trim too — kept for safety).
     cmd = [
         FFMPEG_EXE,
-        "-i", video_path,
-        "-loop", "1", "-i", bg_png,
-        *extra_inputs,
+        *trim_in_args,
+        *cmd_inputs,
+        *trim_out_args,
         "-filter_complex", filter_complex,
         "-map", "[out]",
         "-map", "0:a?",

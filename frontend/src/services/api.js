@@ -582,7 +582,7 @@ export function getCropPreviewUrl(batchId, index, cropTopPct, cropBottomPct, cro
     return `${API_BASE}/meme/crop-preview/${batchId}/${index}?crop_top_pct=${cropTopPct}&crop_bottom_pct=${cropBottomPct}&crop_left_pct=${cropLeftPct}&crop_right_pct=${cropRightPct}&t=${Date.now()}`;
 }
 
-export async function reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText = "", cropTopPct = 0, cropBottomPct = 0, cornerRadius = 0, cropLeftPct = 0, cropRightPct = 0) {
+export async function reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText = "", cropTopPct = 0, cropBottomPct = 0, cornerRadius = 0, cropLeftPct = 0, cropRightPct = 0, extras = null) {
     const formData = new FormData();
     formData.append("text_y", textY);
     formData.append("text_x", textX);
@@ -595,6 +595,20 @@ export async function reexportMeme(batchId, index, textY, textX, videoScale, vid
     formData.append("crop_right_pct", cropRightPct);
     formData.append("corner_radius", cornerRadius);
     if (customText) formData.append("custom_text", customText);
+    // Extended editor params — only sent when the caller actually customised
+    // them, so the backend keeps its sensible defaults otherwise.
+    if (extras && typeof extras === "object") {
+        const keys = [
+            "bg_mode", "font_family", "text_color", "stroke_color", "stroke_width",
+            "visual_filter", "trim_start", "trim_end",
+            "mirror_cyclic_enabled", "mirror_cyclic_interval", "boost_contrast",
+            "text_align",
+        ];
+        for (const k of keys) {
+            if (extras[k] === undefined || extras[k] === null) continue;
+            formData.append(k, typeof extras[k] === "boolean" ? (extras[k] ? "true" : "false") : extras[k]);
+        }
+    }
     const res = await fetch(`${API_BASE}/meme/reexport/${batchId}/${index}`, {
         method: "POST",
         body: formData,
@@ -749,6 +763,78 @@ export async function uploadOverlayImage(projectId, file) {
     const origin = API_BASE.replace(/\/api$/, "");
     data.url = origin + data.url;  // absolute URL for <img>
     return data;
+}
+
+export async function uploadEditorBroll(projectId, file, onProgress) {
+    // XHR (not fetch) so we can report progress for large video files.
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const formData = new FormData();
+        formData.append("video", file);
+        xhr.open("POST", `${API_BASE}/editor/${projectId}/broll`);
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && typeof onProgress === "function") {
+                onProgress(Math.round((e.loaded / e.total) * 100));
+            }
+        };
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    const origin = API_BASE.replace(/\/api$/, "");
+                    data.url = origin + data.url;
+                    resolve(data);
+                } catch (e) {
+                    reject(new Error("Bad upload response"));
+                }
+            } else {
+                let msg = `Upload failed (${xhr.status})`;
+                try { msg = JSON.parse(xhr.responseText).detail || msg; } catch {}
+                reject(new Error(msg));
+            }
+        };
+        xhr.onerror = () => reject(new Error("Upload failed (network error)"));
+        xhr.send(formData);
+    });
+}
+
+export async function uploadProjectMusic(projectId, file, onProgress) {
+    // XHR (not fetch) so the user gets real progress feedback for large
+    // audio files. Returns the same {path, url (absolute), filename,
+    // duration, peaks} shape as the editor music upload.
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const formData = new FormData();
+        formData.append("audio", file);
+        xhr.open("POST", `${API_BASE}/export/music/${projectId}`);
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && typeof onProgress === "function") {
+                onProgress(Math.round((e.loaded / e.total) * 100));
+            }
+        };
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    const origin = API_BASE.replace(/\/api$/, "");
+                    data.url = origin + data.url;
+                    resolve(data);
+                } catch (e) {
+                    reject(new Error("Bad upload response"));
+                }
+            } else {
+                let msg = `Upload failed (${xhr.status})`;
+                try { msg = JSON.parse(xhr.responseText).detail || msg; } catch {}
+                reject(new Error(msg));
+            }
+        };
+        xhr.onerror = () => reject(new Error("Upload failed (network error)"));
+        xhr.send(formData);
+    });
+}
+
+export function getProjectMusicUrl(projectId, filename) {
+    return `${API_BASE}/export/music/${projectId}/${encodeURIComponent(filename)}`;
 }
 
 export async function uploadEditorMusic(projectId, file) {

@@ -184,8 +184,23 @@ async def reexport_meme(
     crop_left_pct: float = Form(0.0),
     crop_right_pct: float = Form(0.0),
     corner_radius: int = Form(0),
+    # ── Extended controls (meme editor parity) — all optional ─────────────
+    bg_mode: str = Form("color"),              # "color" | "blur"
+    font_family: str = Form("calibri"),
+    text_color: str = Form(""),
+    stroke_color: str = Form(""),
+    stroke_width: int = Form(0),
+    visual_filter: str = Form("none"),
+    trim_start: float = Form(0.0),
+    trim_end: float = Form(0.0),                # 0 = whole video
+    mirror_cyclic_enabled: bool = Form(False),
+    mirror_cyclic_interval: float = Form(5.0),
+    boost_contrast: bool = Form(False),
+    text_align: str = Form("left"),
 ):
-    """Re-export a meme with updated settings (no Gemini call). Supports crop + rounded corners."""
+    """Re-export a meme with updated settings (no Gemini call). Supports crop +
+    rounded corners + the extended editor controls (font/color/stroke, blur
+    background, visual filter, trim, anti-detect)."""
     from ..services.meme_service import export_meme_video, crop_video_pct
     batch = get_batch(batch_id)
     if not batch:
@@ -221,7 +236,27 @@ async def reexport_meme(
             video_path, meme_text, item["output_path"],
             batch["bg_color"], text_y=text_y, text_x=text_x, video_scale=video_scale,
             video_y=video_y, font_size=font_size, corner_radius=corner_radius,
+            bg_mode=bg_mode, font_family=font_family,
+            text_color=text_color, stroke_color=stroke_color, stroke_width=stroke_width,
+            visual_filter=visual_filter,
+            trim_start=trim_start, trim_end=trim_end,
+            mirror_cyclic_enabled=mirror_cyclic_enabled,
+            mirror_cyclic_interval=mirror_cyclic_interval,
+            boost_contrast=boost_contrast,
+            text_align=text_align,
         )
+        # Cache the chosen settings on the item so re-rendering preserves them
+        # and so the UI can show what was applied. Stored under `style_meta`
+        # to not collide with anything the meme service writes.
+        item["style_meta"] = {
+            "bg_mode": bg_mode, "font_family": font_family,
+            "text_color": text_color, "stroke_color": stroke_color, "stroke_width": stroke_width,
+            "visual_filter": visual_filter,
+            "trim_start": trim_start, "trim_end": trim_end,
+            "mirror_cyclic_enabled": mirror_cyclic_enabled,
+            "mirror_cyclic_interval": mirror_cyclic_interval,
+            "boost_contrast": boost_contrast,
+        }
         item["status"] = "ready"
     except Exception as e:
         item["status"] = "error"

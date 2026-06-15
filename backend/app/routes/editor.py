@@ -483,6 +483,56 @@ async def editor_overlay_file(project_id: str, filename: str):
     return FileResponse(path)
 
 
+@router.post("/{project_id}/broll")
+async def editor_upload_broll(project_id: str, video: UploadFile = File(...)):
+    """Upload a B-roll (picture-in-picture) video. Returns path + URL + duration.
+
+    Persists to projects/{id}/broll/. Probes duration so the frontend can
+    set a sensible default for broll_in / broll_out without a follow-up call.
+    """
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+
+    broll_dir = os.path.join(project.output_dir, "broll")
+    os.makedirs(broll_dir, exist_ok=True)
+    ext = os.path.splitext(video.filename or "")[1].lower() or ".mp4"
+    if ext not in (".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"):
+        ext = ".mp4"
+    fname = f"broll_{uuid.uuid4().hex[:8]}{ext}"
+    fpath = os.path.join(broll_dir, fname)
+    with open(fpath, "wb") as f:
+        shutil.copyfileobj(video.file, f)
+
+    # Probe duration so the UI can default broll_out = full length
+    try:
+        duration = video_service.get_video_duration(fpath)
+    except Exception:
+        duration = 0.0
+
+    return {
+        "path": fpath,
+        "url": f"/api/editor/{project_id}/broll/{fname}",
+        "filename": fname,
+        "duration": round(float(duration or 0.0), 3),
+    }
+
+
+@router.get("/{project_id}/broll/{filename}")
+async def editor_broll_file(project_id: str, filename: str):
+    """Serve an uploaded B-roll MP4 — used by the frontend <video> element."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = os.path.join(projects[project_id].output_dir, "broll", filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="B-roll not found")
+    return FileResponse(path)
+
+
 @router.post("/{project_id}/music")
 async def editor_upload_music(project_id: str, audio: UploadFile = File(...)):
     """Upload a background-music track for the editor. Returns server path + URL.

@@ -13,7 +13,7 @@ import {
   List, LayoutGrid, Clock, GripVertical, Check, Play, Pencil, RefreshCw,
   ZoomIn, Type, Wand2, SkipBack, SkipForward, Pause,
   Copy, AlertCircle, Loader2, X, Plus, Square, CheckCircle2, Crosshair,
-  Undo2, Redo2, FileText,
+  Undo2, Redo2, FileText, Trash2, Music2,
 } from "lucide-react";
 
 
@@ -1399,6 +1399,25 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   const [reanalyzingClip, setReanalyzingClip] = useState(null);
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
+  // ── Project-wide music state (Clips screen) ────────────────────────────
+  // ClipsStep affects the WHOLE PROJECT's music settings — i.e. all clips
+  // in the batch will use this when they export. For per-clip music
+  // overrides, the Visual Editor (Paso 3) still has the "Aplicar a" scope.
+  // These mirror the EditorStep state so the UX is consistent.
+  const [musicStyle, setMusicStyle] = useState({
+    music_path: null,
+    music_volume: 0.8,
+    original_volume: 1.0,
+    music_start: 0.0,
+    music_end: 0.0,
+  });
+  const [musicMeta, setMusicMeta] = useState(null);    // {url, name, duration, peaks}
+  const [uploadingMusic, setUploadingMusic] = useState(false);
+  const [musicUploadPct, setMusicUploadPct] = useState(0);
+  const [musicExpanded, setMusicExpanded] = useState(false);
+  const musicAudioRef = useRef(null);
+  const musicFileRef = useRef(null);
+
   // Spanish translation/export: per-clip translation data keyed by clip.id.
   // Each value is { caption_es, transcript_es, transcript_en }. Empty caption_es
   // means "not translated yet" (don't render the sub-row).
@@ -1536,13 +1555,93 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     }
   };
 
-  // Load existing creator_name from the project on mount.
+  // Load existing creator_name + music style from the project on mount. The
+  // music fields live on project.style; if a track is already saved we also
+  // build a musicMeta entry so the audio element + trim sliders render with
+  // the right limits.
   useEffect(() => {
     if (!projectId) return;
     api.getProject(projectId)
-      .then((p) => setCreatorName(p?.creator_name || ""))
+      .then((p) => {
+        setCreatorName(p?.creator_name || "");
+        const s = p?.style || {};
+        const next = {
+          music_path: s.music_path || null,
+          music_volume: typeof s.music_volume === "number" ? s.music_volume : 0.8,
+          original_volume: typeof s.original_volume === "number" ? s.original_volume : 1.0,
+          music_start: typeof s.music_start === "number" ? s.music_start : 0.0,
+          music_end: typeof s.music_end === "number" ? s.music_end : 0.0,
+        };
+        setMusicStyle(next);
+        if (next.music_path) {
+          const basename = String(next.music_path).split(/[\\/]/).pop();
+          setMusicMeta({
+            url: api.getProjectMusicUrl(projectId, basename),
+            name: basename,
+            duration: 0,
+            peaks: [],
+          });
+          setMusicExpanded(true);
+        }
+      })
       .catch(() => { /* project may not exist after backend restart */ });
   }, [projectId]);
+
+  // Persist the music style fields back to the project whenever they change.
+  // Skipped on the very first render (we read FROM the project then) to avoid
+  // a redundant save with defaults. Debounced 350ms so dragging a slider
+  // doesn't spam the backend.
+  const _musicFirstRunRef = useRef(true);
+  useEffect(() => {
+    if (!projectId) return;
+    if (_musicFirstRunRef.current) { _musicFirstRunRef.current = false; return; }
+    const t = setTimeout(() => {
+      // Fetch the latest project style, merge music fields, send back. We
+      // avoid clobbering other fields (caption, watermark, etc.) the user
+      // might have set in the Visual Editor.
+      api.getProject(projectId)
+        .then((p) => {
+          const merged = { ...(p?.style || {}), ...musicStyle };
+          return api.updateStyle(projectId, merged);
+        })
+        .catch((e) => console.warn("[music] save failed:", e));
+    }, 350);
+    return () => clearTimeout(t);
+  }, [projectId, musicStyle.music_path, musicStyle.music_volume, musicStyle.original_volume, musicStyle.music_start, musicStyle.music_end]);
+
+  // ── Music handlers (ClipsStep) ──────────────────────────────────────────
+  const handleMusicUpload = async (file) => {
+    if (!file || !projectId) return;
+    setUploadingMusic(true);
+    setMusicUploadPct(0);
+    try {
+      const res = await api.uploadProjectMusic(projectId, file, (pct) => setMusicUploadPct(pct));
+      setMusicMeta({
+        url: res.url, name: res.filename, duration: res.duration || 0,
+        peaks: res.peaks || [],
+      });
+      setMusicStyle((s) => ({
+        ...s,
+        music_path: res.path,
+        music_start: 0.0,
+        music_end: 0.0,
+      }));
+      setMusicExpanded(true);
+    } catch (e) {
+      alert(`Error subiendo música: ${e.message}`);
+    } finally {
+      setUploadingMusic(false);
+      setMusicUploadPct(0);
+    }
+  };
+
+  const handleMusicRemove = () => {
+    setMusicMeta(null);
+    setMusicStyle((s) => ({ ...s, music_path: null, music_start: 0, music_end: 0 }));
+    if (musicAudioRef.current) {
+      try { musicAudioRef.current.pause(); musicAudioRef.current.currentTime = 0; } catch (_) {}
+    }
+  };
 
   // Load which clips already have a cached Spanish version so the 🌐ES sub-row
   // shows up immediately on mount, AND grab the translated text so we can
@@ -1773,6 +1872,169 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
           />
         </div>
       )}
+
+      {/* ── 🎵 Música del proyecto ──────────────────────────────────────
+          Project-wide music — applies to every clip on export. Per-clip
+          overrides still live in the Visual Editor (Paso 3) under "Aplicar
+          a: Este clip". Collapsible so the clips list stays the focus. */}
+      <div style={{ padding: "12px 28px", borderBottom: "1px solid var(--st-line)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}
+             onClick={() => setMusicExpanded(v => !v)}>
+          <Music2 size={14} style={{ color: musicStyle.music_path ? "var(--st-accent)" : "var(--st-muted)" }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--st-text)" }}>
+            Música del proyecto
+          </span>
+          {musicStyle.music_path && musicMeta?.name && (
+            <span style={{
+              fontFamily: "var(--st-mono)", fontSize: 10.5, color: "var(--st-faint)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200,
+            }}>
+              {musicMeta.name}
+            </span>
+          )}
+          <div style={{ flex: 1 }} />
+          <ChevronDown size={15} style={{
+            color: "var(--st-faint)",
+            transform: musicExpanded ? "rotate(180deg)" : "none",
+            transition: "transform .15s",
+          }} />
+        </div>
+
+        {musicExpanded && (
+          <div style={{ marginTop: 10 }}>
+            {!musicStyle.music_path ? (
+              <>
+                <p style={{ fontSize: 11.5, color: "var(--st-muted)", margin: "0 0 8px", lineHeight: 1.5 }}>
+                  Subí una canción para que se mezcle en TODOS los clips al exportar. Para que un clip puntual tenga otra música o ninguna, usá el Visual Editor (Paso 3).
+                </p>
+                <button onClick={() => musicFileRef.current?.click()} disabled={uploadingMusic}
+                  className="btn btn-secondary"
+                  style={{ width: "100%", padding: "8px 0", fontSize: 12.5, justifyContent: "center" }}>
+                  {uploadingMusic
+                    ? `Subiendo… ${musicUploadPct}%`
+                    : <><Music2 size={13} /> Subir música</>}
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "8px 10px", marginBottom: 10,
+                  background: "var(--st-soft)", border: "1px solid var(--st-line)",
+                  borderRadius: 8,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 12, color: "var(--st-text)", fontWeight: 600,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>{musicMeta?.name || "Pista cargada"}</div>
+                    {musicMeta?.duration > 0 && (
+                      <div style={{ fontSize: 10.5, color: "var(--st-faint)", fontFamily: "var(--st-mono)" }}>
+                        {Math.floor(musicMeta.duration / 60)}:{String(Math.floor(musicMeta.duration % 60)).padStart(2, "0")}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={handleMusicRemove} title="Quitar música"
+                    style={{
+                      background: "transparent", border: "1px solid var(--st-border)",
+                      borderRadius: 6, color: "var(--st-muted)", padding: "4px 8px",
+                      fontSize: 11, cursor: "pointer",
+                    }}>
+                    Quitar
+                  </button>
+                </div>
+
+                {musicMeta?.url && (
+                  <audio
+                    ref={musicAudioRef}
+                    src={musicMeta.url}
+                    controls
+                    preload="metadata"
+                    style={{ width: "100%", height: 32, marginBottom: 12 }}
+                    onLoadedMetadata={(e) => {
+                      const d = e.currentTarget.duration;
+                      if (isFinite(d) && d > 0 && (!musicMeta.duration || Math.abs(musicMeta.duration - d) > 0.1)) {
+                        setMusicMeta((m) => m ? { ...m, duration: d } : m);
+                      }
+                    }}
+                  />
+                )}
+
+                {/* Volumes side-by-side to save vertical space here */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
+                  {[
+                    { label: "Vol música", value: musicStyle.music_volume, key: "music_volume", def: 0.8 },
+                    { label: "Vol original", value: musicStyle.original_volume, key: "original_volume", def: 1.0 },
+                  ].map(({ label, value, key, def }) => (
+                    <div key={key}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--st-muted)", marginBottom: 3 }}>
+                        <span>{label}</span>
+                        <span style={{ fontFamily: "var(--st-mono)", color: "var(--st-text)" }}>{Math.round(value * 100)}%</span>
+                      </div>
+                      <input type="range" min={0} max={2} step={0.05} value={value}
+                        onChange={(e) => setMusicStyle((s) => ({ ...s, [key]: parseFloat(e.target.value) }))}
+                        onDoubleClick={() => setMusicStyle((s) => ({ ...s, [key]: def }))}
+                        style={{ width: "100%" }}
+                        title="Doble click para resetear" />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Trim — only when we know the duration */}
+                {musicMeta?.duration > 0.5 && (
+                  <div style={{ padding: "8px 10px", background: "var(--st-soft)", border: "1px solid var(--st-line)", borderRadius: 8 }}>
+                    <div style={{ fontSize: 10.5, color: "var(--st-faint)", marginBottom: 6, fontFamily: "var(--st-mono)", letterSpacing: ".06em" }}>
+                      ↳ ¿QUÉ PARTE DE LA PISTA QUERÉS QUE SUENE?
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--st-muted)", marginBottom: 3 }}>
+                          <span>Empieza en</span>
+                          <span style={{ fontFamily: "var(--st-mono)", color: "var(--st-text)" }}>{(musicStyle.music_start || 0).toFixed(1)}s</span>
+                        </div>
+                        <input type="range" min={0} max={Math.max(0.5, musicMeta.duration - 0.1)} step={0.1}
+                          value={musicStyle.music_start || 0}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            setMusicStyle((s) => ({
+                              ...s,
+                              music_start: Math.min(v, (s.music_end || musicMeta.duration) - 0.1),
+                            }));
+                          }}
+                          style={{ width: "100%" }} />
+                      </div>
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--st-muted)", marginBottom: 3 }}>
+                          <span>Termina en</span>
+                          <span style={{ fontFamily: "var(--st-mono)", color: "var(--st-text)" }}>
+                            {(musicStyle.music_end || 0) === 0 ? "fin natural" : `${musicStyle.music_end.toFixed(1)}s`}
+                          </span>
+                        </div>
+                        <input type="range" min={0} max={musicMeta.duration} step={0.1}
+                          value={musicStyle.music_end || 0}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            setMusicStyle((s) => ({
+                              ...s,
+                              music_end: v > 0 ? Math.max(v, (s.music_start || 0) + 0.1) : 0,
+                            }));
+                          }}
+                          style={{ width: "100%" }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--st-faint)", marginTop: 4, fontFamily: "var(--st-mono)" }}>
+                      Termina en 0 → suena hasta el final natural de la canción
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      {/* Hidden file input for the music upload button */}
+      <input ref={musicFileRef} type="file" accept="audio/*" hidden
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleMusicUpload(f); e.target.value = ""; }} />
 
       {/* batch + model bar (only when clips selected) */}
       {selectedClips.size > 0 && (
@@ -2310,6 +2572,14 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     auto_reframe_follow_id: null,
     auto_reframe_padding: 0.30,
     auto_reframe_smoothing: 0.85,
+    // Background music — mixed in as a fast post-step on export. Follows the
+    // existing "Aplicar a" scope (Todos / Este clip / Varios), so a project
+    // can have a default track AND a specific clip can override with another.
+    music_path: null,
+    music_volume: 0.8,
+    original_volume: 1.0,
+    music_start: 0.0,     // music seconds — where the slice starts in source
+    music_end: 0.0,       // music seconds — 0 means "play to natural end"
   });
   const [exportStatus, setExportStatus] = useState("idle"); // idle, exporting, done
   const [exportMode, setExportMode] = useState("tiktok"); // "tiktok" | "instagram"
@@ -2336,6 +2606,18 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
   // call-to-action when the user toggles ES on an untranslated clip.
   const [editorTranslated, setEditorTranslated] = useState(new Set());
   const [translatingNow, setTranslatingNow] = useState(false);
+
+  // ── Music state (Visual Editor / Paso 3) ────────────────────────────────
+  // The actual path/volumes live on `style` (so they round-trip through
+  // persistStyle and follow the "Aplicar a" scope). These locals only hold
+  // ephemeral UI things: upload status, the preview audio element ref, the
+  // file's natural duration (for clamping the trim sliders), the waveform
+  // peaks for the visual bar, and a friendly display name.
+  const [uploadingMusic, setUploadingMusic] = useState(false);
+  const [musicUploadPct, setMusicUploadPct] = useState(0);
+  const [musicMeta, setMusicMeta] = useState(null);   // {url, name, duration, peaks}
+  const musicAudioRef = useRef(null);
+  const musicFileRef = useRef(null);
 
   // ── Auto-reframe per-clip state ─────────────────────────────────────────
   // Each AI clip has its own face_track because each clip covers a different
@@ -2396,6 +2678,62 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       setAnalyzeFacesError(e.message || "Falló el análisis de caras");
     } finally {
       setAnalyzingFacesId(null);
+    }
+  };
+
+  // ── Music handlers ──────────────────────────────────────────────────────
+  const handleMusicUpload = async (file) => {
+    if (!file || !projectId) return;
+    setUploadingMusic(true);
+    setMusicUploadPct(0);
+    try {
+      const res = await api.uploadProjectMusic(projectId, file, (pct) => setMusicUploadPct(pct));
+      setMusicMeta({
+        url: res.url, name: res.filename, duration: res.duration || 0,
+        peaks: res.peaks || [],
+      });
+      // Default trim = whole track. Persisted through the existing style effect.
+      setStyle((s) => ({
+        ...s,
+        music_path: res.path,
+        music_start: 0.0,
+        music_end: 0.0,
+      }));
+    } catch (e) {
+      alert(`Error subiendo música: ${e.message}`);
+    } finally {
+      setUploadingMusic(false);
+      setMusicUploadPct(0);
+    }
+  };
+
+  // Sync the local musicMeta when style.music_path changes (clip switch /
+  // scope change / project reload). If the path is set but we don't have the
+  // matching meta (e.g. backend restart, or the user switched to a clip whose
+  // override has a different track), derive a minimal entry from the path —
+  // the <audio> element will fill in duration via onLoadedMetadata so the
+  // trim sliders become available.
+  useEffect(() => {
+    if (!style.music_path) {
+      if (musicMeta) setMusicMeta(null);
+      return;
+    }
+    // Already matches?
+    const basename = String(style.music_path).split(/[\\/]/).pop();
+    if (musicMeta && musicMeta.url && musicMeta.url.includes(basename)) return;
+    setMusicMeta({
+      url: projectId ? api.getProjectMusicUrl(projectId, basename) : null,
+      name: basename,
+      duration: 0,
+      peaks: [],
+    });
+  }, [style.music_path, projectId]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleMusicRemove = () => {
+    setMusicMeta(null);
+    setStyle((s) => ({ ...s, music_path: null, music_start: 0, music_end: 0 }));
+    if (musicAudioRef.current) {
+      try { musicAudioRef.current.pause(); musicAudioRef.current.currentTime = 0; } catch (_) {}
     }
   };
 
@@ -2606,7 +2944,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y, style.mirror_cyclic_enabled, style.mirror_cyclic_interval, style.sway_enabled, style.sway_period, style.sway_amplitude, style.auto_reframe_enabled, style.auto_reframe_mode, style.auto_reframe_follow_id, style.auto_reframe_padding, style.auto_reframe_smoothing, previewLanguage, editorTranslated]);
+  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y, style.mirror_cyclic_enabled, style.mirror_cyclic_interval, style.sway_enabled, style.sway_period, style.sway_amplitude, style.auto_reframe_enabled, style.auto_reframe_mode, style.auto_reframe_follow_id, style.auto_reframe_padding, style.auto_reframe_smoothing, style.music_path, style.music_volume, style.original_volume, style.music_start, style.music_end, previewLanguage, editorTranslated]);
 
   // Poll progress
   useEffect(() => {
@@ -3214,6 +3552,128 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
 
             <div style={{ height: 6 }} />
 
+            {/* Música (background music post-mix). Follows the existing
+                "Aplicar a" scope, so a project can have a default track AND a
+                specific clip can override with another one. The persistStyle
+                effect picks up the music_* fields on style; on export,
+                mix_music_track runs as a fast post-step (video copied, only
+                audio re-mixed). Trim sliders pick which SLICE of the song
+                plays — handy when you want only a drop or a chorus. */}
+            <StSection icon={<Music2 size={14} />}>Música</StSection>
+            {!style.music_path ? (
+              <>
+                <p style={{ fontSize: 12, color: "var(--st-muted)", margin: "0 0 10px", lineHeight: 1.5 }}>
+                  Sumá una pista de fondo (MP3 / WAV / OGG). Se mezcla por encima del audio original cuando exportás.
+                </p>
+                <button onClick={() => musicFileRef.current?.click()} disabled={uploadingMusic}
+                  className="st-btn st-btn--ghost"
+                  style={{ width: "100%", justifyContent: "center", padding: "9px 0" }}>
+                  {uploadingMusic
+                    ? `Subiendo… ${musicUploadPct}%`
+                    : <><Music2 size={14} /> Subir música</>}
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "8px 10px", marginBottom: 12,
+                  background: "var(--st-soft)", border: "1px solid var(--st-line)",
+                  borderRadius: 8,
+                }}>
+                  <Music2 size={14} style={{ color: "var(--st-muted)", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 12, color: "var(--st-text)", fontWeight: 600,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>{musicMeta?.name || "Pista cargada"}</div>
+                    {musicMeta?.duration > 0 && (
+                      <div style={{ fontSize: 10.5, color: "var(--st-faint)", fontFamily: "var(--st-mono)" }}>
+                        {Math.floor(musicMeta.duration / 60)}:{String(Math.floor(musicMeta.duration % 60)).padStart(2, "0")}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={handleMusicRemove} title="Quitar música"
+                    style={{
+                      background: "transparent", border: "1px solid var(--st-border)",
+                      borderRadius: 6, color: "var(--st-muted)", padding: "4px 8px",
+                      fontSize: 11, cursor: "pointer",
+                    }}>
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+
+                {musicMeta?.url && (
+                  <audio
+                    ref={musicAudioRef}
+                    src={musicMeta.url}
+                    controls
+                    preload="metadata"
+                    style={{ width: "100%", height: 32, marginBottom: 14 }}
+                    onLoadedMetadata={(e) => {
+                      // Pick up the source duration once the browser knows it,
+                      // so the trim sliders can clamp correctly even when the
+                      // backend probe came back empty (e.g. reload after the
+                      // server restarted).
+                      const d = e.currentTarget.duration;
+                      if (isFinite(d) && d > 0 && (!musicMeta.duration || Math.abs(musicMeta.duration - d) > 0.1)) {
+                        setMusicMeta((m) => m ? { ...m, duration: d } : m);
+                      }
+                    }}
+                  />
+                )}
+
+                <StSlider label="Volumen música" display={`${Math.round((style.music_volume ?? 0.8) * 100)}%`}
+                  min={0} max={2} step={0.05} value={style.music_volume ?? 0.8}
+                  onChange={(e) => setStyle((s) => ({ ...s, music_volume: parseFloat(e.target.value) }))}
+                  onReset={() => setStyle((s) => ({ ...s, music_volume: 0.8 }))} />
+                <StSlider label="Volumen original (video)" display={`${Math.round((style.original_volume ?? 1.0) * 100)}%`}
+                  min={0} max={2} step={0.05} value={style.original_volume ?? 1.0}
+                  onChange={(e) => setStyle((s) => ({ ...s, original_volume: parseFloat(e.target.value) }))}
+                  onReset={() => setStyle((s) => ({ ...s, original_volume: 1.0 }))} />
+
+                {/* Trim — only meaningful when we know the source duration. */}
+                {musicMeta?.duration > 0.5 && (
+                  <div style={{ marginTop: 4, padding: 10, background: "var(--st-soft)", borderRadius: 8, border: "1px solid var(--st-line)" }}>
+                    <div style={{ fontSize: 10.5, color: "var(--st-faint)", marginBottom: 6, fontFamily: "var(--st-mono)", letterSpacing: ".06em" }}>
+                      ↳ ¿QUÉ PARTE DE LA PISTA QUERÉS QUE SUENE?
+                    </div>
+                    <StSlider label="Empieza en" display={`${(style.music_start ?? 0).toFixed(1)}s`}
+                      min={0} max={Math.max(0.5, musicMeta.duration - 0.1)} step={0.1}
+                      value={style.music_start ?? 0}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setStyle((s) => ({
+                          ...s,
+                          music_start: Math.min(v, (s.music_end || musicMeta.duration) - 0.1),
+                        }));
+                      }}
+                      onReset={() => setStyle((s) => ({ ...s, music_start: 0 }))} />
+                    <StSlider label="Termina en" display={(style.music_end ?? 0) === 0 ? "fin natural" : `${style.music_end.toFixed(1)}s`}
+                      min={0} max={musicMeta.duration} step={0.1}
+                      value={style.music_end ?? 0}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setStyle((s) => ({
+                          ...s,
+                          music_end: v > 0 ? Math.max(v, (s.music_start || 0) + 0.1) : 0,
+                        }));
+                      }}
+                      onReset={() => setStyle((s) => ({ ...s, music_end: 0 }))} />
+                    <div style={{ fontSize: 10, color: "var(--st-faint)", marginTop: 3, fontFamily: "var(--st-mono)" }}>
+                      Termina en 0 → suena hasta el final natural de la canción
+                    </div>
+                  </div>
+                )}
+
+                <p style={{ fontSize: 10.5, color: "var(--st-faint)", margin: "10px 0 0", lineHeight: 1.5 }}>
+                  El "Aplicar a" de arriba decide a qué clips se aplica esta música — Todos, Este clip, o Varios.
+                </p>
+              </>
+            )}
+
+            <div style={{ height: 10 }} />
+
             {/* Auto-encuadre (face tracking) — per-clip.
                 Each AI clip needs its own face analysis since each covers a
                 different range of the source video. We key UI state by
@@ -3577,6 +4037,11 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
           }}
         />
       )}
+
+      {/* Hidden file input for music upload — triggered by the "Subir música"
+          button in the Música section of the inspector. */}
+      <input ref={musicFileRef} type="file" accept="audio/*" hidden
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleMusicUpload(f); e.target.value = ""; }} />
 
       {/* Inline caption-text editor — Enter inserts a hard line break (\n)
           that the PIL renderer respects when laying out the white box. */}
@@ -4924,6 +5389,32 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
   const [editingText, setEditingText] = useState(false);
   const [customText, setCustomText] = useState("");
 
+  // ── Extended editor controls (parity with Visual Editor) ───────────────
+  // All default to "preserve the old meme look" so cards that never open
+  // the Ajustes panel come out identical to before.
+  const [bgMode, setBgMode] = useState("color");          // "color" | "blur"
+  const [fontFamily, setFontFamily] = useState("calibri");
+  const [textColor, setTextColor] = useState("");         // "" = derive from bg
+  const [strokeColor, setStrokeColor] = useState("#000000");
+  const [strokeWidth, setStrokeWidth] = useState(0);
+  // Text horizontal alignment — "left" preserves the legacy meme look,
+  // "center" is what most users actually want for memes. Default left here
+  // so existing cards don't shift; the picker lets the user switch.
+  const [textAlign, setTextAlign] = useState("left");     // "left" | "center" | "right"
+  const [visualFilter, setVisualFilter] = useState("none");
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [mirrorCyclic, setMirrorCyclic] = useState(false);
+  const [boostContrast, setBoostContrast] = useState(false);
+  // Live edit overlay over the baked video preview:
+  // - showGuides: dashed cross-hair at center
+  // - the ghost text follows textX/textY and is draggable to update them.
+  // The drag math reads previewBoxRef.getBoundingClientRect() so the math
+  // stays accurate regardless of the actual rendered preview size.
+  const [showGuides, setShowGuides] = useState(false);
+  const memePreviewRef = useRef(null);
+  const memeDragRef = useRef(null);   // {startX, startY, startTextX, startTextY}
+
   // Sync global values into local state
   useEffect(() => {
     setCropTopPct(globalCropTopPct);
@@ -4949,10 +5440,56 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
     setFontSize(globalPreset.fontSize);
   }, [globalPreset]);
 
+  // Drag the ghost-text overlay on the preview to update textX/textY in real
+  // time. Listener lives at window level so the drag survives leaving the
+  // text element (mouse can move faster than React re-renders).
+  useEffect(() => {
+    const onMove = (e) => {
+      const d = memeDragRef.current;
+      if (!d) return;
+      const box = memePreviewRef.current;
+      if (!box) return;
+      const rect = box.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const dx = (e.clientX - d.startX) / rect.width;
+      const dy = (e.clientY - d.startY) / rect.height;
+      // Clamp to the same ranges as the sliders so the result is always valid.
+      // `axis: "y"` skips the X update (used by the horizontal text-row
+      // handle); without it, both axes update.
+      if (d.axis !== "y") setTextX(Math.max(0.02, Math.min(0.95, d.startTextX + dx)));
+      if (d.axis !== "x") setTextY(Math.max(0.02, Math.min(0.95, d.startTextY + dy)));
+    };
+    const onUp = () => { memeDragRef.current = null; };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, []);
+
   const handleReexport = async () => {
     setReexporting(true);
     try {
-      await api.reexportMeme(batchId, index, textY, textX, videoScale, videoY, fontSize, customText, cropTopPct / 100, cropBottomPct / 100, cornerRadius, cropLeftPct / 100, cropRightPct / 100);
+      await api.reexportMeme(
+        batchId, index, textY, textX, videoScale, videoY, fontSize, customText,
+        cropTopPct / 100, cropBottomPct / 100, cornerRadius,
+        cropLeftPct / 100, cropRightPct / 100,
+        {
+          bg_mode: bgMode,
+          font_family: fontFamily,
+          text_color: textColor,
+          stroke_color: strokeColor,
+          stroke_width: strokeWidth,
+          visual_filter: visualFilter,
+          trim_start: trimStart,
+          trim_end: trimEnd,
+          mirror_cyclic_enabled: mirrorCyclic,
+          mirror_cyclic_interval: 5.0,
+          boost_contrast: boostContrast,
+          text_align: textAlign,
+        },
+      );
       setBust(Date.now());
       setEditingText(false);
     } catch (e) {
@@ -5105,11 +5642,117 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
         </div>
       )}
 
-      {/* Video preview */}
+      {/* Video preview — wraps the baked <video> with an interactive layer:
+          a dashed centre cross-hair (toggle) and a "ghost text" at the current
+          textX/textY that the user can drag to update those sliders. The text
+          you see DURING drag is the SAME text that will be baked on the next
+          re-export, so positioning is WYSIWYG. The actual baked text in the
+          video below stays put until you click "Re-exportar". */}
       {isReady && showVideo && (
         <div style={{ padding: "0 14px 14px" }}>
-          <video key={bust} src={api.getMemeDownloadUrl(batchId, index, bust)} controls
-            style={{ width: "100%", maxHeight: 300, borderRadius: 9, background: "#000", display: "block" }} />
+          {/* Edit toolbar: always visible while Preview is open so the user
+              can toggle Guías / read the drag hint without first opening the
+              Ajustes panel. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <button onClick={() => setShowGuides(g => !g)}
+              title="Líneas de guía en el centro"
+              className="st-btn st-btn--ghost"
+              style={{
+                padding: "4px 9px", fontSize: 11,
+                border: `1px solid ${showGuides ? "var(--st-accent)" : "var(--st-border)"}`,
+                background: showGuides ? "var(--st-soft)" : "transparent",
+                color: showGuides ? "var(--st-text)" : "var(--st-muted)",
+              }}>
+              <Crosshair size={11} /> Guías
+            </button>
+            <span style={{ fontSize: 10.5, color: "var(--st-faint)", fontFamily: "var(--st-mono)" }}>
+              Arrastrá la línea dorada para altura · usá "Alineación" en Ajustes para centrar
+            </span>
+          </div>
+          <div ref={memePreviewRef} style={{
+            // Wrapper LOCKED to the meme canvas 9:16 aspect so cqw lines up
+            // with the actual displayed video width. Without this, the
+            // wrapper was full column width but the video kept its 9:16
+            // shape inside — leaving black bars and making the ghost-text
+            // overlay (which uses cqw) ~2× bigger than the baked text.
+            position: "relative",
+            width: "min(100%, 220px)",
+            aspectRatio: "9 / 16",
+            margin: "0 auto",
+            borderRadius: 9, overflow: "hidden", background: "#000",
+            containerType: "inline-size",
+          }}>
+            <video key={bust} src={api.getMemeDownloadUrl(batchId, index, bust)} controls
+              style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 9, background: "#000", display: "block" }} />
+
+            {/* Centre guides */}
+            {showGuides && (
+              <>
+                <div style={{
+                  position: "absolute", left: "50%", top: 0, bottom: 0,
+                  width: 0, borderLeft: "1px dashed var(--st-accent, #e6c270)",
+                  pointerEvents: "none", zIndex: 5, opacity: 0.7,
+                }} />
+                <div style={{
+                  position: "absolute", top: "50%", left: 0, right: 0,
+                  height: 0, borderTop: "1px dashed var(--st-accent, #e6c270)",
+                  pointerEvents: "none", zIndex: 5, opacity: 0.7,
+                }} />
+                <span style={{
+                  position: "absolute", left: "50%", top: "50%",
+                  transform: "translate(-50%, -50%)",
+                  fontFamily: "var(--st-mono)", fontSize: 9, color: "var(--st-on-accent)",
+                  background: "var(--st-accent, #e6c270)", padding: "1px 5px", borderRadius: 4,
+                  pointerEvents: "none", zIndex: 6,
+                }}>centro</span>
+              </>
+            )}
+
+            {/* Horizontal line at the current textY — marks WHERE the row of
+                text will land vertically. Drag it up/down to change textY.
+                No more confusing "POS" dot; the user just sees a thin gold
+                line aligned with the future text row. */}
+            <div
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                memeDragRef.current = {
+                  startX: e.clientX, startY: e.clientY,
+                  startTextX: textX, startTextY: textY,
+                  axis: "y",   // only update textY for this handle
+                };
+              }}
+              title="Arrastrá arriba/abajo para mover la altura del texto"
+              style={{
+                position: "absolute",
+                left: 0, right: 0,
+                top: `${textY * 100}%`,
+                height: 12,
+                marginTop: -6,            // centre the hit-area on the line
+                cursor: "ns-resize",
+                touchAction: "none",
+                zIndex: 7,
+                display: "grid", placeItems: "center",
+              }}
+            >
+              <div style={{
+                width: "92%", height: 0,
+                borderTop: "2px dashed var(--st-accent, #e6c270)",
+                pointerEvents: "none",
+              }} />
+              <span style={{
+                position: "absolute", left: "50%", top: "50%",
+                transform: "translate(-50%, -50%)",
+                fontFamily: "var(--st-mono)", fontSize: 9, fontWeight: 700,
+                color: "#15130e",
+                background: "var(--st-accent, #e6c270)",
+                padding: "1px 5px", borderRadius: 4,
+                pointerEvents: "none",
+                whiteSpace: "nowrap",
+                boxShadow: "0 1px 3px rgba(0,0,0,.5)",
+              }}>altura del texto</span>
+            </div>
+          </div>
         </div>
       )}
 
@@ -5159,7 +5802,146 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
                 <input type="range" min={min} max={max} step={step} value={value} onChange={e => setValue(e.target.value)} style={{ width: "100%" }} />
               </div>
             ))}
-            <button onClick={handleReexport} disabled={reexporting} className="st-btn st-btn--primary" style={{ width: "100%", justifyContent: "center", padding: "10px 0", marginTop: 4 }}>
+
+            {/* ── Tipografía ─────────────────────────────────────────── */}
+            <div style={{ marginTop: 14, padding: 12, background: "var(--st-soft)", borderRadius: 9, border: "1px solid var(--st-line)" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--st-text)", marginBottom: 10, letterSpacing: ".05em", textTransform: "uppercase" }}>Texto</div>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: "var(--st-muted)", marginBottom: 4 }}>Fuente</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+                  {[["calibri", "Calibri"], ["arial_black", "Arial Black"], ["trebuchet", "Trebuchet"], ["impact", "Impact"]].map(([k, label]) => {
+                    const on = fontFamily === k;
+                    return (
+                      <button key={k} onClick={() => setFontFamily(k)} style={{
+                        fontSize: 11, padding: "5px 0",
+                        background: on ? "var(--st-accent)" : "transparent",
+                        color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                        border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                        borderRadius: 5, cursor: "pointer",
+                      }}>{label}</button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Text alignment — this is what most users actually want for
+                  "centrar el texto". Left preserves the old look. */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: "var(--st-muted)", marginBottom: 4 }}>Alineación horizontal</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
+                  {[["left", "⬅ Izquierda"], ["center", "↔ Centro"], ["right", "Derecha ➡"]].map(([k, label]) => {
+                    const on = textAlign === k;
+                    return (
+                      <button key={k} onClick={() => setTextAlign(k)} style={{
+                        fontSize: 11, padding: "6px 0",
+                        background: on ? "var(--st-accent)" : "transparent",
+                        color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                        border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                        borderRadius: 5, cursor: "pointer", fontWeight: 600,
+                      }}>{label}</button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <label style={{ flex: 1, fontSize: 11, color: "var(--st-muted)" }}>
+                  <span style={{ display: "block", marginBottom: 3 }}>Color texto</span>
+                  <input type="color" value={textColor || "#ffffff"} onChange={e => setTextColor(e.target.value)}
+                    style={{ width: "100%", height: 28, border: "1px solid var(--st-border)", borderRadius: 5, background: "transparent" }} />
+                </label>
+                <label style={{ flex: 1, fontSize: 11, color: "var(--st-muted)" }}>
+                  <span style={{ display: "block", marginBottom: 3 }}>Color borde</span>
+                  <input type="color" value={strokeColor} onChange={e => setStrokeColor(e.target.value)}
+                    style={{ width: "100%", height: 28, border: "1px solid var(--st-border)", borderRadius: 5, background: "transparent" }} />
+                </label>
+              </div>
+              <div style={{ marginBottom: 2 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--st-muted)", marginBottom: 4 }}>
+                  <span>Grosor borde</span><span style={{ fontFamily: "var(--st-mono)", color: "var(--st-text)" }}>{strokeWidth}px</span>
+                </div>
+                <input type="range" min={0} max={12} step={1} value={strokeWidth} onChange={e => setStrokeWidth(parseInt(e.target.value))} style={{ width: "100%" }} />
+              </div>
+            </div>
+
+            {/* ── Fondo + filtro ─────────────────────────────────────── */}
+            <div style={{ marginTop: 10, padding: 12, background: "var(--st-soft)", borderRadius: 9, border: "1px solid var(--st-line)" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--st-text)", marginBottom: 10, letterSpacing: ".05em", textTransform: "uppercase" }}>Fondo y filtro</div>
+              <div style={{ fontSize: 11, color: "var(--st-muted)", marginBottom: 4 }}>Fondo</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginBottom: 10 }}>
+                {[["color", "🎨 Color"], ["blur", "🌫 Blur del video"]].map(([k, label]) => {
+                  const on = bgMode === k;
+                  return (
+                    <button key={k} onClick={() => setBgMode(k)} style={{
+                      fontSize: 11.5, padding: "6px 0",
+                      background: on ? "var(--st-accent)" : "transparent",
+                      color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                      border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                      borderRadius: 5, cursor: "pointer",
+                    }}>{label}</button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--st-muted)", marginBottom: 4 }}>Filtro</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
+                {[["none", "Ninguno"], ["cinematic", "Cine"], ["warm", "Cálido"], ["vivid", "Vivo"], ["moody", "Moody"], ["bw", "B/N"]].map(([k, label]) => {
+                  const on = visualFilter === k;
+                  return (
+                    <button key={k} onClick={() => setVisualFilter(k)} style={{
+                      fontSize: 11, padding: "5px 0",
+                      background: on ? "var(--st-accent)" : "transparent",
+                      color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                      border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                      borderRadius: 5, cursor: "pointer",
+                    }}>{label}</button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── Trim del video fuente ──────────────────────────────── */}
+            <div style={{ marginTop: 10, padding: 12, background: "var(--st-soft)", borderRadius: 9, border: "1px solid var(--st-line)" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--st-text)", marginBottom: 10, letterSpacing: ".05em", textTransform: "uppercase" }}>Trim · usá solo el pedazo gracioso</div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--st-muted)", marginBottom: 4 }}>
+                  <span>Inicio</span><span style={{ fontFamily: "var(--st-mono)", color: "var(--st-text)" }}>{trimStart.toFixed(1)}s</span>
+                </div>
+                <input type="range" min={0} max={30} step={0.1} value={trimStart}
+                  onChange={e => setTrimStart(Math.min(parseFloat(e.target.value), trimEnd > 0 ? trimEnd - 0.1 : 99))}
+                  style={{ width: "100%" }} />
+              </div>
+              <div style={{ marginBottom: 2 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--st-muted)", marginBottom: 4 }}>
+                  <span>Fin</span><span style={{ fontFamily: "var(--st-mono)", color: "var(--st-text)" }}>{trimEnd === 0 ? "fin del video" : `${trimEnd.toFixed(1)}s`}</span>
+                </div>
+                <input type="range" min={0} max={60} step={0.1} value={trimEnd}
+                  onChange={e => setTrimEnd(parseFloat(e.target.value))}
+                  style={{ width: "100%" }} />
+                <div style={{ fontSize: 10, color: "var(--st-faint)", marginTop: 3, fontFamily: "var(--st-mono)" }}>
+                  Fin = 0 → hasta el final natural
+                </div>
+              </div>
+            </div>
+
+            {/* ── Anti-detect ────────────────────────────────────────── */}
+            <div style={{ marginTop: 10, padding: 12, background: "var(--st-soft)", borderRadius: 9, border: "1px solid var(--st-line)" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--st-text)", marginBottom: 8, letterSpacing: ".05em", textTransform: "uppercase" }}>🛡 Anti-detect</div>
+              {[
+                { label: "Espejo cíclico", value: mirrorCyclic, setValue: setMirrorCyclic, hint: "El video se invierte cada 5s" },
+                { label: "Boost contraste", value: boostContrast, setValue: setBoostContrast, hint: "Sube contraste + saturación" },
+              ].map(({ label, value, setValue, hint }) => (
+                <label key={label} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", cursor: "pointer" }}>
+                  <input type="checkbox" checked={value} onChange={e => setValue(e.target.checked)}
+                    style={{ accentColor: "var(--st-accent)", width: 14, height: 14 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, color: "var(--st-text)" }}>{label}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--st-faint)" }}>{hint}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <button onClick={handleReexport} disabled={reexporting} className="st-btn st-btn--primary" style={{ width: "100%", justifyContent: "center", padding: "10px 0", marginTop: 12 }}>
               {reexporting ? "Re-exportando…" : "Re-exportar con estos ajustes"}
             </button>
           </div>
@@ -5205,6 +5987,15 @@ function MemeStep() {
   const [gVideoY, setGVideoY] = useState(0.55);
   const [gVideoScale, setGVideoScale] = useState(0.9);
   const [gFontSize, setGFontSize] = useState(65);
+  // Extended global controls (apply to all)
+  const [gBgMode, setGBgMode] = useState("color");
+  const [gFontFamily, setGFontFamily] = useState("calibri");
+  const [gTextColor, setGTextColor] = useState("");
+  const [gStrokeColor, setGStrokeColor] = useState("#000000");
+  const [gStrokeWidth, setGStrokeWidth] = useState(0);
+  const [gVisualFilter, setGVisualFilter] = useState("none");
+  const [gMirrorCyclic, setGMirrorCyclic] = useState(false);
+  const [gBoostContrast, setGBoostContrast] = useState(false);
   const [gCropTopPct, setGCropTopPct] = useState(0);
   const [gCropBottomPct, setGCropBottomPct] = useState(0);
   const [gCropLeftPct, setGCropLeftPct] = useState(0);
@@ -5352,8 +6143,23 @@ function MemeStep() {
     if (!batch) return;
     setReexportingAll(true);
     const readyItems = batch.items.map((item, i) => ({ item, i })).filter(({ item }) => item.status === "ready");
+    const extras = {
+      bg_mode: gBgMode,
+      font_family: gFontFamily,
+      text_color: gTextColor,
+      stroke_color: gStrokeColor,
+      stroke_width: gStrokeWidth,
+      visual_filter: gVisualFilter,
+      mirror_cyclic_enabled: gMirrorCyclic,
+      mirror_cyclic_interval: 5.0,
+      boost_contrast: gBoostContrast,
+    };
     await Promise.all(readyItems.map(({ i }) =>
-      api.reexportMeme(batchId, i, gTextY, gTextX, gVideoScale, gVideoY, gFontSize, "", gCropTopPct / 100, gCropBottomPct / 100, gCornerRadius, gCropLeftPct / 100, gCropRightPct / 100).catch(() => {})
+      api.reexportMeme(
+        batchId, i, gTextY, gTextX, gVideoScale, gVideoY, gFontSize, "",
+        gCropTopPct / 100, gCropBottomPct / 100, gCornerRadius,
+        gCropLeftPct / 100, gCropRightPct / 100, extras,
+      ).catch(() => {})
     ));
     setReexportingAll(false);
   };
@@ -5639,7 +6445,101 @@ function MemeStep() {
                         <input type="range" min={min} max={max} step={step} value={value} onChange={e => setValue(e.target.value)} style={{ width: "100%" }} />
                       </div>
                     ))}
-                    <button onClick={handleReexportAll} disabled={reexportingAll} className="st-btn st-btn--primary" style={{ width: "100%", justifyContent: "center", padding: "10px 0", marginTop: 4 }}>
+
+                    {/* Tipografía global */}
+                    <div style={{ marginTop: 14, padding: 12, background: "var(--st-soft)", borderRadius: 9, border: "1px solid var(--st-line)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--st-text)", marginBottom: 10, letterSpacing: ".05em", textTransform: "uppercase" }}>Texto</div>
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 11.5, color: "var(--st-muted)", marginBottom: 4 }}>Fuente</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+                          {[["calibri", "Calibri"], ["arial_black", "Arial Black"], ["trebuchet", "Trebuchet"], ["impact", "Impact"]].map(([k, label]) => {
+                            const on = gFontFamily === k;
+                            return (
+                              <button key={k} onClick={() => setGFontFamily(k)} style={{
+                                fontSize: 11, padding: "5px 0",
+                                background: on ? "var(--st-accent)" : "transparent",
+                                color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                                border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                                borderRadius: 5, cursor: "pointer",
+                              }}>{label}</button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                        <label style={{ flex: 1, fontSize: 11.5, color: "var(--st-muted)" }}>
+                          <span style={{ display: "block", marginBottom: 3 }}>Color texto</span>
+                          <input type="color" value={gTextColor || "#ffffff"} onChange={e => setGTextColor(e.target.value)}
+                            style={{ width: "100%", height: 28, border: "1px solid var(--st-border)", borderRadius: 5, background: "transparent" }} />
+                        </label>
+                        <label style={{ flex: 1, fontSize: 11.5, color: "var(--st-muted)" }}>
+                          <span style={{ display: "block", marginBottom: 3 }}>Color borde</span>
+                          <input type="color" value={gStrokeColor} onChange={e => setGStrokeColor(e.target.value)}
+                            style={{ width: "100%", height: 28, border: "1px solid var(--st-border)", borderRadius: 5, background: "transparent" }} />
+                        </label>
+                      </div>
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--st-muted)", marginBottom: 4 }}>
+                          <span>Grosor borde</span><span style={{ fontFamily: "var(--st-mono)", color: "var(--st-text)" }}>{gStrokeWidth}px</span>
+                        </div>
+                        <input type="range" min={0} max={12} step={1} value={gStrokeWidth} onChange={e => setGStrokeWidth(parseInt(e.target.value))} style={{ width: "100%" }} />
+                      </div>
+                    </div>
+
+                    {/* Fondo + filtro global */}
+                    <div style={{ marginTop: 10, padding: 12, background: "var(--st-soft)", borderRadius: 9, border: "1px solid var(--st-line)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--st-text)", marginBottom: 10, letterSpacing: ".05em", textTransform: "uppercase" }}>Fondo y filtro</div>
+                      <div style={{ fontSize: 11.5, color: "var(--st-muted)", marginBottom: 4 }}>Fondo</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginBottom: 10 }}>
+                        {[["color", "🎨 Color"], ["blur", "🌫 Blur del video"]].map(([k, label]) => {
+                          const on = gBgMode === k;
+                          return (
+                            <button key={k} onClick={() => setGBgMode(k)} style={{
+                              fontSize: 11.5, padding: "6px 0",
+                              background: on ? "var(--st-accent)" : "transparent",
+                              color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                              border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                              borderRadius: 5, cursor: "pointer",
+                            }}>{label}</button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--st-muted)", marginBottom: 4 }}>Filtro</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
+                        {[["none", "Ninguno"], ["cinematic", "Cine"], ["warm", "Cálido"], ["vivid", "Vivo"], ["moody", "Moody"], ["bw", "B/N"]].map(([k, label]) => {
+                          const on = gVisualFilter === k;
+                          return (
+                            <button key={k} onClick={() => setGVisualFilter(k)} style={{
+                              fontSize: 11, padding: "5px 0",
+                              background: on ? "var(--st-accent)" : "transparent",
+                              color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                              border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                              borderRadius: 5, cursor: "pointer",
+                            }}>{label}</button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Anti-detect global */}
+                    <div style={{ marginTop: 10, padding: 12, background: "var(--st-soft)", borderRadius: 9, border: "1px solid var(--st-line)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--st-text)", marginBottom: 8, letterSpacing: ".05em", textTransform: "uppercase" }}>🛡 Anti-detect</div>
+                      {[
+                        { label: "Espejo cíclico", value: gMirrorCyclic, setValue: setGMirrorCyclic, hint: "El video se invierte cada 5s" },
+                        { label: "Boost contraste", value: gBoostContrast, setValue: setGBoostContrast, hint: "Sube contraste + saturación" },
+                      ].map(({ label, value, setValue, hint }) => (
+                        <label key={label} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", cursor: "pointer" }}>
+                          <input type="checkbox" checked={value} onChange={e => setValue(e.target.checked)}
+                            style={{ accentColor: "var(--st-accent)", width: 14, height: 14 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, color: "var(--st-text)" }}>{label}</div>
+                            <div style={{ fontSize: 10.5, color: "var(--st-faint)" }}>{hint}</div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+
+                    <button onClick={handleReexportAll} disabled={reexportingAll} className="st-btn st-btn--primary" style={{ width: "100%", justifyContent: "center", padding: "10px 0", marginTop: 12 }}>
                       {reexportingAll ? "Re-exportando todos…" : "Re-exportar todos con estos ajustes"}
                     </button>
                   </div>
@@ -6935,6 +7835,18 @@ function EditorMode({ onExit }) {
   const previewBoxRef = useRef(null);  // the 9:16 preview container (for drag math)
   const overlayDragRef = useRef(null); // {mode:'move'|'resize', startX, startY, ...}
 
+  // ─── Video overlays (B-roll picture-in-picture) state ─────────────────────
+  // Each: {url, path, x, y, scale, opacity, start, end, broll_in, broll_out,
+  // audio_mode, name, duration}. The full source duration is cached from upload
+  // so the timing sliders can clamp properly.
+  const [brolls, setBrolls] = useState([]);
+  const [selectedBrollIdx, setSelectedBrollIdx] = useState(null);
+  const [uploadingBroll, setUploadingBroll] = useState(false);
+  const [brollUploadPct, setBrollUploadPct] = useState(0);
+  const brollFileRef = useRef(null);
+  // Refs to each B-roll <video> element so we can sync playback to the playhead
+  const brollVideoRefs = useRef({});
+
   // ─── Subtitles state ────────────────────────────────────────────────────
   const [subtitlesOn, setSubtitlesOn] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -7384,6 +8296,44 @@ function EditorMode({ onExit }) {
     }
   };
 
+  // ── B-roll handlers ────────────────────────────────────────────────────
+  const handleBrollUpload = async (file) => {
+    if (!file || !projectId) return;
+    setUploadingBroll(true);
+    setBrollUploadPct(0);
+    try {
+      const res = await api.uploadEditorBroll(projectId, file, (pct) => setBrollUploadPct(pct));
+      const dur = Math.max(0.5, Number(res.duration) || 5);
+      const visible = Math.min(dur, Math.max(2, Math.round(outputDuration * 0.25) || 5));
+      const newBroll = {
+        url: res.url, path: res.path, name: res.filename,
+        duration: dur,
+        x: 0.80, y: 0.18, scale: 0.30, opacity: 1.0,
+        start: 0, end: visible,
+        broll_in: 0, broll_out: Math.min(dur, visible),
+        audio_mode: "mute",
+      };
+      setBrolls((prev) => {
+        const next = [...prev, newBroll];
+        setSelectedBrollIdx(next.length - 1);
+        return next;
+      });
+    } catch (e) {
+      alert(`Error subiendo B-roll: ${e.message}`);
+    } finally {
+      setUploadingBroll(false);
+      setBrollUploadPct(0);
+    }
+  };
+
+  const updateBroll = (idx, patch) => {
+    setBrolls((prev) => prev.map((b, i) => (i === idx ? { ...b, ...patch } : b)));
+  };
+  const removeBroll = (idx) => {
+    setBrolls((prev) => prev.filter((_, i) => i !== idx));
+    setSelectedBrollIdx((cur) => (cur === idx ? null : cur > idx ? cur - 1 : cur));
+  };
+
   const updateOverlay = (idx, patch) => {
     setOverlays((prev) => prev.map((o, i) => (i === idx ? { ...o, ...patch } : o)));
   };
@@ -7407,6 +8357,12 @@ function EditorMode({ onExit }) {
       path: o.path, x: o.x, y: o.y, scale: o.scale,
       start: o.start, end: o.end, opacity: o.opacity,
     })),
+    video_overlays: brolls.map((b) => ({
+      path: b.path, x: b.x, y: b.y, scale: b.scale, opacity: b.opacity,
+      start: b.start, end: b.end,
+      broll_in: b.broll_in, broll_out: b.broll_out,
+      audio_mode: b.audio_mode,
+    })),
   });
 
   // Single debounced persist whenever ANY style-affecting field changes.
@@ -7416,7 +8372,7 @@ function EditorMode({ onExit }) {
       api.updateStyle(projectId, buildEditorStyle()).catch((e) => console.error("style save failed:", e));
     }, 350);
     return () => clearTimeout(t);
-  }, [aspectRatio, bgStyle, visualFilter, music, subtitlesOn, subStyle, subSize, subY, overlays]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [aspectRatio, bgStyle, visualFilter, music, subtitlesOn, subStyle, subSize, subY, overlays, brolls]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drag / resize an overlay on the preview (mouse)
   useEffect(() => {
@@ -7435,6 +8391,13 @@ function EditorMode({ onExit }) {
         });
       } else if (d.mode === "resize") {
         updateOverlay(d.idx, { scale: Math.max(0.05, Math.min(1.5, d.oscale + dx)) });
+      } else if (d.mode === "moveBroll") {
+        updateBroll(d.idx, {
+          x: Math.max(0, Math.min(1, d.ox + dx)),
+          y: Math.max(0, Math.min(1, d.oy + dy)),
+        });
+      } else if (d.mode === "resizeBroll") {
+        updateBroll(d.idx, { scale: Math.max(0.1, Math.min(1.0, d.oscale + dx)) });
       }
     };
     const onUp = () => { overlayDragRef.current = null; };
@@ -7533,6 +8496,33 @@ function EditorMode({ onExit }) {
     if (!a || !music || !playing) return;
     if (Math.abs(a.currentTime - outputTime) > 0.3) { try { a.currentTime = outputTime; } catch (_) {} }
   }, [outputTime, music, playing]);
+
+  // ─── Sync each B-roll <video> element with the playhead. ─────────────────
+  // When outputTime is inside [start..end] the B-roll should be playing at
+  // time `broll_in + (outputTime - start)`. Outside that window or when the
+  // main video is paused, the B-roll is paused. Drift > 0.3s = hard reseek.
+  useEffect(() => {
+    for (const b of brolls) {
+      const i = brolls.indexOf(b);
+      const el = brollVideoRefs.current[i];
+      if (!el) continue;
+      const inWindow = outputTime >= b.start && outputTime <= b.end;
+      if (!inWindow) {
+        if (!el.paused) try { el.pause(); } catch (_) {}
+        continue;
+      }
+      const wantedT = Math.max(0, b.broll_in + (outputTime - b.start));
+      if (Math.abs(el.currentTime - wantedT) > 0.3) {
+        try { el.currentTime = wantedT; } catch (_) {}
+      }
+      if (playing && el.paused) {
+        const p = el.play();
+        if (p && p.catch) p.catch(() => {});
+      } else if (!playing && !el.paused) {
+        try { el.pause(); } catch (_) {}
+      }
+    }
+  }, [outputTime, playing, brolls]);
 
   // ─── Add Subtitles (button → trigger Whisper on the trim) ──────────────
   const activateSubtitles = async () => {
@@ -7751,6 +8741,7 @@ function EditorMode({ onExit }) {
     setClipObj(null);
     setSegments([]); setSelectedSegIdx(null); setThumbnails([]);
     setOverlays([]); setSelectedOverlayIdx(null);
+    setBrolls([]); setSelectedBrollIdx(null); setUploadingBroll(false); setBrollUploadPct(0);
     setMusic(null); setBgStyle("blur"); setVisualFilter("none");
     histRef.current = { past: [], future: [] }; lastDocRef.current = null;
     setAspectRatio("9:16");
@@ -7989,6 +8980,61 @@ function EditorMode({ onExit }) {
                           onMouseDown={(e) => {
                             e.preventDefault(); e.stopPropagation();
                             overlayDragRef.current = { mode: "resize", idx: i, startX: e.clientX, startY: e.clientY, oscale: ov.scale };
+                          }}
+                          style={{
+                            position: "absolute", right: -6, bottom: -6, width: 12, height: 12,
+                            background: "var(--st-gold)", borderRadius: "50%", cursor: "nwse-resize",
+                            border: "2px solid #15130e",
+                          }}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+                {/* B-roll video overlays — same drag/resize pattern as image
+                    overlays, but rendered with a <video> element. Playback is
+                    kept in sync with the main playhead via the useEffect a
+                    bit further down; this block only handles position + size
+                    + selection + the visibility window. */}
+                {brolls.map((b, i) => {
+                  const visible = outputTime >= b.start - 0.01 && outputTime <= b.end + 0.01;
+                  const isSel = selectedBrollIdx === i;
+                  if (!visible && !isSel) return null;
+                  return (
+                    <div key={`broll-${i}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setSelectedBrollIdx(i);
+                        setActiveRailTool("overlay");
+                        overlayDragRef.current = { mode: "moveBroll", idx: i, startX: e.clientX, startY: e.clientY, ox: b.x, oy: b.y };
+                      }}
+                      style={{
+                        position: "absolute",
+                        left: `${b.x * 100}%`, top: `${b.y * 100}%`,
+                        width: `${b.scale * 100}%`,
+                        transform: "translate(-50%, -50%)",
+                        opacity: visible ? b.opacity : 0.35,
+                        cursor: "move",
+                        outline: isSel ? "1.5px dashed var(--st-gold)" : "none",
+                        zIndex: 6,
+                        background: "#000",
+                        borderRadius: 4,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <video
+                        ref={(el) => { if (el) brollVideoRefs.current[i] = el; else delete brollVideoRefs.current[i]; }}
+                        src={b.url}
+                        muted={b.audio_mode === "mute"}
+                        preload="metadata"
+                        draggable={false}
+                        style={{ width: "100%", height: "auto", display: "block", pointerEvents: "none" }}
+                      />
+                      {isSel && (
+                        <div
+                          onMouseDown={(e) => {
+                            e.preventDefault(); e.stopPropagation();
+                            overlayDragRef.current = { mode: "resizeBroll", idx: i, startX: e.clientX, startY: e.clientY, oscale: b.scale };
                           }}
                           style={{
                             position: "absolute", right: -6, bottom: -6, width: 12, height: 12,
@@ -8340,6 +9386,124 @@ function EditorMode({ onExit }) {
                       </p>
                     </>
                   )}
+
+                  {/* ── B-roll (videos picture-in-picture) ────────────────
+                      Lives inside the Imágenes panel because conceptually
+                      they're "things laid over the video" — same drag UX
+                      pattern, just video instead of static images. */}
+                  <div style={{ height: 1, background: "var(--st-line)", margin: "18px 0 12px" }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+                    <Film size={14} style={{ color: "var(--st-muted)" }} />
+                    <span className="st-eyebrow">📺 B-roll</span>
+                    <div style={{ flex: 1 }} />
+                    <span style={{ fontFamily: "var(--st-mono)", fontSize: 10, color: "var(--st-faint)" }}>{brolls.length}</span>
+                  </div>
+
+                  <button onClick={() => brollFileRef.current?.click()} disabled={uploadingBroll}
+                    className="st-btn st-btn--ghost" style={{ width: "100%", justifyContent: "center", padding: "9px 0", marginBottom: 12 }}>
+                    {uploadingBroll
+                      ? `Subiendo… ${brollUploadPct}%`
+                      : <><Upload size={14} /> Subir video B-roll</>}
+                  </button>
+
+                  {brolls.length === 0 ? (
+                    <p style={{ fontSize: 11.5, color: "var(--st-muted)", margin: 0, lineHeight: 1.5 }}>
+                      Subí un video (reaction, B-roll, gameplay) para mostrarlo encima del video principal por un rango de tiempo.
+                    </p>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+                        {brolls.map((b, i) => {
+                          const sel = selectedBrollIdx === i;
+                          return (
+                            <span key={i} onClick={() => setSelectedBrollIdx(i)} style={{
+                              fontFamily: "var(--st-mono)", fontSize: 11, padding: "4px 9px", borderRadius: 7, cursor: "pointer",
+                              border: `1px solid ${sel ? "var(--st-accent)" : "var(--st-border)"}`,
+                              background: sel ? "var(--st-soft)" : "transparent",
+                              color: sel ? "var(--st-text)" : "var(--st-muted)",
+                            }}>📺 {String(i + 1).padStart(2, "0")}</span>
+                          );
+                        })}
+                      </div>
+
+                      {selectedBrollIdx !== null && brolls[selectedBrollIdx] && (() => {
+                        const b = brolls[selectedBrollIdx];
+                        const i = selectedBrollIdx;
+                        return (
+                          <>
+                            <div style={{ fontSize: 11, color: "var(--st-faint)", marginBottom: 8, fontFamily: "var(--st-mono)" }}>
+                              {b.name} · {b.duration.toFixed(1)}s
+                            </div>
+
+                            <FrameSlider label="Aparece desde" val={`${b.start.toFixed(1)}s`}
+                              min={0} max={Math.max(0.5, outputDuration)} step={0.1} value={b.start}
+                              onChange={(n) => updateBroll(i, { start: Math.min(n, b.end - 0.1) })} />
+                            <FrameSlider label="Hasta" val={`${b.end.toFixed(1)}s`}
+                              min={0.5} max={Math.max(0.5, outputDuration)} step={0.1} value={b.end}
+                              onChange={(n) => updateBroll(i, { end: Math.max(n, b.start + 0.1) })} />
+
+                            <div style={{ fontSize: 10.5, color: "var(--st-faint)", margin: "4px 0 8px", fontFamily: "var(--st-mono)" }}>↳ Pedazo del B-roll que se reproduce:</div>
+                            <FrameSlider label="B-roll desde" val={`${b.broll_in.toFixed(1)}s`}
+                              min={0} max={Math.max(0.5, b.duration - 0.1)} step={0.1} value={b.broll_in}
+                              onChange={(n) => updateBroll(i, { broll_in: Math.min(n, b.broll_out - 0.1) })} />
+                            <FrameSlider label="B-roll hasta" val={`${b.broll_out.toFixed(1)}s`}
+                              min={0.1} max={b.duration} step={0.1} value={b.broll_out}
+                              onChange={(n) => updateBroll(i, { broll_out: Math.max(n, b.broll_in + 0.1) })} />
+
+                            <FrameSlider label="Tamaño" val={`${Math.round(b.scale * 100)}%`}
+                              min={0.1} max={1.0} step={0.02} value={b.scale}
+                              onChange={(n) => updateBroll(i, { scale: n })} />
+                            <FrameSlider label="Opacidad" val={`${Math.round(b.opacity * 100)}%`}
+                              min={0.2} max={1.0} step={0.05} value={b.opacity}
+                              onChange={(n) => updateBroll(i, { opacity: n })} />
+
+                            {/* Position presets (4 corners + custom) */}
+                            <div style={{ fontSize: 10.5, color: "var(--st-faint)", margin: "8px 0 5px", fontFamily: "var(--st-mono)" }}>POSICIÓN</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginBottom: 12 }}>
+                              {[
+                                ["↖", 0.18, 0.18], ["↗", 0.82, 0.18],
+                                ["↙", 0.18, 0.82], ["↘", 0.82, 0.82],
+                              ].map(([label, x, y]) => (
+                                <button key={label} onClick={() => updateBroll(i, { x, y })}
+                                  style={{
+                                    padding: "6px 0", fontSize: 14, border: "1px solid var(--st-border)",
+                                    borderRadius: 6, background: "transparent", color: "var(--st-text)", cursor: "pointer",
+                                  }}>{label}</button>
+                              ))}
+                            </div>
+
+                            {/* Audio mode */}
+                            <div style={{ fontSize: 10.5, color: "var(--st-faint)", margin: "0 0 5px", fontFamily: "var(--st-mono)" }}>AUDIO DEL B-ROLL</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5, marginBottom: 12 }}>
+                              {[["mute", "🔇 Mute"], ["mix", "🎚 Mix"], ["replace", "🔄 Reemp."]].map(([k, label]) => {
+                                const active = b.audio_mode === k;
+                                return (
+                                  <button key={k} onClick={() => updateBroll(i, { audio_mode: k })}
+                                    title={k === "mute" ? "Audio del B-roll silenciado" : k === "mix" ? "Mezcla a 50% con el audio original" : "Reemplaza el audio original (mismo mix por ahora)"}
+                                    style={{
+                                      fontSize: 11, padding: "6px 3px",
+                                      background: active ? "var(--st-accent)" : "transparent",
+                                      color: active ? "var(--st-on-accent)" : "var(--st-muted)",
+                                      border: `1px solid ${active ? "var(--st-accent)" : "var(--st-border)"}`,
+                                      borderRadius: 6, cursor: "pointer",
+                                    }}>{label}</button>
+                                );
+                              })}
+                            </div>
+
+                            <button onClick={() => removeBroll(i)} className="st-btn st-btn--ghost"
+                              style={{ width: "100%", justifyContent: "center", padding: "6px 0", fontSize: 11.5, color: "var(--st-live)" }}>
+                              <Trash2 size={12} /> Borrar B-roll
+                            </button>
+                          </>
+                        );
+                      })()}
+
+                      <p style={{ fontSize: 10.5, color: "var(--st-faint)", margin: "12px 0 0", lineHeight: 1.5 }}>
+                        Arrastrá el video en el preview para moverlo · esquina dorada para redimensionar.
+                      </p>
+                    </>
+                  )}
                 </>
               )}
 
@@ -8552,6 +9716,8 @@ function EditorMode({ onExit }) {
         onChange={(e) => { addImageClip(e.target.files[0]); e.target.value = ""; }} />
       <input ref={overlayFileRef} type="file" accept="image/*" style={{ display: "none" }}
         onChange={(e) => { handleOverlayUpload(e.target.files[0]); e.target.value = ""; }} />
+      <input ref={brollFileRef} type="file" accept="video/*" style={{ display: "none" }}
+        onChange={(e) => { handleBrollUpload(e.target.files[0]); e.target.value = ""; }} />
 
       {/* Auto-reframe MP4 preview modal — 10s sample with reframe baked in
           so the user can verify the framing before exporting the full clip. */}

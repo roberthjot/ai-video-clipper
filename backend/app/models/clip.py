@@ -44,6 +44,31 @@ class ImageOverlay(BaseModel):
     opacity: float = 1.0       # 0-1
 
 
+class VideoOverlay(BaseModel):
+    """A video (B-roll) painted on top of the main video for a time range.
+
+    Mirrors ImageOverlay's position/scale/timing model and adds:
+    - broll_in / broll_out: which slice of the B-roll source plays (in B-roll
+      seconds, not output seconds). broll_out=0 means "play to the end".
+    - audio_mode: what to do with the B-roll's audio track during overlay.
+        "mute"    -> drop it (default, simplest)
+        "mix"     -> amix at 50% with the main audio while the overlay is on
+        "replace" -> swap original with B-roll audio during overlay (v2; not
+                     wired in the filter chain yet — falls back to "mix")
+    Same canvas-relative coordinate system as ImageOverlay (0..1 of 1080×1920).
+    """
+    path: str                       # server path to the uploaded mp4
+    x: float = 0.80                 # default top-right corner
+    y: float = 0.18
+    scale: float = 0.30             # width as fraction of canvas width
+    opacity: float = 1.0
+    start: float = 0.0              # output seconds: when it appears
+    end: float = 99999.0            # output seconds: when it disappears
+    broll_in: float = 0.0           # B-roll seconds: where its playback starts
+    broll_out: float = 0.0          # B-roll seconds: 0 = until natural end
+    audio_mode: str = "mute"        # "mute" | "mix" | "replace"
+
+
 class Keyframe(BaseModel):
     """A single keyframe on the per-clip animation timeline.
 
@@ -191,6 +216,12 @@ class StyleConfig(BaseModel):
     music_path: str | None = None       # server path to the uploaded audio file
     music_volume: float = 0.8           # 0..2 — music track gain
     original_volume: float = 1.0        # 0..2 — original video audio gain
+    # Music trim — which SLICE of the source music file to use. start in
+    # seconds from the music's natural beginning; end=0 means "play to the
+    # natural end". Useful when the user wants a specific drop / chorus and
+    # not the silent intro. mix_music_track applies these as atrim+asetpts.
+    music_start: float = 0.0
+    music_end: float = 0.0
 
     # Master toggle: skip caption + burned-in subtitles entirely (clean video)
     no_text: bool = False
@@ -213,6 +244,12 @@ class StyleConfig(BaseModel):
     # Image overlays (editor mode) — images painted on top of the video for a
     # time range. Empty by default. Burned in at export.
     image_overlays: list[ImageOverlay] = []
+
+    # Video overlays (B-roll picture-in-picture). Same position/timing model
+    # as image_overlays but each entry is an MP4 with a sub-range (broll_in /
+    # broll_out) and an audio mode. Burned in at export — see
+    # export_service for the filter chain.
+    video_overlays: list[VideoOverlay] = []
 
     # Auto-reframe (face-tracking). When enabled, the export pipeline replaces
     # the static fg crop with a dynamic crop window that follows the face

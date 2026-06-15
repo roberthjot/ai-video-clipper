@@ -668,21 +668,40 @@ def get_audio_peaks(audio_path: str, buckets: int = 300) -> list:
 
 
 def mix_music_track(video_path: str, music_path: str,
-                    music_volume: float = 0.8, original_volume: float = 1.0) -> str:
+                    music_volume: float = 0.8, original_volume: float = 1.0,
+                    music_start: float = 0.0, music_end: float = 0.0) -> str:
     """Mix a background-music track into an already-rendered clip, IN PLACE.
 
     Runs as a fast post-step after the main export: the video stream is copied
-    (no re-encode) and only the audio is re-mixed, so it's cheap. The music
-    starts at the clip's beginning and is cut to the video length (-shortest).
+    (no re-encode) and only the audio is re-mixed, so it's cheap.
+
+    `music_start` / `music_end` pick a SLICE of the music source (in music
+    seconds). end=0 means "play to the natural end" — `-shortest` still cuts
+    to the video length so a long music slice is fine. The slice plays from
+    the clip's t=0 onward.
+
     If the clip has no audio of its own, the music becomes the only track.
     """
     tmp = video_path + ".mixtmp.mp4"
+
+    # Build the music branch. If trim is requested, prepend atrim+asetpts so
+    # the slice starts at the clip's t=0 (asetpts=PTS-STARTPTS resets PTS).
+    has_trim = (music_start and music_start > 0) or (music_end and music_end > music_start)
+    if has_trim:
+        if music_end and music_end > music_start:
+            atrim = f"atrim=start={music_start}:end={music_end},"
+        else:
+            atrim = f"atrim=start={music_start},"
+        music_branch = f"[1:a]{atrim}asetpts=PTS-STARTPTS,volume={music_volume}"
+    else:
+        music_branch = f"[1:a]volume={music_volume}"
+
     if _has_audio_stream(video_path):
         fc = (f"[0:a]volume={original_volume}[a0];"
-              f"[1:a]volume={music_volume}[a1];"
+              f"{music_branch}[a1];"
               f"[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]")
     else:
-        fc = f"[1:a]volume={music_volume}[aout]"
+        fc = f"{music_branch}[aout]"
     cmd = [FFMPEG_EXE, "-i", video_path, "-i", music_path,
            "-filter_complex", fc, "-map", "0:v", "-map", "[aout]",
            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",

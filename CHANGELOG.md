@@ -2,6 +2,173 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🎵 Background music in Visual Editor + ClipsStep
+
+Music mixing already worked in the standalone Editor (EditorMode); brought
+it to the AI clip flow with two access points.
+
+### Backend
+
+- `StyleConfig` gained `music_start: float` and `music_end: float` (end=0
+  means "play to the natural end of the source file"). `music_path`,
+  `music_volume`, `original_volume` were already there.
+- `video_service.mix_music_track(..., music_start=0.0, music_end=0.0)` now
+  prepends `atrim=start={start}[:end={end}],asetpts=PTS-STARTPTS` to the
+  music branch when either trim value is set. amix is unchanged. The video
+  stream is still stream-copied so the post-mix is fast.
+- `export_clip_with_style` passes the new trim values through.
+- New endpoints in `routes/export.py` (parallel to editor's):
+  - `POST /api/export/music/{project_id}` — accepts `audio` UploadFile,
+    saves to `projects/{id}/music/music_<uuid>.<ext>`, returns
+    `{path, url, filename, duration, peaks}`. Duration and peaks are best-
+    effort — they don't fail the upload if probing breaks.
+  - `GET /api/export/music/{project_id}/{filename}` — `FileResponse` for the
+    frontend's `<audio>` preview.
+
+### Frontend
+
+- `services/api.js`: `uploadProjectMusic(projectId, file, onProgress)` (XHR
+  with progress events), `getProjectMusicUrl(projectId, filename)`.
+- **Visual Editor (Paso 3)**: new "🎵 Música" section in the right inspector
+  between Subtítulos and Auto-encuadre. Empty state shows a "Subir música"
+  button; filled state shows a track card (name + duration + Trash2 button),
+  embedded `<audio controls>`, 2 volume sliders (música 0–2, original 0–2),
+  and a "↳ ¿Qué parte de la pista querés que suene?" sub-card with start +
+  end sliders. The music_* fields live on the central `style` state, so they
+  follow the existing "Aplicar a" scope (Todos / Este clip / Varios).
+- **ClipsStep (Paso 2)**: collapsible "🎵 Música del proyecto" section
+  between the model selector and the batch toolbar. Project-wide only
+  (per-clip overrides stay in Paso 3). Loads existing music_path from
+  `project.style` on mount, and persists changes via a debounced
+  fetch-merge-put (350 ms) so the music save never clobbers other style
+  fields the user might have set in Paso 3.
+- Both panels' `<audio onLoadedMetadata>` fills in the duration if the
+  backend probe came back empty (handles backend restarts cleanly).
+- Hidden `<input type=file accept="audio/*">` next to the existing hidden
+  inputs in each component.
+
+## 📺 B-roll picture-in-picture (EditorMode)
+
+Lay a second video on top of the main one for a time range — reaction
+overlays, gameplay corners, etc. Uses the same drag / resize / position UX
+as the existing image overlays.
+
+### Backend
+
+- New `VideoOverlay` model mirroring `ImageOverlay` plus three video-only
+  fields: `broll_in`, `broll_out` (which slice of the source plays) and
+  `audio_mode` (`"mute"|"mix"|"replace"`). Default position is top-right
+  (x=0.80, y=0.18) at 30% width.
+- `StyleConfig.video_overlays: list[VideoOverlay]`.
+- `POST /api/editor/{id}/broll` accepts the upload, saves to
+  `projects/{id}/broll/broll_<uuid>.mp4`, probes duration, returns
+  `{path, url, filename, duration}`.
+- `GET /api/editor/{id}/broll/{filename}` serves the file Range-friendly via
+  FastAPI `FileResponse`.
+- `export_service` per VideoOverlay:
+  - Adds a plain `-i <path>` (no `-loop`).
+  - Video filter:
+    `[N:v]trim=start={broll_in}:end={broll_out},setpts=PTS-STARTPTS+{ov_start}/TB,scale={ov_w}:-2,format=rgba,colorchannelmixer=aa={opacity}[brollN]`
+    then overlay with `enable='between(t,ov_start,ov_end)'`.
+  - Audio (mix/replace): `atrim+asetpts+volume:enable` per broll, then `amix`
+    with the main audio. Mix uses 0.5 vol; replace falls back to 0.9 vol in
+    v1 (true ducking is a v2 task). When any broll wants mix/replace, the
+    `-map 0:a?` is replaced with `-map [outaudio]`.
+
+### Frontend
+
+- `api.js`: `uploadEditorBroll(projectId, file, onProgress)` (XHR).
+- `EditorMode`: new B-roll subsection inside the Imágenes inspector (after
+  the image-overlay block, separator + 📺 header). Upload button with live
+  percent. Per-broll: 6 timing sliders (start/end in output, broll_in/out in
+  source), Tamaño + Opacidad, 4-corner position presets, 3-button audio
+  mode picker (Mute/Mix/Replace), borrar.
+- Live HTML preview: each broll is rendered as a `<video>` element at its
+  position/scale, with dashed-gold outline when selected. Drag/resize uses
+  the existing `overlayDragRef` extended with `moveBroll`/`resizeBroll`.
+- Playback sync (`useEffect on [outputTime, playing, brolls]`): when
+  outputTime is inside `[start..end]`, broll's currentTime is set to
+  `broll_in + (outputTime - start)`. Drift > 0.3 s = hard-reseek. Outside
+  the window the broll is paused.
+- `Trash2` icon import added.
+
+## 😂 Meme Generator — extended editor
+
+The Meme Generator's per-meme Ajustes panel + the global Ajustes panel
+gained the same kind of fine-grained controls as the Visual Editor, kept in
+an inline flat layout (memes are iterate-fast, not full modal).
+
+### Backend (`backend/app/services/meme_service.py`)
+
+- `_FONT_MAP_MEME` table maps font keys (`calibri / arial_black / trebuchet
+  / comic / impact`) to Windows TTF paths. Calibri Bold remains the default.
+- `_hex_to_rgb` + `_MEME_VISUAL_FILTERS` local table mirroring the main
+  pipeline's filters (cinematic/warm/vivid/moody/bw).
+- `create_meme_bg_png(...)` gained `font_family`, `text_color`,
+  `stroke_color`, `stroke_width`, `transparent`, `text_align`. With
+  `transparent=True` it returns an RGBA PNG used by the blur background.
+  Stroke uses PIL's `stroke_width` + `stroke_fill`. `text_align="center"`
+  computes each wrapped line's width via `font.getlength` and centers it on
+  the canvas; `"right"` anchors to the 5%-from-right margin.
+- `export_meme_video(...)` gained 11 optional params (bg_mode color/blur,
+  font_family, text_color, stroke_color, stroke_width, visual_filter,
+  trim_start, trim_end, mirror_cyclic_enabled+interval, boost_contrast,
+  text_align). All defaults preserve the pre-existing meme look.
+  - `bg_mode="blur"`: filter chain
+    `[0:v]split=2[fg_in][bg_in]; [bg_in]scale=...,crop=...,boxblur=14:2[bg]; [fg_in]<fg_filter>[fg]; [bg][fg]overlay=...[comp]; [comp][1:v]overlay=0:0[out]`
+    so the source video itself becomes the background and the text PNG
+    overlays as a transparent layer.
+  - Visual filter + mirror_cyclic + boost_contrast fold into the FG chain
+    via comma-concat.
+  - Trim: `-ss start` before the first `-i`; `-to (end-start)` after the
+    inputs.
+- `routes/meme.py POST /reexport/{batch_id}/{index}` accepts all 12 new
+  Form params with safe defaults. Successful re-exports cache the settings
+  on `item.style_meta`.
+
+### Frontend
+
+- `api.js`: `reexportMeme(...)` gained an optional `extras = null` final
+  argument. New keys only get appended to the FormData when present, so old
+  callers keep working untouched.
+- `MemeItemCard`: new state for the 12 extra controls + `showGuides` +
+  `memePreviewRef` + `memeDragRef`. `handleReexport` packs everything into
+  `extras`.
+  - 4 new bordered sections in the existing Ajustes panel: **Texto** (font
+    picker, alignment picker ⬅/↔/➡, text + stroke color pickers, stroke
+    width), **Fondo y filtro** (color / blur background, 6 visual-filter
+    chips), **Trim** (start + end sliders, end=0 = natural end), **🛡
+    Anti-detect** (mirror cíclico + boost contraste checkboxes).
+- **Drag-to-position + center guides** on the baked video preview:
+  - Wrapper has `aspectRatio: "9 / 16"` + `containerType: "inline-size"` +
+    `width: min(100%, 220px)` + `margin: 0 auto` — locks the preview to the
+    canvas shape so `cqw` math lines up with the video pixels.
+  - Center cross-hair (dashed gold + "centro" pill), toggled by a 🎯 Guías
+    button above the preview.
+  - Horizontal "altura del texto" handle: a thin dashed gold line at the
+    current text_y. Drag up/down only (the X is locked because the new
+    Alineación picker handles horizontal position semantically).
+  - Drag handler uses an `axis` flag on `memeDragRef` so the same window-
+    level pointermove listener serves both X+Y drags and Y-only drags.
+- **MemeStep** (global panel): same Texto / Fondo y filtro / Anti-detect
+  sections in the "Ajustes globales — aplica a todos" collapsible.
+  `handleReexportAll` packs the same `extras` object and fans out to each
+  ready meme.
+
+## ⏱ + ❤️ Earlier fixes shipped in this batch
+
+- **Export timeout** (`export_clip_with_style`,
+  `export_instagram_clip`): the fixed `subprocess.run(..., timeout=600)`
+  killed 1 h+ Editor exports at 10 min. Now
+  `max(600, int(duration * 5))` — 5× realtime safety margin (a 60 min
+  export gets 5 h) and the chosen value is printed at start.
+- **ES sub-row segments fix**: when the user cut segments in the editor,
+  the cached `words_es` was NOT remapped through
+  `video_service.remap_transcript_to_segments` before the recursive
+  `export_clip_with_style` call. Spanish subs were off by the cumulative
+  cut length. Adding the `clip_copy.words_es` remap right after the EN
+  transcript remap fixes it.
+
 ## 🇪🇸 Spanish translation track (separate EN / ES exports)
 
 Captions and burned-in subtitles can now be exported in Spanish as a parallel

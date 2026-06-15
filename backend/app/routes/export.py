@@ -1,8 +1,10 @@
 import os
+import shutil
+import uuid
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse
 from ..models.clip import StyleConfig
-from ..services import export_service, gemini_service
+from ..services import export_service, gemini_service, video_service
 from .upload import get_project_store
 from ..config import settings
 
@@ -26,6 +28,61 @@ async def upload_watermark(project_id: str, watermark: UploadFile = File(...)):
 
     project.style.watermark_path = wm_path
     return {"status": "uploaded", "path": wm_path}
+
+
+@router.post("/music/{project_id}")
+async def upload_project_music(project_id: str, audio: UploadFile = File(...)):
+    """Upload a background-music track for the clip-export flow (Visual Editor
+    / Paso 3). The path goes onto StyleConfig.music_path (project-wide) or
+    a clip's style_override (per-clip), depending on the user's "Aplicar a"
+    scope on the frontend. Returns the path, a serve URL, the probed duration
+    (so the trim sliders can clamp), and a waveform peak list."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+
+    music_dir = os.path.join(project.output_dir, "music")
+    os.makedirs(music_dir, exist_ok=True)
+    ext = os.path.splitext(audio.filename or "")[1].lower()
+    if ext not in (".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".flac"):
+        ext = ".mp3"
+    fname = f"music_{uuid.uuid4().hex[:8]}{ext}"
+    fpath = os.path.join(music_dir, fname)
+    with open(fpath, "wb") as f:
+        shutil.copyfileobj(audio.file, f)
+
+    # Best-effort duration + peaks. Failing here shouldn't kill the upload.
+    try:
+        duration = video_service.get_video_duration(fpath)
+    except Exception:
+        duration = 0.0
+    try:
+        peaks = video_service.get_audio_peaks(fpath, buckets=320)
+    except Exception:
+        peaks = []
+
+    return {
+        "path": fpath,
+        "url": f"/api/export/music/{project_id}/{fname}",
+        "filename": audio.filename or fname,
+        "duration": round(float(duration or 0.0), 3),
+        "peaks": peaks,
+    }
+
+
+@router.get("/music/{project_id}/{filename}")
+async def project_music_file(project_id: str, filename: str):
+    """Serve an uploaded music track for the frontend's <audio> preview."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = os.path.join(projects[project_id].output_dir, "music", filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Music not found")
+    return FileResponse(path)
 
 
 @router.post("/split-image/{project_id}")
