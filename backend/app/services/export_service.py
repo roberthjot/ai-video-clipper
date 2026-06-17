@@ -365,16 +365,24 @@ def export_clip_with_style(
         # Pass the RAW caption (with user-typed \n intact) — create_caption_overlay
         # does its own pixel-wrap. The char-based pre-split would turn into spurious
         # hard breaks inside _wrap_px (which respects \n as forced).
-        lines = [_caption] if _caption else []
+        _cap_style = getattr(style, 'caption_style', 'box')
+        # Strip color markers for every style EXCEPT highlight (which parses
+        # them into colored spans). Keeps box/tiktok from showing literal *.
+        _cap_for_style = _caption if _cap_style == 'highlight' else video_service.strip_caption_markers(_caption)
+        lines = [_cap_for_style] if _cap_for_style else []
         pad_x = getattr(style, "caption_box_pad_x", 14)
         pad_y = getattr(style, "caption_box_pad_y", 14)
         line_gap = 5
         base_y = int(style.text_y * target_h)
 
         _font = getattr(style, 'caption_font', 'calibri')
-        if getattr(style, 'caption_style', 'box') == 'tiktok':
+        if _cap_style == 'tiktok':
             rounded_box_path, box_w, box_h = video_service.create_tiktok_caption_overlay(
                 lines, font_size=style.font_size, font_key=_font
+            )
+        elif _cap_style in ('clean', 'highlight', 'yellow'):
+            rounded_box_path, box_w, box_h = video_service.create_text_caption_overlay(
+                lines, variant=_cap_style, font_size=style.font_size, font_key=_font
             )
         else:
             rounded_box_path, box_w, box_h = video_service.create_caption_overlay(

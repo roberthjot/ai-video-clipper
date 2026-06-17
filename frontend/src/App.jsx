@@ -7,6 +7,13 @@ import { StSection, StChip, StSlider, StToggle, StFieldRow, StRow, StSegmented }
 
 // Human label for a model value (falls back to the raw value).
 const modelLabel = (val) => (GEMINI_VIDEO_MODELS.find((m) => m.val === val) || {}).label || val;
+
+// Strip *yellow* / **red** color markers for read-only caption display.
+// Edit fields keep the raw text so markers stay editable.
+const stripCaptionMarkers = (t) =>
+  typeof t === "string" && t.includes("*")
+    ? t.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1")
+    : t;
 import {
   Sun, Moon, Scissors, Film, Upload, Download, Image as ImageIcon,
   Radio, Sparkles, Settings, ChevronDown, ChevronRight, Search,
@@ -1075,7 +1082,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                   so the box width matches what Play Clip will show. */}
               {clip.viral_caption && (() => {
                 // Mirror split_text_into_lines (max 30 chars, up to 4 lines)
-                const words = clip.viral_caption.split(/\s+/);
+                const words = stripCaptionMarkers(clip.viral_caption).split(/\s+/);
                 const lines = [];
                 let current = [];
                 for (const w of words) {
@@ -2139,7 +2146,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                   <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--st-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{clip.description}</span>
                 </div>
                 <div style={{ fontSize: 13.5, color: "var(--st-muted)", fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {isBeingAnalyzed ? "Re-analizando…" : `“${clip.viral_caption}”`}
+                  {isBeingAnalyzed ? "Re-analizando…" : `“${stripCaptionMarkers(clip.viral_caption)}”`}
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
@@ -2269,7 +2276,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                 Caption actual
               </div>
               <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#fff", lineHeight: 1.4 }}>
-                "{scriptViewClip.viral_caption}"
+                "{stripCaptionMarkers(scriptViewClip.viral_caption)}"
               </p>
             </div>
 
@@ -2337,7 +2344,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                   🇬🇧 Caption (EN)
                 </div>
                 <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#fff", lineHeight: 1.4 }}>
-                  "{scriptEsClip.viral_caption}"
+                  "{stripCaptionMarkers(scriptEsClip.viral_caption)}"
                 </p>
               </div>
               <div style={{
@@ -3259,7 +3266,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                   const fs = style.font_size || 70;
                   const padX = style.caption_box_pad_x ?? 30;
                   const padY = style.caption_box_pad_y ?? 6;
-                  const caption = selectedClip.viral_caption || "";
+                  const caption = stripCaptionMarkers(selectedClip.viral_caption || "");
 
                   // Estimate the rendered box in CANVAS pixels (1080×1920).
                   const CANVAS_W = 1080, CANVAS_H = 1920;
@@ -3473,10 +3480,20 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
 
             {/* Caption style */}
             <StSection icon={<Type size={14} />}>Caption style</StSection>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: style.caption_style === "highlight" ? 8 : 12 }}>
               <StChip active={style.caption_style === "box"} onClick={() => setStyle((s) => ({ ...s, caption_style: "box" }))}>Caja blanca</StChip>
               <StChip active={style.caption_style === "tiktok"} onClick={() => setStyle((s) => ({ ...s, caption_style: "tiktok" }))}>TikTok</StChip>
+              <StChip active={style.caption_style === "clean"} onClick={() => setStyle((s) => ({ ...s, caption_style: "clean" }))}>Blanco limpio</StChip>
+              <StChip active={style.caption_style === "yellow"} onClick={() => setStyle((s) => ({ ...s, caption_style: "yellow" }))}>Acento amarillo</StChip>
+              <StChip active={style.caption_style === "highlight"} onClick={() => setStyle((s) => ({ ...s, caption_style: "highlight" }))}>Palabras de color</StChip>
             </div>
+            {style.caption_style === "highlight" && (
+              <p style={{ fontSize: 11, color: "var(--st-faint)", margin: "0 0 14px", lineHeight: 1.55 }}>
+                Gemini pinta nombres y frases clave solo. Para marcar a mano editá el texto y envolvé palabras:{" "}
+                <code style={{ color: "#FFD93D", fontFamily: "var(--st-mono)" }}>*amarillo*</code>{" · "}
+                <code style={{ color: "#FF3B5C", fontFamily: "var(--st-mono)" }}>**rojo**</code>
+              </p>
+            )}
             <select className="st-select" value={style.caption_font} onChange={(e) => setStyle((s) => ({ ...s, caption_font: e.target.value }))} style={{ marginBottom: 20 }}>
               <optgroup label="Windows (siempre disponibles)">
                 <option value="calibri">Calibri Bold (default)</option>

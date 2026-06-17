@@ -2,6 +2,80 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🎨 New caption styles (clean / highlight / yellow) + color markers
+
+The main Gemini caption (the big overlay text) had only 2 styles — "Caja
+blanca" (box) and "TikTok". Added 3 modern text-only looks plus a
+color-marker system for keyword highlighting.
+
+### TikTok caption overflow fix (prerequisite)
+
+`create_tiktok_caption_overlay` never pixel-wrapped its input — it got the
+whole caption as one string, clamped `box_w` but painted text at natural
+width, so long captions ran off both frame edges (negative start-x). Added
+the same pixel-wrap engine the box style already had: long text now grows
+the box **vertically** (more lines) and always fits. `box_h` uses the
+wrapped line count.
+
+### New renderer (`video_service.create_text_caption_overlay`)
+
+One PIL renderer, three `variant`s, no background box:
+
+- **clean** — white bold, thin outline (3px) + soft Gaussian drop shadow.
+  Smart headline Title Case (stopwords like *to / on / the* stay lowercase
+  unless first word). Matches the "white headline" reference look.
+- **highlight** — parses inline color markers into colored word spans
+  (`*word*` → yellow `#FFD93D`, `**word**` → red `#FF3B5C`), rest white.
+- **yellow** — white text with the last significant word auto-colored
+  yellow.
+
+Shares the pixel-wrap + Pilmoji emoji engine (emojis painted in color
+after the outline pass). `_smart_title_words` + a stopword set drive Title
+Case. Returns `(png, box_w, box_h)` with shadow margin folded in so the
+caller's centering math is unchanged.
+
+### Color markers — Gemini-marked + hand-marked (hybrid)
+
+Inline markup embedded in the caption text:
+
+- `*word*` → **yellow** (names / hooks), `**word**` → **red** (emotional
+  payoff). `**` parsed before `*` (markdown precedence).
+- **Gemini auto-marks**: the main analysis prompt now instructs Gemini to
+  wrap 1-2 keywords (at most 2 spans, 1-3 words each, never the first
+  word). The cleaning regexes in `gemini_service.py` preserve `*` so the
+  markers survive caption normalization.
+- **Manual**: type the markers in the "Editar texto" modal.
+- `video_service.strip_caption_markers()` removes markers; every caption
+  style EXCEPT highlight strips them at the dispatch sites, so box / tiktok
+  / clean / yellow never show literal asterisks. (clean/yellow parse them
+  out internally too.)
+
+### Dispatch (3 sites)
+
+`export_service.py` + the two `video_service.py` preview paths route
+`clean|highlight|yellow` → `create_text_caption_overlay`, `tiktok` → its
+own renderer, else `box`. Each strips markers unless the style is
+highlight.
+
+### Frontend
+
+- Visual Editor (Paso 3) caption-style selector gained 3 chips: **Blanco
+  limpio**, **Acento amarillo**, **Palabras de color**. Selecting
+  "Palabras de color" shows a hint with the `*amarillo*` / `**rojo**`
+  syntax.
+- `stripCaptionMarkers()` helper strips markers in read-only displays
+  (clip card overlay, analyzer quote, script modals, Visual Editor live
+  caption) — the edit fields keep raw markers so they stay editable.
+
+### Caveats
+
+- The Visual Editor live caption overlay (CSS) shows highlight text in
+  plain white (markers stripped); the real colors render in the
+  server-side Play preview and the export. Minor preview/export mismatch
+  by design.
+- ES translation track doesn't carry markers through yet — ES highlight
+  renders white. (Not requested this round.)
+
 ## 🟢 Kick.com integration
 
 Mirror of the Twitch VOD-clips flow for Kick: paste a Kick VOD URL → list

@@ -1082,21 +1082,61 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
 
     line_h = int(font_size * 1.40)  # taller line so emojis fit
 
-    # Split each line into (text_part, emoji_part). Emojis are stripped for the
-    # outlined text pass; they are painted in color afterwards.
-    parsed = []
-    for line in lines:
-        emojis_in_line = "".join(_EMOJI_RE.findall(line))
-        text_only = _EMOJI_RE.sub("", line).rstrip()
-        parsed.append({"text": text_only, "emoji": emojis_in_line})
-
-    # Measure widths per line (text + emoji separately so emoji never gets stroked)
+    # Measure helper — text width in px (emoji measured separately below).
     def _txt_w(s):
         try:
             return int(font.getlength(s))
         except Exception:
             return int(len(s) * font_size * 0.55)
 
+    # Pixel-wrap the incoming text so no single line overflows the frame.
+    # The caller hands us the whole caption as ONE string; without wrapping,
+    # a long caption ("it with a slipper in this powerful…") runs off both
+    # edges because the box_w clamp below shrinks the canvas but never
+    # reflows the text. Wrapping grows the box VERTICALLY instead. Manual
+    # "\n" breaks the user typed are respected as hard breaks.
+    max_content_w = W_vid - 64
+
+    def _word_w(word):
+        em = "".join(_EMOJI_RE.findall(word))
+        txt = _EMOJI_RE.sub("", word)
+        w = _txt_w(txt)
+        if em:
+            w += len(em) * int(font_size * 1.05)
+            if txt:
+                w += int(font_size * 0.20)
+        return w
+
+    def _wrap_lines(src_lines):
+        out = []
+        space_w = _txt_w(" ")
+        for block in (src_lines or []):
+            for sub in str(block).split("\n"):
+                cur, cur_w = "", 0
+                for word in sub.split():
+                    ww = _word_w(word)
+                    sep = space_w if cur else 0
+                    if cur and cur_w + sep + ww > max_content_w:
+                        out.append(cur)
+                        cur, cur_w = word, ww
+                    else:
+                        cur = (cur + " " + word).strip() if cur else word
+                        cur_w = cur_w + sep + ww
+                if cur:
+                    out.append(cur)
+        return out or [""]
+
+    wrapped_lines = _wrap_lines(lines)
+
+    # Split each line into (text_part, emoji_part). Emojis are stripped for the
+    # outlined text pass; they are painted in color afterwards.
+    parsed = []
+    for line in wrapped_lines:
+        emojis_in_line = "".join(_EMOJI_RE.findall(line))
+        text_only = _EMOJI_RE.sub("", line).rstrip()
+        parsed.append({"text": text_only, "emoji": emojis_in_line})
+
+    # Measure widths per line (text + emoji separately so emoji never gets stroked)
     line_widths = []
     for p in parsed:
         tw = _txt_w(p["text"])
@@ -1104,9 +1144,10 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
         spacer = int(font_size * 0.20) if p["emoji"] and p["text"] else 0
         line_widths.append(tw + spacer + ew)
 
+    n_lines = len(parsed)
     max_line_px = max(line_widths) if line_widths else 0
     box_w = min(W_vid - 40, int(max_line_px + pad_x * 2 + stroke_width * 2))
-    box_h = line_h * len(lines) + line_gap * max(len(lines) - 1, 0) + pad_y * 2 + stroke_width * 2
+    box_h = line_h * n_lines + line_gap * max(n_lines - 1, 0) + pad_y * 2 + stroke_width * 2
 
     img = Image.new('RGBA', (box_w, box_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -1164,6 +1205,245 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
     temp_dir = os.path.join(os.path.dirname(__file__), "temp")
     os.makedirs(temp_dir, exist_ok=True)
     png_path = os.path.join(temp_dir, f"caption_tiktok_{_uuid.uuid4().hex}.png")
+    img.save(png_path)
+    return png_path, box_w, box_h
+
+
+# ─── Color-marker helpers (shared by highlight style + marker stripping) ──────
+# Inline markup the user (or Gemini) can embed in a caption:
+#   *word*    → YELLOW   (names / hooks)
+#   **word**  → RED/PINK (emotional punch)
+# Markers are parsed by the "highlight" caption style and STRIPPED everywhere
+# else so a box/tiktok/clean render never shows literal asterisks.
+import re as _re_mark
+_MARK_RE = _re_mark.compile(r"\*\*(.+?)\*\*|\*(.+?)\*")
+
+CAPTION_COLORS = {
+    "white":  (255, 255, 255, 255),
+    "yellow": (255, 217, 61, 255),   # #FFD93D — warm gold
+    "red":    (255, 59, 92, 255),    # #FF3B5C — TikTok pink-red
+}
+
+# Title-case stopwords (kept lowercase unless they're the first word) so a
+# rendered caption reads like a real headline: "The Secret to Staying ...".
+_TITLE_STOP = {
+    "a", "an", "the", "and", "or", "but", "nor", "for", "so", "yet",
+    "as", "at", "by", "in", "of", "on", "to", "up", "via", "with",
+    "from", "into", "over", "than", "that", "this", "is", "it",
+}
+
+
+def strip_caption_markers(text: str) -> str:
+    """Remove *…* / **…** color markers, keeping the inner text. Idempotent."""
+    if not text or "*" not in text:
+        return text
+    return _MARK_RE.sub(lambda m: m.group(1) if m.group(1) is not None else m.group(2), text)
+
+
+def _parse_colored_segments(text: str):
+    """Split text into ordered (segment, color) pairs. ** before * (markdown
+    precedence). Unmarked runs are 'white'."""
+    segs, pos = [], 0
+    for m in _MARK_RE.finditer(text or ""):
+        if m.start() > pos:
+            segs.append((text[pos:m.start()], "white"))
+        if m.group(1) is not None:
+            segs.append((m.group(1), "red"))
+        else:
+            segs.append((m.group(2), "yellow"))
+        pos = m.end()
+    if pos < len(text or ""):
+        segs.append((text[pos:], "white"))
+    return segs
+
+
+def _smart_title_words(words: list) -> list:
+    """Title-case a word list headline-style: capitalize each word except
+    stopwords, but always capitalize the first word. Operates on the visible
+    text only (emoji-only tokens pass through untouched)."""
+    out = []
+    first_done = False
+    for w in words:
+        # Leave emoji-only / empty tokens as-is.
+        if not w or not _EMOJI_RE.sub("", w).strip():
+            out.append(w)
+            continue
+        lw = w.lower()
+        if not first_done or lw not in _TITLE_STOP:
+            out.append(w[:1].upper() + w[1:].lower())
+        else:
+            out.append(lw)
+        first_done = True
+    return out
+
+
+def create_text_caption_overlay(lines: list, variant: str = "clean",
+                                 font_size: int = 72, font_key: str = "calibri",
+                                 stroke_width: int = 3, title_case: bool = True,
+                                 line_gap: int = 8) -> tuple:
+    """Render one of the modern text-only caption styles (no background box):
+
+      • clean     — white bold, thin outline + soft drop shadow.
+      • highlight  — white with *yellow* / **red** keyword spans.
+      • yellow     — white with the last significant word auto-colored yellow.
+
+    Shares the pixel-wrap + Pilmoji emoji engine with the tiktok renderer.
+    Returns (png_path, box_w, box_h). box_w/box_h include any shadow margin so
+    the caller's centering math stays correct.
+    """
+    from PIL import ImageFont as _IF, ImageFilter as _ImF, ImageChops
+    import uuid as _uuid
+
+    W_vid = 1080
+    max_content_w = W_vid - 64
+    font_path = get_font_path(font_key)
+    try:
+        font = _IF.truetype(font_path, font_size)
+    except Exception:
+        font = _IF.load_default()
+    line_h = int(font_size * 1.40)
+
+    def _txt_w(s):
+        try:
+            return int(font.getlength(s))
+        except Exception:
+            return int(len(s) * font_size * 0.55)
+
+    # 1) Reflow incoming lines into one stream, parse color markers → words.
+    raw = "\n".join(s.rstrip() for s in (lines or []) if s and str(s).strip())
+    # Tokens carry (text, color). Hard "\n" breaks become a sentinel token.
+    tokens = []  # list of dicts: {text, color, br}
+    for block_i, block in enumerate(raw.split("\n")):
+        if block_i > 0:
+            tokens.append({"text": "", "color": "white", "br": True})
+        for seg_text, seg_color in _parse_colored_segments(block):
+            for word in seg_text.split():
+                # 'highlight' keeps marker colors; clean/yellow force white here.
+                color = seg_color if variant == "highlight" else "white"
+                tokens.append({"text": word, "color": color, "br": False})
+
+    word_tokens = [t for t in tokens if not t["br"]]
+    if title_case and word_tokens:
+        new_texts = _smart_title_words([t["text"] for t in word_tokens])
+        for t, nt in zip(word_tokens, new_texts):
+            t["text"] = nt
+
+    # 'yellow' variant: color the LAST text-bearing word yellow.
+    if variant == "yellow":
+        for t in reversed(word_tokens):
+            if _EMOJI_RE.sub("", t["text"]).strip():
+                t["color"] = "yellow"
+                break
+
+    # 2) Split each token into (text_part, emoji_part) + width.
+    def _tok_metrics(tok):
+        em = "".join(_EMOJI_RE.findall(tok["text"]))
+        txt = _EMOJI_RE.sub("", tok["text"]).rstrip()
+        tw = _txt_w(txt)
+        ew = len(em) * int(font_size * 1.05)
+        spacer = int(font_size * 0.20) if (em and txt) else 0
+        return txt, em, tw, ew, spacer, tw + spacer + ew
+
+    space_w = _txt_w(" ")
+
+    # 3) Wrap tokens into lines by pixel width (respect hard breaks).
+    wrapped = [[]]   # list of lines, each a list of token render-dicts
+    cur_w = 0
+    for tok in tokens:
+        if tok["br"]:
+            wrapped.append([])
+            cur_w = 0
+            continue
+        txt, em, tw, ew, spacer, total = _tok_metrics(tok)
+        sep = space_w if wrapped[-1] else 0
+        if wrapped[-1] and cur_w + sep + total > max_content_w:
+            wrapped.append([])
+            cur_w = 0
+            sep = 0
+        wrapped[-1].append({"txt": txt, "em": em, "tw": tw, "ew": ew,
+                             "spacer": spacer, "w": total, "color": tok["color"]})
+        cur_w += sep + total
+    wrapped = [ln for ln in wrapped if ln] or [[]]
+
+    # 4) Canvas size.
+    def _line_w(ln):
+        return sum(t["w"] for t in ln) + space_w * max(len(ln) - 1, 0)
+    content_w = max((_line_w(ln) for ln in wrapped), default=0)
+    n_lines = len(wrapped)
+    inner_w = min(W_vid, content_w + stroke_width * 2 + 8)
+    inner_h = line_h * n_lines + line_gap * max(n_lines - 1, 0) + stroke_width * 2 + 8
+
+    has_shadow = (variant == "clean")
+    M = 16 if has_shadow else 0          # margin for blur+offset
+    box_w = inner_w + 2 * M
+    box_h = inner_h + 2 * M
+
+    img = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
+
+    # Pilmoji context (emojis painted in color, no stroke).
+    has_any_emoji = any(t["em"] for ln in wrapped for t in ln)
+    pilmoji_ctx = None
+    if has_any_emoji:
+        try:
+            from pilmoji import Pilmoji
+            from pilmoji.source import AppleEmojiSource
+            pilmoji_ctx = Pilmoji(img, source=AppleEmojiSource)
+        except Exception as e:
+            print(f"[Text Caption] Pilmoji unavailable: {e}")
+
+    draw = ImageDraw.Draw(img)
+
+    def _draw_line(d, ln, y, paint_text=True):
+        lw = _line_w(ln)
+        x = M + (inner_w - lw) // 2
+        for t in ln:
+            if t["txt"] and paint_text:
+                col = CAPTION_COLORS.get(t["color"], CAPTION_COLORS["white"])
+                # Outline pass (black).
+                for dx in range(-stroke_width, stroke_width + 1):
+                    for dy in range(-stroke_width, stroke_width + 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        if dx * dx + dy * dy <= stroke_width * stroke_width + stroke_width:
+                            d.text((x + dx, y + dy), t["txt"], font=font, fill=(0, 0, 0, 255))
+                d.text((x, y), t["txt"], font=font, fill=col)
+            # Emoji painted in color (after outline) by Pilmoji.
+            if t["em"] and pilmoji_ctx and paint_text:
+                emoji_x = x + t["tw"] + t["spacer"]
+                pilmoji_ctx.text((emoji_x, y), t["em"], font=font,
+                                 fill=(255, 255, 255, 255),
+                                 emoji_position_offset=(0, -int(font_size * 0.80)))
+            x += t["w"] + space_w
+
+    # Soft drop shadow for clean: render a black silhouette, blur, offset.
+    if has_shadow:
+        shadow = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
+        sdraw = ImageDraw.Draw(shadow)
+        for i, ln in enumerate(wrapped):
+            y = M + stroke_width + 4 + i * (line_h + line_gap)
+            lw = _line_w(ln)
+            x = M + (inner_w - lw) // 2
+            for t in ln:
+                if t["txt"]:
+                    sdraw.text((x, y), t["txt"], font=font, fill=(0, 0, 0, 200))
+                x += t["w"] + space_w
+        shadow = shadow.filter(_ImF.GaussianBlur(6))
+        shadow = ImageChops.offset(shadow, 0, 4)
+        img.alpha_composite(shadow)
+
+    for i, ln in enumerate(wrapped):
+        y = M + stroke_width + 4 + i * (line_h + line_gap)
+        _draw_line(draw, ln, y)
+
+    if pilmoji_ctx:
+        try:
+            pilmoji_ctx.close()
+        except Exception:
+            pass
+
+    temp_dir = os.path.join(os.path.dirname(__file__), "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    png_path = os.path.join(temp_dir, f"caption_{variant}_{_uuid.uuid4().hex}.png")
     img.save(png_path)
     return png_path, box_w, box_h
 
@@ -1627,7 +1907,10 @@ def generate_preview_frame(
         # Pass the RAW caption (with user-typed \n intact) — create_caption_overlay
         # does its own pixel-wrap. Avoids the char-based pre-split turning into
         # spurious hard breaks inside _wrap_px (which respects \n as forced).
-        lines = [_caption] if _caption else []
+        # Strip color markers for every style EXCEPT highlight (which parses
+        # them into colored spans). Keeps box/tiktok from showing literal *.
+        _cap_for_style = _caption if caption_style == 'highlight' else strip_caption_markers(_caption)
+        lines = [_cap_for_style] if _cap_for_style else []
         pad_x, pad_y = caption_box_pad_x, caption_box_pad_y
         line_gap = 5
         base_y = int(text_y * target_h)
@@ -1635,6 +1918,10 @@ def generate_preview_frame(
         if caption_style == 'tiktok':
             rounded_box_path, box_w, box_h = create_tiktok_caption_overlay(
                 lines, font_size=font_size, font_key=caption_font
+            )
+        elif caption_style in ('clean', 'highlight', 'yellow'):
+            rounded_box_path, box_w, box_h = create_text_caption_overlay(
+                lines, variant=caption_style, font_size=font_size, font_key=caption_font
             )
         else:
             rounded_box_path, box_w, box_h = create_caption_overlay(
@@ -1873,7 +2160,10 @@ def generate_preview_clip(
         # Pass the RAW caption (with user-typed \n intact) — create_caption_overlay
         # does its own pixel-wrap. Avoids the char-based pre-split turning into
         # spurious hard breaks inside _wrap_px (which respects \n as forced).
-        lines = [_caption] if _caption else []
+        # Strip color markers for every style EXCEPT highlight (which parses
+        # them into colored spans). Keeps box/tiktok from showing literal *.
+        _cap_for_style = _caption if caption_style == 'highlight' else strip_caption_markers(_caption)
+        lines = [_cap_for_style] if _cap_for_style else []
         pad_x, pad_y = caption_box_pad_x, caption_box_pad_y
         line_gap = 5
         base_y = int(text_y * target_h)
@@ -1881,6 +2171,10 @@ def generate_preview_clip(
         if caption_style == 'tiktok':
             rounded_box_path, box_w, box_h = create_tiktok_caption_overlay(
                 lines, font_size=font_size, font_key=caption_font
+            )
+        elif caption_style in ('clean', 'highlight', 'yellow'):
+            rounded_box_path, box_w, box_h = create_text_caption_overlay(
+                lines, variant=caption_style, font_size=font_size, font_key=caption_font
             )
         else:
             rounded_box_path, box_w, box_h = create_caption_overlay(

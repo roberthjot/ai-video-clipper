@@ -753,7 +753,7 @@ def analyze_video(
             # Strip punctuation but PRESERVE letters, digits, apostrophes, and emoji unicode
             # Emojis are kept by allowing characters in common emoji unicode ranges
             caption = re.sub(
-                r"[^\w\s'\U0001F300-\U0001FAFF\U00002600-\U000027BF\u2700-\u27bf\u2600-\u26ff]",
+                r"[^\w\s'*\U0001F300-\U0001FAFF\U00002600-\U000027BF\u2700-\u27bf\u2600-\u26ff]",
                 '', caption
             ).strip()
             # Remove extra spaces
@@ -976,7 +976,7 @@ def _fill_with_alternates(file_obj, clips: list, needed: int, system_prompt: str
             alt = alt_by_start.get(orig.start_time) or (alt_data[i] if i < len(alt_data) else {})
             caption = alt.get("viral_caption", orig.viral_caption)
             caption = caption.replace('\u2019', "'").replace('\u2018', "'")
-            caption = re.sub(r"[^\w\s']", '', caption).strip()
+            caption = re.sub(r"[^\w\s'*]", '', caption).strip()
             caption = re.sub(r'\s+', ' ', caption).strip()
             caption = caption[:1].upper() + caption[1:].lower() if caption else caption
 
