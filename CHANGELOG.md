@@ -2,6 +2,20 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🐛 Fix: Twitch clip downloads (PersistedQueryNotFound)
+
+All Twitch clip downloads started failing with `PersistedQueryNotFound`
+(batch returned 502, "None of the clips could be downloaded"). Twitch
+rotated the SHA256 hash of its `VideoAccessToken_Clip` persisted GraphQL
+query, so the hard-coded `_CLIP_TOKEN_HASH` we sent was no longer
+recognized.
+
+Fix: `twitch_service.get_clip_download_url` now sends the **full GraphQL
+query document** inline (`_CLIP_TOKEN_QUERY`) instead of a persisted-query
+hash. This is rotation-proof — Twitch can change its hashes without
+breaking us again. Verified end-to-end against live clips (returns signed
+MP4 URLs + video qualities). Not a key/app issue — purely Twitch-side.
+
 ## 🎨 New caption styles (clean / highlight / yellow) + color markers
 
 The main Gemini caption (the big overlay text) had only 2 styles — "Caja

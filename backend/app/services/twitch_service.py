@@ -146,10 +146,21 @@ def get_video_info(video_id: str) -> dict:
 
 _GQL_URL = "https://gql.twitch.tv/gql"
 _WEB_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
-# Persisted-query SHA for the public clip access-token query. This is what
-# twitch.tv itself uses when you press play on a clip page — gives a signed
-# direct MP4 URL.
-_CLIP_TOKEN_HASH = "36b89d2507fce29e5ca551df756d27c1cfe079e2609642b4390aa4c35796eb11"
+# Full GraphQL document for the public clip access-token query (gives a signed
+# direct MP4 URL — same call twitch.tv makes when you press play on a clip).
+# We send the FULL query instead of a persisted-query SHA hash: Twitch rotates
+# those hashes periodically and a stale hash returns "PersistedQueryNotFound",
+# which broke clip downloads. Sending the document inline is rotation-proof.
+_CLIP_TOKEN_QUERY = (
+    "query VideoAccessToken_Clip($slug: ID!) {"
+    "  clip(slug: $slug) {"
+    "    playbackAccessToken(params: {platform: \"web\", playerBackend: \"mediaplayer\", playerType: \"site\"}) {"
+    "      signature value"
+    "    }"
+    "    videoQualities { frameRate quality sourceURL }"
+    "  }"
+    "}"
+)
 
 
 def get_clip_download_url(clip_slug: str, preferred_quality: str = "720") -> tuple:
@@ -163,8 +174,8 @@ def get_clip_download_url(clip_slug: str, preferred_quality: str = "720") -> tup
     import urllib.parse
     body = json.dumps([{
         "operationName": "VideoAccessToken_Clip",
-        "variables": {"platform": "web", "slug": clip_slug},
-        "extensions": {"persistedQuery": {"version": 1, "sha256Hash": _CLIP_TOKEN_HASH}},
+        "query": _CLIP_TOKEN_QUERY,
+        "variables": {"slug": clip_slug},
     }]).encode("utf-8")
     req = urllib.request.Request(
         _GQL_URL, data=body,
