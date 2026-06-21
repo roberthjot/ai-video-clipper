@@ -33,7 +33,7 @@ DEFAULTS = {
     "analysis_system": {
         "label": "Análisis principal (clips + captions)",
         "description": "El prompt grande que detecta los clips virales, escribe el caption, el score y la descripción de Instagram. El más importante.",
-        "tokens": ["{{TARGET_CLIPS}}", "{{MIN_DURATION}}", "{{VIDEO_DURATION}}", "{{DUR_MIN}}", "{{THIRD1}}", "{{THIRD2}}", "{{VIDEO_DURATION_INT}}", "{{START_MAX}}", "{{INSTRUCTION}}", "{{CREATOR_SECTION}}", "{{TRANSCRIPT_SECTION}}"],
+        "tokens": ["{{TARGET_CLIPS}}", "{{MIN_DURATION}}", "{{MAX_DURATION}}", "{{VIDEO_DURATION}}", "{{DUR_MIN}}", "{{THIRD1}}", "{{THIRD2}}", "{{VIDEO_DURATION_INT}}", "{{START_MAX}}", "{{INSTRUCTION}}", "{{CREATOR_SECTION}}", "{{TRANSCRIPT_SECTION}}"],
         "text": (
             "\n"
             "    You are the #1 viral video editor on TikTok with 10 years of experience creating content that gets hundreds of millions of views.\n"
@@ -112,11 +112,20 @@ DEFAULTS = {
             "\n"
             "    TIMESTAMP RULES (CRITICAL):\n"
             "    1. Use simple decimal numbers only (e.g. 10.5). NO leading zeros.\n"
-            "    2. Clip duration MUST be between {{MIN_DURATION}} and 60 seconds. Vary the durations — not all clips the same length.\n"
+            "    2. Clip duration MUST be between {{MIN_DURATION}} and {{MAX_DURATION}} seconds. Vary the durations — not all clips the same length.\n"
+            "       - Keep MOST clips punchy (around {{MIN_DURATION}}-45s). That is the default.\n"
+            "       - A clip MAY run longer, up to {{MAX_DURATION}}s, ONLY when the moment is a complete self-contained story, argument, or exchange that genuinely needs the extra time (e.g. a full anecdote or a back-and-forth on a podcast). If a good moment is long, RESPECT it — do not chop it down just to be short.\n"
+            "       - NEVER pad a clip with filler to make it longer.\n"
             "    3. The video is EXACTLY {{VIDEO_DURATION}} seconds long ({{DUR_MIN}} minutes).\n"
             "       - \"start_time\" MUST be less than {{START_MAX}}.\n"
             "       - \"end_time\" MUST be less than or equal to {{VIDEO_DURATION}}.\n"
             "       - Clips beyond {{VIDEO_DURATION}} seconds DO NOT EXIST and will be rejected.\n"
+            "\n"
+            "    COMPLETE THOUGHTS (CRITICAL — the clip must stand alone):\n"
+            "    - Every clip MUST begin and end on a COMPLETE thought. Start at the beginning of the sentence or idea, end after it fully resolves.\n"
+            "    - NEVER cut someone off mid-sentence or mid-word, at the start OR the end.\n"
+            "    - The viewer should understand the clip with ZERO outside context. If the ending feels abrupt or the setup is missing, extend the timestamps (within the max) until the moment is whole.\n"
+            "    - It is better to make a clip a few seconds longer so it ends cleanly than to cut a thought in half.\n"
             "\n"
             "    TIMESTAMP ACCURACY (EXTREMELY IMPORTANT):\n"
             "    Before writing each clip's start_time and end_time, STOP and ask yourself:\n"

@@ -398,6 +398,7 @@ function UploadStep({ onComplete }) {
   const [file, setFile] = useState(null);
   const [clipCount, setClipCount] = useState(25);
   const [minDuration, setMinDuration] = useState(15);
+  const [maxDuration, setMaxDuration] = useState(90);
   const [customPrompt, setCustomPrompt] = useState("");
   const [contentType, setContentType] = useState("drama"); // "drama" | "motivational"
   const { model: geminiModel, setModel: setGeminiModel } = useModel(); // global model (synced w/ sidebar + Ajustes)
@@ -480,7 +481,8 @@ function UploadStep({ onComplete }) {
         geminiModel,
         creatorName,
         startSec,
-        analyzeDuration
+        analyzeDuration,
+        maxDuration
       );
 
       setProjectIdRef(uploadRes.project_id);
@@ -669,19 +671,29 @@ function UploadStep({ onComplete }) {
       <div className="st-card" style={{ padding: "20px 24px", marginBottom: 18 }}>
         <div className="st-eyebrow" style={{ marginBottom: 16 }}>Configuración</div>
 
-        {/* Clips + min duration */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 18 }}>
+        {/* Clips + min/max duration */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 6 }}>
           <div>
             <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>Número de clips</label>
             <input type="number" value={clipCount} onChange={(e) => setClipCount(Math.max(1, parseInt(e.target.value) || 1))} min={1} max={50}
               className="st-input" style={{ fontFamily: "var(--st-mono)" }} />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>Duración mínima (seg)</label>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>Duración mín. (seg)</label>
             <input type="number" value={minDuration} onChange={(e) => setMinDuration(parseInt(e.target.value) || 10)} min={5} max={120}
               className="st-input" style={{ fontFamily: "var(--st-mono)" }} />
           </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>Duración máx. (seg)</label>
+            <input type="number" value={maxDuration}
+              onChange={(e) => setMaxDuration(Math.min(180, Math.max(minDuration + 5, parseInt(e.target.value) || 90)))}
+              min={20} max={180}
+              className="st-input" style={{ fontFamily: "var(--st-mono)" }} />
+          </div>
         </div>
+        <p style={{ fontSize: 11, color: "var(--st-faint)", margin: "0 0 18px", lineHeight: 1.5 }}>
+          Para podcasts subí el máximo (90-180s) — si un momento es bueno pero largo, Gemini lo respeta y lo deja completo. Para short-form dejalo en ~60.
+        </p>
 
         {/* Content type */}
         <div style={{ marginBottom: 18 }}>
@@ -3550,7 +3562,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             {/* Subtítulos */}
             <StSection icon={<Type size={14} />}>Subtítulos</StSection>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: style.subtitle_style !== "none" ? 14 : 8 }}>
-              {[["none", "Ninguno"], ["standard", "Estándar"], ["clean", "Limpio"], ["karaoke", "Karaoke"], ["popup", "Pop-up"], ["highlight", "Highlight"], ["big_center", "Big Center"], ["twoword", "Two-Word"], ["bounce", "Bounce"], ["typewriter", "Typewriter"], ["karaoke_green", "Karaoke Verde"], ["karaoke_blue", "Karaoke Azul"], ["karaoke_pink", "Karaoke Rosa"], ["box_green", "Caja Verde"], ["box_blue", "Caja Azul"], ["neon", "Neón"], ["karaoke_red", "Karaoke Rojo"], ["karaoke_orange", "Karaoke Naranja"], ["karaoke_purple", "Karaoke Morado"], ["box_pink", "Caja Rosa"], ["box_red", "Caja Roja"], ["line_box", "Caja Línea"], ["underline", "Subrayado"], ["bubble", "Burbuja"], ["reveal", "Aparece"], ["stack", "Vertical"], ["hollow", "Contorno"], ["retro", "Retro 3D"]].map(([v, label]) => (
+              {[["none", "Ninguno"], ["standard", "Estándar"], ["clean", "Limpio"], ["karaoke", "Karaoke"], ["popup", "Pop-up"], ["highlight", "Highlight"], ["big_center", "Big Center"], ["twoword", "Two-Word"], ["bounce", "Bounce"], ["typewriter", "Typewriter"], ["karaoke_green", "Karaoke Verde"], ["karaoke_blue", "Karaoke Azul"], ["karaoke_pink", "Karaoke Rosa"], ["box_green", "Caja Verde"], ["box_blue", "Caja Azul"], ["neon", "Neón"], ["karaoke_red", "Karaoke Rojo"], ["karaoke_orange", "Karaoke Naranja"], ["karaoke_purple", "Karaoke Morado"], ["box_pink", "Caja Rosa"], ["box_red", "Caja Roja"], ["line_box", "Caja Línea"], ["underline", "Subrayado"], ["bubble", "Burbuja"], ["reveal", "Aparece"], ["stack", "Vertical"], ["hollow", "Contorno"], ["retro", "Retro 3D"], ["word_zoom", "1 palabra Zoom"], ["word_yellow", "1 palabra Amarillo"], ["word_box", "1 palabra Caja"], ["word_neon", "1 palabra Neón"], ["word_3d", "1 palabra 3D"], ["word_rotate", "1 palabra Giro"], ["word_glitch", "1 palabra Glitch"], ["word_outline", "1 palabra Doble borde"], ["word_gold", "1 palabra Gold"], ["word_comic", "1 palabra Comic"], ["word_italic", "1 palabra Itálica"], ["word_strip", "1 palabra Barra"], ["word_minimal", "1 palabra Minimal"], ["word_longshadow", "1 palabra Sombra"]].map(([v, label]) => (
                 <SubThumb key={v} styleKey={v} label={label} selected={style.subtitle_style === v} onClick={() => setStyle((s) => ({ ...s, subtitle_style: v }))} />
               ))}
             </div>
@@ -8104,6 +8116,34 @@ function SubThumb({ styleKey, label, selected, onClick }) {
     body = <span style={{ ...base, fontSize: 18, display: "inline-block", transform: "rotate(-3deg)" }}>bounce!</span>;
   else if (styleKey === "typewriter")
     body = <span style={{ ...base, fontSize: 13 }}>typing<span style={{ opacity: 0.65 }}>|</span></span>;
+  else if (styleKey === "word_zoom")
+    body = <span style={{ ...base, fontSize: 25, letterSpacing: ".5px" }}>ZOOM</span>;
+  else if (styleKey === "word_yellow")
+    body = <span style={{ ...base, fontSize: 22, color: "#ffe14d" }}>WORD</span>;
+  else if (styleKey === "word_box")
+    body = <span style={{ ...base, textShadow: "none", background: "#fff", color: "#000", padding: "3px 9px", borderRadius: 6, fontSize: 18 }}>WORD</span>;
+  else if (styleKey === "word_neon")
+    body = <span style={{ ...base, fontSize: 21, textShadow: "0 0 7px #3dd6ff,0 0 13px #3dd6ff,1.3px 1.3px 0 #000,-1.3px 1.3px 0 #000,1.3px -1.3px 0 #000,-1.3px -1.3px 0 #000" }}>WORD</span>;
+  else if (styleKey === "word_3d")
+    body = <span style={{ ...base, fontSize: 22, textShadow: "4px 4px 0 #ff2db8,1.3px 1.3px 0 #000,-1.3px -1.3px 0 #000,1.3px -1.3px 0 #000,-1.3px 1.3px 0 #000" }}>WORD</span>;
+  else if (styleKey === "word_rotate")
+    body = <span style={{ ...base, fontSize: 21, display: "inline-block", transform: "rotate(-12deg)" }}>SPIN</span>;
+  else if (styleKey === "word_glitch")
+    body = <span style={{ ...base, fontSize: 21, textShadow: "-2px 0 #ff2d2d, 2px 0 #00e5ff, 1.3px 1.3px 0 #000,-1.3px -1.3px 0 #000" }}>WORD</span>;
+  else if (styleKey === "word_outline")
+    body = <span style={{ fontFamily: '"Arial Black", Impact, sans-serif', fontWeight: 900, fontSize: 20, color: "#fff", WebkitTextStroke: "3px #ffe14d", textShadow: "0 0 4px #000, 2px 2px 0 #000" }}>WORD</span>;
+  else if (styleKey === "word_gold")
+    body = <span style={{ ...base, fontSize: 21, color: "#e6b422", textShadow: "1.3px 1.3px 0 #3a2a08,-1.3px -1.3px 0 #3a2a08,1.3px -1.3px 0 #3a2a08,-1.3px 1.3px 0 #3a2a08" }}>GOLD</span>;
+  else if (styleKey === "word_comic")
+    body = <span style={{ fontFamily: '"Arial Black", Impact, sans-serif', fontWeight: 900, fontSize: 21, color: "#fff", WebkitTextStroke: "3px #e0301f" }}>BOOM</span>;
+  else if (styleKey === "word_italic")
+    body = <span style={{ ...base, fontSize: 21, fontStyle: "italic", display: "inline-block", transform: "skewX(-9deg)" }}>WORD</span>;
+  else if (styleKey === "word_strip")
+    body = <span style={{ ...base, textShadow: "none", background: "rgba(0,0,0,.55)", padding: "3px 10px", fontSize: 18 }}>WORD</span>;
+  else if (styleKey === "word_minimal")
+    body = <span style={{ fontFamily: '"Arial", "Helvetica Neue", sans-serif', fontWeight: 700, fontSize: 17, color: "#fff", letterSpacing: ".5px", textTransform: "lowercase" }}>word</span>;
+  else if (styleKey === "word_longshadow")
+    body = <span style={{ ...base, fontSize: 20, textShadow: "2px 2px 0 #111,4px 4px 0 #111,6px 6px 0 #111,8px 8px 0 #111,10px 10px 0 #111" }}>WORD</span>;
   else
     body = <span style={{ ...base, fontSize: 12.5 }}>clean caption</span>;
   return (
@@ -9263,6 +9303,11 @@ function EditorMode({ onExit }) {
     ["karaoke_red", "Karaoke Rojo"], ["karaoke_orange", "Karaoke Naranja"], ["karaoke_purple", "Karaoke Morado"],
     ["box_pink", "Caja Rosa"], ["box_red", "Caja Roja"], ["line_box", "Caja Línea"], ["underline", "Subrayado"],
     ["bubble", "Burbuja"], ["reveal", "Aparece"], ["stack", "Vertical"], ["hollow", "Contorno"], ["retro", "Retro 3D"],
+    ["word_zoom", "1 palabra Zoom"], ["word_yellow", "1 palabra Amarillo"], ["word_box", "1 palabra Caja"],
+    ["word_neon", "1 palabra Neón"], ["word_3d", "1 palabra 3D"], ["word_rotate", "1 palabra Giro"],
+    ["word_glitch", "1 palabra Glitch"], ["word_outline", "1 palabra Doble borde"], ["word_gold", "1 palabra Gold"],
+    ["word_comic", "1 palabra Comic"], ["word_italic", "1 palabra Itálica"], ["word_strip", "1 palabra Barra"],
+    ["word_minimal", "1 palabra Minimal"], ["word_longshadow", "1 palabra Sombra"],
   ];
   // Thin adapter over the shared StSlider (keeps EditorMode's number-style
   // onChange + `val` prop so existing usages stay unchanged).

@@ -560,6 +560,7 @@ def analyze_video(
     transcript: dict = None,
     model: str = None,
     creator_name: str = "",
+    max_duration: int = 90,
 ) -> list[ClipData]:
     """
     Use Gemini to analyze a video and identify viral clip candidates.
@@ -609,6 +610,7 @@ def analyze_video(
         "analysis_system",
         TARGET_CLIPS=target_clips,
         MIN_DURATION=min_duration,
+        MAX_DURATION=max_duration,
         VIDEO_DURATION=video_duration,
         DUR_MIN=f"{video_duration/60:.1f}",
         THIRD1=f"{video_duration/3:.0f}",
@@ -699,7 +701,7 @@ def analyze_video(
 
     print(f"[Gemini] min_duration={min_duration}, clips from Gemini: {len(clips_raw)}")
 
-    def build_clips(clips_raw, video_duration, min_duration, existing_starts: list = []):
+    def build_clips(clips_raw, video_duration, min_duration, existing_starts: list = [], max_duration: int = 90):
         clips = []
         skipped = 0
         # Seed deduplication with already-accepted starts so the retry pass
@@ -724,9 +726,12 @@ def analyze_video(
             if end > video_duration:
                 end = video_duration
 
-            # Enforce maximum duration of 60 seconds
-            if end - start > 60:
-                end = start + 60
+            # Enforce maximum duration. Gemini's chosen end_time is respected as
+            # long as the clip is within max_duration — so genuinely long, complete
+            # moments (e.g. a podcast story) survive intact. Only runaway clips
+            # past the cap get trimmed.
+            if end - start > max_duration:
+                end = start + max_duration
 
             # Enforce minimum duration — extend end if too short
             if end - start < min_duration:
@@ -785,7 +790,7 @@ def analyze_video(
             ))
         return clips, skipped
 
-    clips, skipped = build_clips(clips_raw, video_duration, min_duration)
+    clips, skipped = build_clips(clips_raw, video_duration, min_duration, max_duration=max_duration)
 
     # Truncate to requested count if Gemini returned more than asked
     if len(clips) > target_clips:
@@ -834,7 +839,8 @@ def analyze_video(
             retry_text = re.sub(r"\b0+(\d)", r"\1", retry_text)
             retry_raw = json.loads(retry_text)
             retry_clips, _ = build_clips(retry_raw, video_duration, min_duration,
-                                          existing_starts=[c.start_time for c in clips])
+                                          existing_starts=[c.start_time for c in clips],
+                                          max_duration=max_duration)
             # Renumber and append
             for c in retry_clips:
                 c.id = len(clips) + 1

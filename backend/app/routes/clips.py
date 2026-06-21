@@ -172,6 +172,7 @@ async def analyze_video(req: AnalyzeRequest):
                             transcript,
                             project.gemini_model,
                             getattr(project, 'creator_name', ''),
+                            getattr(project, 'max_duration', 90),
                         )
                     except Exception as e:
                         last_err = e
@@ -287,6 +288,7 @@ async def _analyze_in_chunks(project, duration: float, transcript: dict, video_p
                     chunk_transcript,
                     project.gemini_model,
                     getattr(project, 'creator_name', ''),
+                    getattr(project, 'max_duration', 90),
                 )
             except Exception as e:
                 last_err = e

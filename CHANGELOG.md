@@ -2,6 +2,62 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🔤 14 one-word subtitle styles + configurable max clip duration
+
+### One-word-at-a-time subtitle styles (×14)
+
+The subtitle catalog gained 14 styles that show ONE word at a time (each
+Whisper word = its own ASS event, visible from its start to the next
+word's start). All in `subtitle_service.py`.
+
+First batch (6), via the shared `_one_word_events(words, render)` helper:
+- `word_zoom` (hard zoom punch), `word_yellow` (bright yellow pop),
+  `word_box` (word in a solid white box), `word_neon` (cyan glow),
+  `word_3d` (offset magenta 3D shadow), `word_rotate` (spin/wobble in).
+
+Second batch (8), some needing multiple layers per word, via a new
+`_one_word_multi(words, build, upper=)` helper:
+- `word_glitch` — RGB chromatic split (red/cyan). The horizontal offset
+  between the 3 layers uses **asymmetric MarginL/MarginR**, NOT `\pos`, so
+  the style's vertical position + the y-offset slider keep working.
+- `word_outline` — double outline (black outer + yellow inner), 2 layers.
+- `word_gold` — gold fill + dark thin outline (premium/finance look).
+- `word_comic` — thick red outline + white fill.
+- `word_italic` — slanted bold italic (`_ass_header` now has an `italic`
+  field, wired into the Style line).
+- `word_strip` — word on a semi-transparent black bar (BorderStyle=3 +
+  `\3a` alpha).
+- `word_minimal` — lowercase, thin Arial, modern aesthetic (the only
+  non-caps style; `upper=False`).
+- `word_longshadow` — long diagonal dark shadow (`\xshad`/`\yshad`).
+
+Each got an `_ass_header` branch (size/outline/position/special fields), a
+dispatch branch in `generate_ass_for_clip`, and a frontend entry: both
+subtitle selectors (Visual Editor Paso 3 + EditorMode) plus a `SubThumb`
+CSS preview. Catalog total: 41 styles (+ none), 14 of them one-word.
+Verified with real FFmpeg/libass burn-ins.
+
+### Configurable max clip duration (podcast support)
+
+The hard 60-second clip cap is now a configurable maximum (default 90,
+range 20-180) so good-but-long moments survive intact — important for
+podcasts.
+
+- `Project.max_duration` (default 90); `upload.py` accepts a `max_duration`
+  Form field (clamped to `min_duration + 5`).
+- `gemini_service.analyze_video` + `build_clips` take `max_duration`; the
+  truncation `end = start + 60` became `end = start + max_duration`, so
+  Gemini's chosen end is respected when within the cap and only runaway
+  clips get trimmed. Both `clips.py` call sites pass `project.max_duration`.
+- Prompt (`prompts.py` analysis_system): the 60s rule is now
+  `{{MAX_DURATION}}`, plus guidance to keep most clips punchy but let a
+  clip run long when the moment is a complete self-contained story — and a
+  new "COMPLETE THOUGHTS" block telling Gemini to start/end on a complete
+  idea and never cut mid-sentence (boundaries are Gemini's job, no Whisper
+  snapping).
+- Frontend: a "Duración máx. (seg)" field next to mín. in `UploadStep`
+  (default 90, clamp 20-180), passed through `api.uploadVideo`.
+
 ## 🐛 Fix: Twitch clip downloads (PersistedQueryNotFound)
 
 All Twitch clip downloads started failing with `PersistedQueryNotFound`

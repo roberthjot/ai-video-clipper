@@ -50,6 +50,7 @@ def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920, size_scale
     shadow = 2
     fontname = "Arial Black"   # default for all the chunky-text styles
     spacing = 0                # extra horizontal pixels between letters
+    italic = 0                 # -1 = italic
     if style == "standard":
         # Netflix / documentary / iPhone-caption look — ALL CAPS, thin Arial
         # Bold (NOT the chunky Arial Black), tight outline, no shadow.
@@ -117,6 +118,70 @@ def _ass_header(style: str, video_w: int = 1080, video_h: int = 1920, size_scale
         font_size = 80
         outline = 6
         marginV = int(video_h * 0.30)
+    elif style == "word_zoom":
+        font_size = 130
+        outline = 9
+        marginV = int(video_h * 0.42)
+    elif style == "word_yellow":
+        font_size = 120
+        outline = 9
+        marginV = int(video_h * 0.42)
+    elif style == "word_box":
+        font_size = 92
+        outline = 8             # box padding (BorderStyle=3)
+        marginV = int(video_h * 0.42)
+        border_style = 3
+        shadow = 0
+    elif style == "word_neon":
+        font_size = 115
+        outline = 5
+        marginV = int(video_h * 0.42)
+    elif style == "word_3d":
+        font_size = 115
+        outline = 6
+        marginV = int(video_h * 0.40)
+        shadow = 8
+    elif style == "word_rotate":
+        font_size = 120
+        outline = 9
+        marginV = int(video_h * 0.42)
+    elif style == "word_glitch":
+        font_size = 118
+        outline = 2
+        marginV = int(video_h * 0.42)
+    elif style == "word_outline":
+        font_size = 112
+        outline = 2             # per-layer \bord overrides this
+        marginV = int(video_h * 0.42)
+    elif style == "word_gold":
+        font_size = 110
+        outline = 4
+        marginV = int(video_h * 0.42)
+    elif style == "word_comic":
+        font_size = 112
+        outline = 10
+        marginV = int(video_h * 0.42)
+    elif style == "word_italic":
+        font_size = 110
+        outline = 6
+        marginV = int(video_h * 0.42)
+        italic = -1
+    elif style == "word_strip":
+        font_size = 92
+        outline = 22            # bar padding (BorderStyle=3)
+        marginV = int(video_h * 0.42)
+        border_style = 3
+        shadow = 0
+    elif style == "word_minimal":
+        font_size = 86
+        outline = 2
+        marginV = int(video_h * 0.42)
+        fontname = "Arial"
+        spacing = 3
+    elif style == "word_longshadow":
+        font_size = 112
+        outline = 3
+        marginV = int(video_h * 0.42)
     else:  # clean
         font_size = 75
         outline = 5
@@ -145,7 +210,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{fontname},{font_size},{WHITE},{YELLOW},{BLACK_OUTLINE},{BLACK_BG},-1,0,0,0,100,100,{spacing},0,{border_style},{outline},{shadow},2,40,40,{marginV},1
+Style: Default,{fontname},{font_size},{WHITE},{YELLOW},{BLACK_OUTLINE},{BLACK_BG},-1,{italic},0,0,100,100,{spacing},0,{border_style},{outline},{shadow},2,40,40,{marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -593,6 +658,155 @@ def _generate_retro(words: list) -> str:
     return "\n".join(events)
 
 
+# ─── One-word-at-a-time styles ───────────────────────────────────────────────
+# Each word gets its own Dialogue event, visible from its start until the next
+# word's start (no gaps). `render(text)` returns the ASS-styled word.
+
+def _one_word_events(words: list, render) -> str:
+    events = []
+    n = len(words)
+    for i, w in enumerate(words):
+        seg_start = w["start"]
+        seg_end = words[i + 1]["start"] if i + 1 < n else w["end"]
+        if seg_end <= seg_start:
+            continue
+        text = _escape_ass_text(w["word"].upper())
+        events.append(
+            f"Dialogue: 0,{_format_time(seg_start)},{_format_time(seg_end)},"
+            f"Default,,0,0,0,,{render(text)}"
+        )
+    return "\n".join(events)
+
+
+def _generate_word_zoom(words: list) -> str:
+    """One word punching in with a hard zoom (aggressive Hormozi-style)."""
+    return _one_word_events(words, lambda t: (
+        f"{{\\fad(30,0)\\fscx40\\fscy40"
+        f"\\t(0,130,\\fscx112\\fscy112)\\t(130,210,\\fscx100\\fscy100)}}{t}"
+    ))
+
+
+def _generate_word_yellow(words: list) -> str:
+    """One bright-yellow word with a soft pop (classic viral one-word)."""
+    return _one_word_events(words, lambda t: (
+        f"{{\\fad(50,30)\\1c&H00FFFF&\\fscx88\\fscy88"
+        f"\\t(0,120,\\fscx104\\fscy104)\\t(120,180,\\fscx100\\fscy100)}}{t}"
+    ))
+
+
+def _generate_word_box(words: list) -> str:
+    """One word inside a solid white box (black text). Header sets BorderStyle=3."""
+    return _one_word_events(words, lambda t: (
+        f"{{\\fad(40,20)\\1c&H000000&\\3c&HFFFFFF&}}{t}"
+    ))
+
+
+def _generate_word_neon(words: list) -> str:
+    """One word with a glowing cyan neon outline."""
+    return _one_word_events(words, lambda t: (
+        f"{{\\fad(50,30)\\3c&HFFFF00&\\4c&HFFFF00&\\bord5\\shad5}}{t}"
+    ))
+
+
+def _generate_word_3d(words: list) -> str:
+    """One word with a big offset magenta 3D drop shadow."""
+    return _one_word_events(words, lambda t: (
+        f"{{\\fad(40,20)\\4c&HFF00FF&\\shad8}}{t}"
+    ))
+
+
+def _generate_word_rotate(words: list) -> str:
+    """One word that spins/wobbles into place."""
+    return _one_word_events(words, lambda t: (
+        f"{{\\fad(30,0)\\frz14\\fscx90\\fscy90"
+        f"\\t(0,160,\\frz0\\fscx100\\fscy100)}}{t}"
+    ))
+
+
+# ─── One-word multi-layer styles (glitch, double outline, etc.) ──────────────
+# Some one-word looks need several stacked/offset layers per word (e.g. an RGB
+# glitch split or a double outline). `build(text)` returns a list of
+# (layer, margin_l, margin_r, styled_text). Horizontal offset is done with
+# asymmetric MarginL/MarginR — NOT \pos — so the style's vertical position and
+# the y-offset slider keep working. `upper=False` preserves lowercase.
+
+def _one_word_multi(words: list, build, upper: bool = True) -> str:
+    out = []
+    n = len(words)
+    for i, w in enumerate(words):
+        seg_start = w["start"]
+        seg_end = words[i + 1]["start"] if i + 1 < n else w["end"]
+        if seg_end <= seg_start:
+            continue
+        raw = w["word"].upper() if upper else w["word"].lower()
+        text = _escape_ass_text(raw)
+        for (layer, ml, mr, styled) in build(text):
+            out.append(
+                f"Dialogue: {layer},{_format_time(seg_start)},{_format_time(seg_end)},"
+                f"Default,,{ml},{mr},0,,{styled}"
+            )
+    return "\n".join(out)
+
+
+def _generate_word_glitch(words: list) -> str:
+    """One word with an RGB chromatic-split glitch (red left, cyan right)."""
+    return _one_word_multi(words, lambda t: [
+        (0, 0, 14, f"{{\\1c&H0000FF&\\bord0\\shad0}}{t}"),
+        (1, 14, 0, f"{{\\1c&HFFFF00&\\bord0\\shad0}}{t}"),
+        (2, 0, 0, f"{{\\1c&HFFFFFF&\\3c&H000000&\\bord3\\shad0}}{t}"),
+    ])
+
+
+def _generate_word_outline(words: list) -> str:
+    """One word with a double outline: black outer + yellow inner (MrBeast-ish)."""
+    return _one_word_multi(words, lambda t: [
+        (0, 0, 0, f"{{\\3c&H000000&\\bord16\\shad0}}{t}"),
+        (1, 0, 0, f"{{\\1c&HFFFFFF&\\3c&H00FFFF&\\bord7\\shad0}}{t}"),
+    ])
+
+
+def _generate_word_gold(words: list) -> str:
+    """One gold word with a thin dark outline (premium / finance look)."""
+    return _one_word_multi(words, lambda t: [
+        (0, 0, 0, f"{{\\fad(40,20)\\1c&H0037ABD4&\\3c&H00102338&}}{t}"),
+    ])
+
+
+def _generate_word_comic(words: list) -> str:
+    """One word with a thick red outline + white fill (comic pop)."""
+    return _one_word_multi(words, lambda t: [
+        (0, 0, 0, f"{{\\fad(40,20)\\1c&HFFFFFF&\\3c&H002030E0&}}{t}"),
+    ])
+
+
+def _generate_word_italic(words: list) -> str:
+    """One slanted bold-italic word (header sets Italic)."""
+    return _one_word_multi(words, lambda t: [
+        (0, 0, 0, f"{{\\fad(40,20)}}{t}"),
+    ])
+
+
+def _generate_word_strip(words: list) -> str:
+    """One word on a semi-transparent black bar (header BorderStyle=3)."""
+    return _one_word_multi(words, lambda t: [
+        (0, 0, 0, f"{{\\fad(40,20)\\3a&H80&\\3c&H000000&}}{t}"),
+    ])
+
+
+def _generate_word_minimal(words: list) -> str:
+    """One lowercase word, thin and clean (header uses Arial). Modern aesthetic."""
+    return _one_word_multi(words, lambda t: [
+        (0, 0, 0, f"{{\\fad(40,20)}}{t}"),
+    ], upper=False)
+
+
+def _generate_word_longshadow(words: list) -> str:
+    """One word with a long diagonal dark shadow (flat-design depth)."""
+    return _one_word_multi(words, lambda t: [
+        (0, 0, 0, f"{{\\fad(40,20)\\4c&H0A0A0A&\\xshad10\\yshad10}}{t}"),
+    ])
+
+
 def generate_ass_for_clip(
     transcript: dict,
     clip_start: float,
@@ -686,6 +900,34 @@ def generate_ass_for_clip(
         body = _generate_hollow(clip_words)
     elif style == "retro":
         body = _generate_retro(clip_words)
+    elif style == "word_zoom":
+        body = _generate_word_zoom(clip_words)
+    elif style == "word_yellow":
+        body = _generate_word_yellow(clip_words)
+    elif style == "word_box":
+        body = _generate_word_box(clip_words)
+    elif style == "word_neon":
+        body = _generate_word_neon(clip_words)
+    elif style == "word_3d":
+        body = _generate_word_3d(clip_words)
+    elif style == "word_rotate":
+        body = _generate_word_rotate(clip_words)
+    elif style == "word_glitch":
+        body = _generate_word_glitch(clip_words)
+    elif style == "word_outline":
+        body = _generate_word_outline(clip_words)
+    elif style == "word_gold":
+        body = _generate_word_gold(clip_words)
+    elif style == "word_comic":
+        body = _generate_word_comic(clip_words)
+    elif style == "word_italic":
+        body = _generate_word_italic(clip_words)
+    elif style == "word_strip":
+        body = _generate_word_strip(clip_words)
+    elif style == "word_minimal":
+        body = _generate_word_minimal(clip_words)
+    elif style == "word_longshadow":
+        body = _generate_word_longshadow(clip_words)
     elif style == "standard":
         # Same word-grouping body as clean (already does .upper()) — the
         # different look comes entirely from the header (Arial, thin outline).

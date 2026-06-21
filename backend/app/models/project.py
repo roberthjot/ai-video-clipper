@@ -11,6 +11,7 @@ class Project(BaseModel):
     video_path: str
     clip_count: int
     min_duration: int
+    max_duration: int = 90   # hard cap on clip length (s). 90 fits Reels/Shorts/TikTok.
     custom_prompt: str = ""
     creator_name: str = ""  # comma-separated names to weave into captions/titles
     status: str = "created"  # created, uploading, analyzing, ready, exporting, done
