@@ -1537,9 +1537,12 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   };
 
   const handlePlayClip = async (clip) => {
+    // Instant preview to judge if the MOMENT is good (no styling). Plays the
+    // RAW source seeked to the clip range — zero render, zero wait. The styled
+    // render (captions/crop/blur) lives in the editor where it matters.
     setPlayingClip(clip);
-    setLoadingVideo(true);
-    setVideoUrl(api.getVideoPreviewUrl(projectId, clip.id));
+    setLoadingVideo(false);
+    setVideoUrl(api.getRawVideoUrl(projectId));
   };
 
   const handlePlayClipEs = async (clip) => {
@@ -2483,23 +2486,23 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
             <p style={{ color: "var(--text-secondary)", marginBottom: 12, fontSize: 13 }}>
               {formatTime(playingClip.start_time)} — {formatTime(playingClip.end_time)} ({playingClip.duration.toFixed(0)}s)
             </p>
-            {loadingVideo && (
-              <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-muted)" }}>
-                <div className="loading-spinner" style={{ margin: "0 auto 12px" }}></div>
-                <p style={{ fontSize: 13 }}>Generating preview... (first time may take ~15s)</p>
-              </div>
-            )}
             {videoUrl && (
               <video
-                key={videoUrl}
+                key={playingClip.id}
                 controls
                 autoPlay
-                style={{ width: "100%", borderRadius: 10, background: "black", maxHeight: 400, display: loadingVideo ? "none" : "block" }}
+                style={{ width: "100%", borderRadius: 10, background: "black", maxHeight: 400, display: "block" }}
                 src={videoUrl}
-                onCanPlay={() => setLoadingVideo(false)}
+                onLoadedMetadata={(e) => { try { e.currentTarget.currentTime = playingClip.start_time; } catch {} }}
+                onTimeUpdate={(e) => {
+                  const v = e.currentTarget;
+                  // Loop within the clip range so you can re-watch the moment.
+                  if (v.currentTime >= playingClip.end_time || v.currentTime < playingClip.start_time - 0.5) {
+                    try { v.currentTime = playingClip.start_time; } catch {}
+                  }
+                }}
                 onError={() => {
-                  setLoadingVideo(false);
-                  alert("Failed to generate video preview. Try again.");
+                  alert("No se pudo reproducir el video. ¿El archivo fuente sigue en disco?");
                   setVideoUrl(null);
                 }}
               />
@@ -6250,7 +6253,7 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
               <div style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 11, color: "var(--st-muted)", marginBottom: 4 }}>Fuente</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-                  {[["calibri", "Calibri"], ["arial_black", "Arial Black"], ["trebuchet", "Trebuchet"], ["impact", "Impact"]].map(([k, label]) => {
+                  {[["calibri", "Calibri"], ["arial", "Arial (meme)"], ["segoe", "Segoe UI"], ["arial_black", "Arial Black"], ["trebuchet", "Trebuchet"], ["impact", "Impact"]].map(([k, label]) => {
                     const on = fontFamily === k;
                     return (
                       <button key={k} onClick={() => setFontFamily(k)} style={{
@@ -6893,7 +6896,7 @@ function MemeStep() {
                       <div style={{ marginBottom: 10 }}>
                         <div style={{ fontSize: 11.5, color: "var(--st-muted)", marginBottom: 4 }}>Fuente</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-                          {[["calibri", "Calibri"], ["arial_black", "Arial Black"], ["trebuchet", "Trebuchet"], ["impact", "Impact"]].map(([k, label]) => {
+                          {[["calibri", "Calibri"], ["arial", "Arial (meme)"], ["segoe", "Segoe UI"], ["arial_black", "Arial Black"], ["trebuchet", "Trebuchet"], ["impact", "Impact"]].map(([k, label]) => {
                             const on = gFontFamily === k;
                             return (
                               <button key={k} onClick={() => setGFontFamily(k)} style={{

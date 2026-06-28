@@ -317,12 +317,18 @@ DEFAULTS = {
         "tokens": ["{{MEME_TEXT}}"],
         "text": (
             "This video's meme caption is: \"{{MEME_TEXT}}\"\n\n"
-            "Write a long Instagram post caption for this meme video. "
-            "Write it as a funny, relatable Gen Z meme account post in English. "
-            "Use 3-4 short paragraphs (1-3 sentences each). "
-            "Max 2 emojis total. "
-            "At the very end, after all the text, include EXACTLY 3 relevant hashtags. "
-            "The hashtags must be the absolute last thing in the caption, on their own line. "
+            "Write a long Instagram post caption for this meme video, written in English and "
+            "optimized for SEO / discovery.\n"
+            "STRICT RULES:\n"
+            "- THIRD PERSON ONLY. Never use first person — no \"I\", \"me\", \"my\", \"we\", \"us\", \"our\". "
+            "Describe the meme and the situation from an outside narrator voice (e.g. \"this meme nails how...\", "
+            "\"everyone who has ever...\").\n"
+            "- Still funny and relatable like a popular meme account, just never in first person.\n"
+            "- SEO: naturally weave in searchable keywords and phrases people would actually type to find this "
+            "kind of meme or topic. Put the single most important keyword in the FIRST sentence.\n"
+            "- 3-4 short paragraphs (1-3 sentences each).\n"
+            "- Max 2 emojis total.\n"
+            "- End with EXACTLY 3 relevant, high-traffic hashtags as the absolute last thing, on their own line.\n"
             "Return ONLY the caption — no labels, no extra words."
         ),
     },

@@ -2,6 +2,44 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## ⚡ Instant clip preview + meme SEO/font + Instagram cookies
+
+### Instant "Reproducir" in the clips list (no render)
+
+Clicking ▶ Reproducir on a clip used to call `/video-preview`, which
+re-rendered a styled MP4 with FFmpeg every time (~2-15s wait, no cache).
+But at that stage the user only wants to judge if the MOMENT is good, not
+the styling. Now `handlePlayClip` plays the RAW source (`getRawVideoUrl`)
+seeked to the clip range — **zero render, instant**. The `<video>` seeks to
+`start_time` on `loadedMetadata` and loops within `[start, end]`. The
+styled render (captions/crop/blur) stays in the editor where it matters.
+The `/raw-video` endpoint already supported arbitrary-timestamp seeking
+(the editor uses it), so this reused proven plumbing.
+
+### Meme IG description → third person + SEO
+
+`prompts.py` `ig_description_meme`: now forbids first person ("I/me/my/we/
+us/our"), writes from an outside narrator voice, and is SEO-optimized
+(weaves in searchable keywords, most important one in the first sentence).
+
+### Meme font: Arial + Segoe UI
+
+Added the clean Helvetica-like meme font (the classic "[group] after
+[thing]" caption look). `meme_service._FONT_MAP_MEME` gained `arial`
+(arial.ttf — labeled "Arial (meme)") and `segoe` (segoeui.ttf); both meme
+font pickers (per-meme + global) list them.
+
+### Instagram downloader: cookies support
+
+Instagram now requires a logged-in session for most content (the
+downloader hit "rate-limit reached or login required"). `downloader_
+service.py` now passes login cookies to yt-dlp when available: drop a
+Netscape `instagram_cookies.txt` in the backend folder (or set
+`IG_COOKIES_FILE`), or set `DOWNLOADER_COOKIES_BROWSER=firefox`. Cookies
+are sent to all downloads but yt-dlp only forwards them to matching
+domains, so YouTube/TikTok are unaffected. (Chrome/Edge live cookie
+reading is broken by App-Bound Encryption — the file is the reliable path.)
+
 ## 🔤 14 one-word subtitle styles + configurable max clip duration
 
 ### One-word-at-a-time subtitle styles (×14)

@@ -220,6 +220,8 @@ def _wrap_text_px(text: str, font, max_width: int) -> list:
 # load_default() if the file is missing so non-Windows hosts keep working.
 _FONT_MAP_MEME = {
     "calibri":     "C:/Windows/Fonts/calibrib.ttf",
+    "arial":       "C:/Windows/Fonts/arial.ttf",     # clean Helvetica-like (classic meme font)
+    "segoe":       "C:/Windows/Fonts/segoeui.ttf",   # clean Windows system sans
     "arial_black": "C:/Windows/Fonts/ariblk.ttf",
     "trebuchet":   "C:/Windows/Fonts/trebucbd.ttf",
     "comic":       "C:/Windows/Fonts/comicbd.ttf",

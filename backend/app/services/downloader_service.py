@@ -43,6 +43,29 @@ _DESKTOP_UA = (
     "Chrome/120.0.0.0 Safari/537.36"
 )
 
+# ── Cookies for login-required sites (Instagram especially) ──────────────────
+# Instagram now requires a logged-in session for most content. Two ways to
+# provide it (the file is the reliable one — Chrome/Edge browser-reading is
+# broken by App-Bound Encryption on recent versions):
+#   1) A Netscape cookies.txt file. Drop it as "instagram_cookies.txt" in the
+#      backend folder, OR set IG_COOKIES_FILE=<path>.
+#   2) Read live from a browser: set DOWNLOADER_COOKIES_BROWSER=firefox
+#      (chrome/edge often fail on recent versions).
+# When present, cookies are passed to yt-dlp for ALL downloads — yt-dlp only
+# sends them to matching domains, so YouTube/TikTok are unaffected.
+_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DEFAULT_COOKIES_FILE = os.path.join(_BACKEND_ROOT, "instagram_cookies.txt")
+
+
+def _resolve_cookies_file() -> str | None:
+    env_path = os.getenv("IG_COOKIES_FILE", "").strip()
+    if env_path and os.path.exists(env_path):
+        return env_path
+    if os.path.exists(_DEFAULT_COOKIES_FILE):
+        return _DEFAULT_COOKIES_FILE
+    return None
+
+
 # In-memory job store: job_id -> { status, progress, ... }
 _jobs: dict = {}
 _jobs_lock = threading.Lock()
@@ -206,6 +229,17 @@ def _ydl_opts(url: str, quality: str, audio_only: bool, output_template: str,
         opts["http_headers"] = {"User-Agent": _TIKTOK_MOBILE_UA}
     else:
         opts["http_headers"] = {"User-Agent": _DESKTOP_UA}
+
+    # Login cookies (Instagram needs these now). File wins over browser.
+    cookie_file = _resolve_cookies_file()
+    if cookie_file:
+        opts["cookiefile"] = cookie_file
+        print(f"[Downloader] using cookies file: {os.path.basename(cookie_file)}")
+    else:
+        browser = os.getenv("DOWNLOADER_COOKIES_BROWSER", "").strip().lower()
+        if browser:
+            opts["cookiesfrombrowser"] = (browser,)
+            print(f"[Downloader] using cookies from browser: {browser}")
 
     return opts
 
