@@ -136,6 +136,20 @@ export async function editCaption(projectId, clipId, newCaption) {
     return res.json();
 }
 
+export async function trimClip(projectId, clipId, startTime, endTime) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/trim`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start_time: startTime, end_time: endTime }),
+    });
+    if (!res.ok) {
+        let msg = "Failed to trim clip";
+        try { msg = (await res.json()).detail || msg; } catch {}
+        throw new Error(msg);
+    }
+    return res.json();
+}
+
 export async function uploadWatermark(projectId, file) {
     const formData = new FormData();
     formData.append("watermark", file);

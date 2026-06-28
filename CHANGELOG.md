@@ -2,6 +2,24 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## ✂️ Manual re-trim in the instant clip preview
+
+Building on the instant raw-video preview: the clips-list ▶ player modal now
+lets you adjust the clip's in/out points by hand — for when Gemini's
+auto-cut isn't quite where you want it. Instant, no render.
+
+- Backend: `PUT /api/clips/{project_id}/{clip_id}/trim` `{start_time,
+  end_time}` updates the clip's `start_time` / `end_time` / `duration`
+  (clamped to the video, min 0.5s). No re-render — the editor reads the new
+  times on demand.
+- `api.js`: `trimClip(projectId, clipId, start, end)`.
+- ClipsStep player modal: trim state (`trimStart`/`trimEnd`) + a `playerRef`.
+  Controls: "⏮ Inicio aquí" / "Fin aquí ⏭" (set the in/out to the current
+  playhead), ±0.5s fine nudges, a live range/duration readout. The `<video>`
+  loops within the (live-edited) `[trimStart, trimEnd]` so you see the cut
+  instantly. "Guardar recorte" + "Deshacer" appear only when changed; saving
+  persists via the trim endpoint and updates the list through `onUpdateClip`.
+
 ## ⚡ Instant clip preview + meme SEO/font + Instagram cookies
 
 ### Instant "Reproducir" in the clips list (no render)

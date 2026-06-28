@@ -508,6 +508,39 @@ async def edit_clip_caption(project_id: str, clip_id: int, req: EditCaptionReque
     raise HTTPException(status_code=404, detail="Clip not found")
 
 
+class TrimClipRequest(BaseModel):
+    start_time: float
+    end_time: float
+
+
+@router.put("/{project_id}/{clip_id}/trim")
+async def trim_clip(project_id: str, clip_id: int, req: TrimClipRequest):
+    """Adjust a clip's start/end in/out points (manual re-trim from the
+    instant preview). Just updates the times — no re-render. The styled
+    render in the editor reads these on demand."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    vid_dur = float(getattr(project, "video_duration", 0) or 0)
+    start = max(0.0, float(req.start_time))
+    end = float(req.end_time)
+    if vid_dur > 0:
+        end = min(end, vid_dur)
+    if end - start < 0.5:
+        raise HTTPException(status_code=400, detail="Clip must be at least 0.5s long")
+
+    for clip in project.clips:
+        if clip.id == clip_id:
+            clip.start_time = round(start, 3)
+            clip.end_time = round(end, 3)
+            clip.duration = round(end - start, 3)
+            return {"status": "updated", "clip": clip.model_dump()}
+
+    raise HTTPException(status_code=404, detail="Clip not found")
+
+
 @router.get("/{project_id}/{clip_id}/preview")
 async def preview_clip_frame(project_id: str, clip_id: int):
     """Generate and return a 9:16 preview frame for a clip."""

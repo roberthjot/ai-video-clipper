@@ -1415,6 +1415,11 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   const [playingClip, setPlayingClip] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
   const [loadingVideo, setLoadingVideo] = useState(false);
+  // Manual re-trim of the previewed clip (instant — just moves in/out points).
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [trimSaving, setTrimSaving] = useState(false);
+  const playerRef = useRef(null);
   const [reanalyzingClip, setReanalyzingClip] = useState(null);
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
@@ -1542,7 +1547,26 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     // render (captions/crop/blur) lives in the editor where it matters.
     setPlayingClip(clip);
     setLoadingVideo(false);
+    setTrimStart(clip.start_time);
+    setTrimEnd(clip.end_time);
     setVideoUrl(api.getRawVideoUrl(projectId));
+  };
+
+  // Save the manually re-trimmed in/out points (instant, no render).
+  const handleSaveTrim = async () => {
+    if (!playingClip) return;
+    if (trimEnd - trimStart < 0.5) { alert("El clip debe durar al menos 0.5s"); return; }
+    setTrimSaving(true);
+    try {
+      const res = await api.trimClip(projectId, playingClip.id, trimStart, trimEnd);
+      const updated = res.clip || { start_time: trimStart, end_time: trimEnd, duration: trimEnd - trimStart };
+      if (onUpdateClip) onUpdateClip(playingClip.id, updated);
+      setPlayingClip((p) => ({ ...p, ...updated }));
+    } catch (e) {
+      alert("No se pudo guardar el recorte: " + e.message);
+    } finally {
+      setTrimSaving(false);
+    }
   };
 
   const handlePlayClipEs = async (clip) => {
@@ -2483,22 +2507,23 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
         <div className="modal-overlay" onClick={() => { setPlayingClip(null); setVideoUrl(null); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
             <h3>▶ Clip {playingClip.id}: {playingClip.description}</h3>
-            <p style={{ color: "var(--text-secondary)", marginBottom: 12, fontSize: 13 }}>
-              {formatTime(playingClip.start_time)} — {formatTime(playingClip.end_time)} ({playingClip.duration.toFixed(0)}s)
+            <p style={{ color: "var(--text-secondary)", marginBottom: 12, fontSize: 13, fontFamily: "var(--st-mono)" }}>
+              {formatTime(trimStart)} — {formatTime(trimEnd)} ({(trimEnd - trimStart).toFixed(1)}s)
             </p>
             {videoUrl && (
               <video
                 key={playingClip.id}
+                ref={playerRef}
                 controls
                 autoPlay
-                style={{ width: "100%", borderRadius: 10, background: "black", maxHeight: 400, display: "block" }}
+                style={{ width: "100%", borderRadius: 10, background: "black", maxHeight: 360, display: "block" }}
                 src={videoUrl}
-                onLoadedMetadata={(e) => { try { e.currentTarget.currentTime = playingClip.start_time; } catch {} }}
+                onLoadedMetadata={(e) => { try { e.currentTarget.currentTime = trimStart; } catch {} }}
                 onTimeUpdate={(e) => {
                   const v = e.currentTarget;
-                  // Loop within the clip range so you can re-watch the moment.
-                  if (v.currentTime >= playingClip.end_time || v.currentTime < playingClip.start_time - 0.5) {
-                    try { v.currentTime = playingClip.start_time; } catch {}
+                  // Loop within the (possibly re-trimmed) range to re-watch.
+                  if (v.currentTime >= trimEnd || v.currentTime < trimStart - 0.5) {
+                    try { v.currentTime = trimStart; } catch {}
                   }
                 }}
                 onError={() => {
@@ -2507,10 +2532,50 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                 }}
               />
             )}
-            <div className="btn-group">
+            {/* ── Re-trim controls (instant, no render) ── */}
+            <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: "var(--st-soft, rgba(255,255,255,.04))", border: "1px solid var(--st-line, rgba(255,255,255,.08))" }}>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 8 }}>
+                ✂️ Ajustá el recorte: pausá/movés el video al punto que querés y marcá inicio o fin.
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                <button className="btn btn-secondary" style={{ padding: "6px 10px", fontSize: 12 }}
+                  onClick={() => { const t = playerRef.current?.currentTime ?? trimStart; setTrimStart(Math.max(0, Math.min(t, trimEnd - 0.5))); }}>
+                  ⏮ Inicio aquí
+                </button>
+                <button className="btn btn-secondary" style={{ padding: "6px 8px", fontSize: 12 }}
+                  onClick={() => setTrimStart((s) => Math.max(0, Math.min(s - 0.5, trimEnd - 0.5)))}>−0.5s</button>
+                <button className="btn btn-secondary" style={{ padding: "6px 8px", fontSize: 12 }}
+                  onClick={() => setTrimStart((s) => Math.min(s + 0.5, trimEnd - 0.5))}>+0.5s</button>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontFamily: "var(--st-mono)", fontSize: 12, color: "var(--text-muted)" }}>inicio {formatTime(trimStart)}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button className="btn btn-secondary" style={{ padding: "6px 10px", fontSize: 12 }}
+                  onClick={() => { const t = playerRef.current?.currentTime ?? trimEnd; setTrimEnd(Math.max(trimStart + 0.5, t)); }}>
+                  Fin aquí ⏭
+                </button>
+                <button className="btn btn-secondary" style={{ padding: "6px 8px", fontSize: 12 }}
+                  onClick={() => setTrimEnd((e2) => Math.max(e2 - 0.5, trimStart + 0.5))}>−0.5s</button>
+                <button className="btn btn-secondary" style={{ padding: "6px 8px", fontSize: 12 }}
+                  onClick={() => setTrimEnd((e2) => e2 + 0.5)}>+0.5s</button>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontFamily: "var(--st-mono)", fontSize: 12, color: "var(--text-muted)" }}>fin {formatTime(trimEnd)}</span>
+              </div>
+            </div>
+            <div className="btn-group" style={{ marginTop: 12 }}>
               <button className="btn btn-secondary" onClick={() => { setPlayingClip(null); setVideoUrl(null); }}>
-                Close
+                Cerrar
               </button>
+              {(Math.abs(trimStart - playingClip.start_time) > 0.05 || Math.abs(trimEnd - playingClip.end_time) > 0.05) && (
+                <>
+                  <button className="btn btn-secondary" onClick={() => { setTrimStart(playingClip.start_time); setTrimEnd(playingClip.end_time); }}>
+                    Deshacer
+                  </button>
+                  <button className="btn btn-primary" onClick={handleSaveTrim} disabled={trimSaving}>
+                    {trimSaving ? "Guardando…" : "Guardar recorte"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
