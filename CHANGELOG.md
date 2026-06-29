@@ -2,6 +2,43 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 📝 Subtitle text correction + pescador clip download
+
+### Subtitle text correction (fix Whisper words)
+
+Whisper mis-hears names / slang / Spanish and those errors get burned into
+the subtitles. New per-clip "📄 Corregir subtítulos" editor fixes the WORDS
+while keeping each word's timestamp, so the corrected text shows in every
+subtitle style without re-running Whisper. Editing the shared
+`project.transcript` fixes it everywhere (both editors, all styles).
+
+- Backend (clips.py): `GET /{pid}/{cid}/subtitle-words` (words in the clip
+  range + global index), `PUT /{pid}/subtitle-words` (apply `{i,word}` edits,
+  timestamps untouched), `POST /{pid}/subtitle-replace` (global whole-word,
+  case-insensitive find/replace — great for a name Whisper always gets wrong).
+- `api.js`: getSubtitleWords / updateSubtitleWords / replaceSubtitleWord.
+- ClipsStep modal: a find→replace bar (global) + editable word chips (changed
+  ones get a gold border) + save. Handles no-transcript / no-dialogue.
+
+### Pescador per-clip download (⬇ MP4)
+
+The "Pescar clips en vivo" list got a per-clip MP4 download button — grabs
+the raw clip with no Gemini, no render. Reuses the same per-platform download
+the batch flow uses (Twitch = direct signed MP4, Kick = yt-dlp).
+
+- Backend (stream.py): `POST /api/stream/clip-download` `{platform, slug,
+  url, title}` → downloads + returns the MP4 as an attachment.
+- `api.js` downloadPescClipBlob + a per-clip button with spinner.
+
+### Kick download speed cap
+
+Source-quality Kick clips can be ~100MB and Kick's CDN throttles yt-dlp
+(~130 KiB/s), so a single clip took 15-20 min and blocked the request.
+`kick_service.download_clip_to_disk` now caps format to **720p** and pulls
+HLS fragments in parallel (`concurrent_fragment_downloads=5`) — much smaller
++ faster. (Known limitation: Kick still throttles + the download endpoint is
+synchronous; a background queue with progress is the next step.)
+
 ## ✂️ Manual re-trim in the instant clip preview
 
 Building on the instant raw-video preview: the clips-list ▶ player modal now

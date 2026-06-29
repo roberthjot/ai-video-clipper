@@ -494,13 +494,20 @@ def download_clip_to_disk(clip_id_or_url: str, dest_path: str) -> str:
 
     # `outtmpl` MUST be the final mp4 (yt-dlp picks it as the output path).
     # `merge_output_format=mp4` ensures the HLS pieces are remuxed to mp4.
+    #
+    # CAP at 720p: source-quality Kick clips can be ~100MB and Kick's CDN often
+    # throttles yt-dlp to ~130 KiB/s, so "best" took 15-20 min for ONE clip.
+    # 720p is plenty for a 1080x1920 vertical export and downloads in seconds.
+    # concurrent_fragment_downloads pulls the HLS pieces in parallel — big speed
+    # win on throttled connections.
     opts = {
-        "format": "best",
+        "format": "best[height<=720]/bestvideo[height<=720]+bestaudio/best",
         "outtmpl": dest_path,
         "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        "concurrent_fragment_downloads": 5,
         "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(),
         "retries": 3,
         "fragment_retries": 3,

@@ -1420,6 +1420,14 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   const [trimEnd, setTrimEnd] = useState(0);
   const [trimSaving, setTrimSaving] = useState(false);
   const playerRef = useRef(null);
+  // ── Subtitle text correction (fix Whisper words) ──────────────────────────
+  const [subEditClip, setSubEditClip] = useState(null);
+  const [subWords, setSubWords] = useState([]);          // [{i, word, start, end, orig}]
+  const [subLoading, setSubLoading] = useState(false);
+  const [subSaving, setSubSaving] = useState(false);
+  const [subHasTranscript, setSubHasTranscript] = useState(true);
+  const [subFind, setSubFind] = useState("");
+  const [subReplace, setSubReplace] = useState("");
   const [reanalyzingClip, setReanalyzingClip] = useState(null);
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
@@ -1567,6 +1575,51 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     } finally {
       setTrimSaving(false);
     }
+  };
+
+  // ── Subtitle correction handlers ──────────────────────────────────────────
+  const openSubEditor = async (clip) => {
+    setSubEditClip(clip);
+    setSubWords([]); setSubFind(""); setSubReplace(""); setSubHasTranscript(true);
+    setSubLoading(true);
+    try {
+      const r = await api.getSubtitleWords(projectId, clip.id);
+      setSubHasTranscript(!!r.has_transcript);
+      setSubWords((r.words || []).map((w) => ({ ...w, orig: w.word })));
+    } catch (e) {
+      alert("No se pudieron cargar los subtítulos: " + e.message);
+    } finally { setSubLoading(false); }
+  };
+
+  const reloadSubWords = async () => {
+    if (!subEditClip) return;
+    const r = await api.getSubtitleWords(projectId, subEditClip.id);
+    setSubWords((r.words || []).map((w) => ({ ...w, orig: w.word })));
+  };
+
+  const saveSubWords = async () => {
+    const updates = subWords.filter((w) => w.word !== w.orig).map((w) => ({ i: w.i, word: w.word }));
+    if (updates.length === 0) { setSubEditClip(null); return; }
+    setSubSaving(true);
+    try {
+      await api.updateSubtitleWords(projectId, updates);
+      setSubEditClip(null);
+    } catch (e) {
+      alert("No se pudo guardar: " + e.message);
+    } finally { setSubSaving(false); }
+  };
+
+  const doSubReplace = async () => {
+    if (!subFind.trim()) return;
+    setSubSaving(true);
+    try {
+      const r = await api.replaceSubtitleWord(projectId, subFind.trim(), subReplace.trim());
+      await reloadSubWords();
+      setSubFind(""); setSubReplace("");
+      if (!r.changed) alert("No se encontró esa palabra en el transcript.");
+    } catch (e) {
+      alert("No se pudo reemplazar: " + e.message);
+    } finally { setSubSaving(false); }
   };
 
   const handlePlayClipEs = async (clip) => {
@@ -2198,6 +2251,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                   { ic: <Play size={16} />, title: "Reproducir", fn: () => handlePlayClip(clip) },
                   { ic: <Scissors size={16} />, title: "Editar (zoom/trim)", fn: () => setEditorClip(clip) },
                   { ic: <Pencil size={16} />, title: "Editar caption", fn: () => { setEditingClip(clip); setEditText(clip.viral_caption); } },
+                  { ic: <FileText size={16} />, title: "Corregir subtítulos", fn: () => openSubEditor(clip) },
                   { ic: <RefreshCw size={16} />, title: "Re-analizar", fn: () => handleReanalyze(clip) },
                 ].map((a, k) => (
                   <span key={k} title={a.title} onClick={a.fn}
@@ -2575,6 +2629,80 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                     {trimSaving ? "Guardando…" : "Guardar recorte"}
                   </button>
                 </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Subtitle correction modal — fix Whisper words (keeps timestamps) */}
+      {subEditClip && (
+        <div className="modal-overlay" onClick={() => setSubEditClip(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
+            <h3>📝 Corregir subtítulos · Clip {subEditClip.id}</h3>
+            <p style={{ color: "var(--st-muted)", fontSize: 12.5, margin: "4px 0 14px" }}>
+              Arreglá las palabras que Whisper transcribió mal (nombres, slang). Se mantienen los tiempos, así los subtítulos quedan sincronizados.
+            </p>
+
+            {subLoading ? (
+              <div style={{ padding: "26px 0", textAlign: "center", color: "var(--st-muted)", fontSize: 13 }}>
+                <Loader2 size={22} style={{ animation: "st-spin 1s linear infinite" }} /> Cargando…
+              </div>
+            ) : !subHasTranscript ? (
+              <div style={{ padding: "20px 0", textAlign: "center", color: "var(--st-muted)", fontSize: 13 }}>
+                Este proyecto no tiene transcripción (Whisper no corrió o falló), así que no hay subtítulos que corregir.
+              </div>
+            ) : subWords.length === 0 ? (
+              <div style={{ padding: "20px 0", textAlign: "center", color: "var(--st-muted)", fontSize: 13 }}>
+                No hay diálogo detectado en el rango de este clip.
+              </div>
+            ) : (
+              <>
+                {/* Global find & replace */}
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+                  <input className="st-input" placeholder="Buscar palabra…" value={subFind}
+                    onChange={(e) => setSubFind(e.target.value)} style={{ flex: 1, minWidth: 120, fontSize: 13 }} />
+                  <span style={{ color: "var(--st-faint)" }}>→</span>
+                  <input className="st-input" placeholder="Reemplazar por…" value={subReplace}
+                    onChange={(e) => setSubReplace(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && doSubReplace()}
+                    style={{ flex: 1, minWidth: 120, fontSize: 13 }} />
+                  <button className="st-btn st-btn--ghost" onClick={doSubReplace} disabled={!subFind.trim() || subSaving}
+                    style={{ padding: "8px 12px", fontSize: 12 }}>Reemplazar todo</button>
+                </div>
+
+                {/* Per-word editor */}
+                <div style={{ maxHeight: 300, overflowY: "auto", display: "flex", flexWrap: "wrap", gap: 6, padding: "10px", border: "1px solid var(--st-line)", borderRadius: 9, background: "var(--st-soft)" }}>
+                  {subWords.map((w, idx) => {
+                    const changed = w.word !== w.orig;
+                    return (
+                      <input
+                        key={w.i}
+                        value={w.word}
+                        onChange={(e) => setSubWords((prev) => prev.map((p, j) => j === idx ? { ...p, word: e.target.value } : p))}
+                        title={`${w.start.toFixed(1)}s`}
+                        size={Math.max(3, (w.word || "").length)}
+                        style={{
+                          fontSize: 13, padding: "4px 7px", borderRadius: 6, fontFamily: "var(--st-ui)",
+                          background: "var(--st-surface)", color: "var(--st-text)",
+                          border: `1px solid ${changed ? "var(--st-accent)" : "var(--st-border)"}`,
+                          outline: "none", minWidth: 30,
+                        }} />
+                    );
+                  })}
+                </div>
+                <p style={{ fontSize: 11, color: "var(--st-faint)", margin: "8px 0 0" }}>
+                  {subWords.filter((w) => w.word !== w.orig).length} palabra(s) modificada(s). Las que cambiaste se marcan con borde dorado.
+                </p>
+              </>
+            )}
+
+            <div className="btn-group" style={{ marginTop: 16 }}>
+              <button className="btn btn-secondary" onClick={() => setSubEditClip(null)}>Cerrar</button>
+              {subHasTranscript && subWords.length > 0 && (
+                <button className="btn btn-primary" onClick={saveSubWords} disabled={subSaving}>
+                  {subSaving ? "Guardando…" : "Guardar cambios"}
+                </button>
               )}
             </div>
           </div>
@@ -4719,6 +4847,7 @@ function LiveStreamStep({ onClipToProject }) {
   const [pescStarting, setPescStarting] = useState(false);
   const [pescError, setPescError] = useState("");
   const [pescSelected, setPescSelected] = useState(new Set());
+  const [pescDownloading, setPescDownloading] = useState(new Set());  // clip ids being downloaded
   const [pescSort, setPescSort] = useState("recent");          // "recent" | "views"
   const [pescSearch, setPescSearch] = useState("");
   const [pescProcessing, setPescProcessing] = useState(null);  // {phase, name, progress} during batch
@@ -5130,6 +5259,26 @@ function LiveStreamStep({ onClipToProject }) {
   })();
 
   // Process selected pescador clips with the existing Kick/Twitch batch flow.
+  // Download ONE pescador clip (raw MP4, no Gemini). Fetches the blob and
+  // triggers a browser save.
+  const downloadPescClip = async (c) => {
+    if (!pescSession || pescDownloading.has(c.id)) return;
+    setPescDownloading((s) => new Set(s).add(c.id));
+    try {
+      const blob = await api.downloadPescClipBlob(pescSession.platform, c.id, c.url, c.title);
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = `${(c.title || "clip").replace(/[^\w\-]+/g, "_").slice(0, 50) || "clip"}.mp4`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 15000);
+    } catch (e) {
+      alert("No se pudo descargar el clip: " + e.message);
+    } finally {
+      setPescDownloading((s) => { const n = new Set(s); n.delete(c.id); return n; });
+    }
+  };
+
   const processPescSelected = async () => {
     if (!pescSession || pescSelected.size === 0) return;
     const platform = pescSession.platform;
@@ -5837,6 +5986,17 @@ function LiveStreamStep({ onClipToProject }) {
                               👁 {c.view_count} · ⏱ {Math.round(c.duration)}s · {c.creator_name || "—"}
                             </div>
                           </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); downloadPescClip(c); }}
+                            disabled={pescDownloading.has(c.id)}
+                            title="Descargar este clip (MP4, sin Gemini)"
+                            className="st-btn st-btn--ghost"
+                            style={{ flexShrink: 0, padding: "6px 9px", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+                            {pescDownloading.has(c.id)
+                              ? <Loader2 size={14} style={{ animation: "st-spin 1s linear infinite" }} />
+                              : <Download size={14} />}
+                            {pescDownloading.has(c.id) ? "Bajando…" : "MP4"}
+                          </button>
                         </div>
                       );
                     })}

@@ -541,6 +541,107 @@ async def trim_clip(project_id: str, clip_id: int, req: TrimClipRequest):
     raise HTTPException(status_code=404, detail="Clip not found")
 
 
+# ─── Subtitle text correction (fix Whisper mistranscriptions) ────────────────
+# The project's Whisper transcript drives the word-by-word subtitle styles.
+# Whisper mis-hears names / slang / Spanish; these endpoints let the user fix
+# the WORDS while keeping each word's timestamp, so the corrected text shows in
+# every subtitle style without re-running Whisper.
+
+class SubtitleWordsUpdate(BaseModel):
+    updates: list[dict]   # [{ "i": <global word index>, "word": "<new text>" }]
+
+
+class SubtitleReplaceRequest(BaseModel):
+    find: str
+    replace: str
+
+
+@router.get("/{project_id}/{clip_id}/subtitle-words")
+async def get_subtitle_words(project_id: str, clip_id: int):
+    """Return the transcript words that fall inside this clip's time range,
+    each with its GLOBAL index into project.transcript['words'] so the editor
+    can send back targeted updates."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+    clip = next((c for c in project.clips if c.id == clip_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    transcript = getattr(project, "transcript", None)
+    words = (transcript or {}).get("words") or []
+    if not words:
+        return {"has_transcript": False, "words": []}
+
+    out = []
+    for i, w in enumerate(words):
+        try:
+            ws, we = float(w.get("start", 0)), float(w.get("end", 0))
+        except (TypeError, ValueError):
+            continue
+        # Keep words that overlap the clip range at all.
+        if we >= clip.start_time and ws <= clip.end_time:
+            out.append({"i": i, "word": w.get("word", ""), "start": round(ws, 3), "end": round(we, 3)})
+    return {"has_transcript": True, "words": out}
+
+
+@router.put("/{project_id}/subtitle-words")
+async def update_subtitle_words(project_id: str, req: SubtitleWordsUpdate):
+    """Apply per-word text edits (timestamps untouched)."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+    transcript = getattr(project, "transcript", None)
+    words = (transcript or {}).get("words") or []
+    if not words:
+        raise HTTPException(status_code=400, detail="This project has no transcript")
+
+    changed = 0
+    for u in (req.updates or []):
+        try:
+            idx = int(u.get("i"))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(words):
+            new_w = str(u.get("word", "")).strip()
+            if words[idx].get("word", "") != new_w:
+                words[idx]["word"] = new_w
+                changed += 1
+    return {"status": "updated", "changed": changed}
+
+
+@router.post("/{project_id}/subtitle-replace")
+async def replace_subtitle_word(project_id: str, req: SubtitleReplaceRequest):
+    """Global whole-word, case-insensitive find/replace across the transcript.
+    Great for a name Whisper consistently mis-hears."""
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+    transcript = getattr(project, "transcript", None)
+    words = (transcript or {}).get("words") or []
+    find = (req.find or "").strip()
+    if not find:
+        raise HTTPException(status_code=400, detail="`find` is required")
+    if not words:
+        raise HTTPException(status_code=400, detail="This project has no transcript")
+
+    repl = (req.replace or "").strip()
+    find_low = find.lower()
+    changed = 0
+    for w in words:
+        cur = w.get("word", "")
+        # Compare on the trimmed/lowered core so surrounding punctuation/case
+        # don't block a match; preserve nothing fancy — just swap the text.
+        if cur.strip().lower() == find_low:
+            if cur != repl:
+                w["word"] = repl
+                changed += 1
+    return {"status": "ok", "changed": changed}
+
+
 @router.get("/{project_id}/{clip_id}/preview")
 async def preview_clip_frame(project_id: str, clip_id: int):
     """Generate and return a 9:16 preview frame for a clip."""

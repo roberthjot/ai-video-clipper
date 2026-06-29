@@ -221,6 +221,49 @@ def live_clips_list():
     return {"sessions": live_clips_service.list_sessions()}
 
 
+@router.post("/clip-download")
+def clip_download(payload: dict):
+    """Download ONE pescador clip (Twitch or Kick) and return the raw MP4 as an
+    attachment — no Gemini, no render. Reuses the same per-platform download
+    that the batch-to-project flow uses, just skips everything after the file.
+    Payload: {platform, slug, url, title}."""
+    import os as _os
+    import re as _re
+    import uuid as _uuid
+    from ..config import settings as _settings
+
+    platform = (payload.get("platform") or "").lower().strip()
+    slug = (payload.get("slug") or "").strip()
+    url = (payload.get("url") or "").strip()
+    title = (payload.get("title") or "clip").strip()
+    safe_title = _re.sub(r"[^\w\-]+", "_", title)[:50] or "clip"
+
+    dl_dir = _os.path.join(_settings.PROJECTS_DIR, "_pesc_downloads")
+    _os.makedirs(dl_dir, exist_ok=True)
+    dest = _os.path.join(dl_dir, f"{_uuid.uuid4().hex[:8]}_{safe_title}.mp4")
+
+    try:
+        if platform == "twitch":
+            if not slug:
+                raise HTTPException(status_code=400, detail="slug required for twitch")
+            twitch_service.download_clip_to_disk(slug, dest)
+        elif platform == "kick":
+            ident = url or slug   # Kick prefers the channel-prefixed URL for yt-dlp
+            if not ident:
+                raise HTTPException(status_code=400, detail="url or slug required for kick")
+            kick_service.download_clip_to_disk(ident, dest)
+        else:
+            raise HTTPException(status_code=400, detail="platform must be 'twitch' or 'kick'")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Clip download failed: {e}")
+
+    if not _os.path.exists(dest):
+        raise HTTPException(status_code=502, detail="Clip downloaded but file is missing")
+    return FileResponse(dest, media_type="video/mp4", filename=f"{safe_title}.mp4")
+
+
 @router.post("/start")
 def start_stream(req: StreamStartRequest):
     if not req.url.strip():

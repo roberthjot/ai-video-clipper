@@ -136,6 +136,54 @@ export async function editCaption(projectId, clipId, newCaption) {
     return res.json();
 }
 
+export async function downloadPescClipBlob(platform, slug, url, title) {
+    const res = await fetch(`${API_BASE}/stream/clip-download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, slug, url, title }),
+    });
+    if (!res.ok) {
+        let msg = "Download failed";
+        try { msg = (await res.json()).detail || msg; } catch {}
+        throw new Error(msg);
+    }
+    return res.blob();
+}
+
+export async function getSubtitleWords(projectId, clipId) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/subtitle-words`);
+    if (!res.ok) throw new Error("Failed to load subtitle words");
+    return res.json();
+}
+
+export async function updateSubtitleWords(projectId, updates) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/subtitle-words`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates }),
+    });
+    if (!res.ok) {
+        let msg = "Failed to save subtitle edits";
+        try { msg = (await res.json()).detail || msg; } catch {}
+        throw new Error(msg);
+    }
+    return res.json();
+}
+
+export async function replaceSubtitleWord(projectId, find, replace) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/subtitle-replace`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ find, replace }),
+    });
+    if (!res.ok) {
+        let msg = "Replace failed";
+        try { msg = (await res.json()).detail || msg; } catch {}
+        throw new Error(msg);
+    }
+    return res.json();
+}
+
 export async function trimClip(projectId, clipId, startTime, endTime) {
     const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/trim`, {
         method: "PUT",
