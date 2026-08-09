@@ -644,13 +644,16 @@ def process_clip_to_project(clip_slug: str, clip_title: str,
 
 
 def process_clips_batch_to_project(clips: list[dict], broadcaster_name: str = "",
-                                   gemini_model: str = "") -> str:
+                                   gemini_model: str = "", analyze_with_gemini: bool = True) -> str:
     """Batch flow: N Kick clip ids → ONE project with N ClipData entries.
 
     Downloads every clip MP4 with yt-dlp, concatenates them via FFmpeg
     (`-f concat -c copy`) into a single mp4, then creates a project whose
     clips[] covers each source clip's time range in the combined output.
-    Background thread captions every clip via Gemini.
+    When `analyze_with_gemini=True` (default) a background thread captions
+    every clip via Gemini. When `False`, clips land ready with empty
+    captions for the user to re-analyze at their own pace (no Gemini, no
+    Whisper).
     """
     from .. import config as _cfg
     from ..models.project import Project
@@ -740,16 +743,26 @@ def process_clips_batch_to_project(clips: list[dict], broadcaster_name: str = ""
             clip_count=len(clip_objs),
             min_duration=1,
             custom_prompt="",
-            status="analyzing",
+            status="analyzing" if analyze_with_gemini else "ready",
             video_duration=total_duration,
             output_dir=os.path.join(_cfg.settings.PROJECTS_DIR, project_id),
             gemini_model=gemini_model or _cfg.settings.GEMINI_MODEL,
             creator_name=broadcaster_name.strip(),
             clips=clip_objs,
         )
+        if not analyze_with_gemini:
+            for clip in project.clips:
+                clip.viral_caption = ""
+                clip.viral_score = 0
+                clip.match_confidence = "unverified"
         os.makedirs(project.output_dir, exist_ok=True)
         projects = get_project_store()
         projects[project_id] = project
+
+        if not analyze_with_gemini:
+            print(f"[KickBatch] project={project_id} {len(clip_objs)} clips, "
+                  f"total {total_duration:.1f}s — SKIPPING Gemini (user re-analyzes manually)")
+            return project_id
 
         _run_whisper(project_id, combined_path)
         t = threading.Thread(target=_caption_with_gemini, args=(project_id,), daemon=True)

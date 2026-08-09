@@ -247,7 +247,9 @@ async def reexport_meme(
         )
         # Cache the chosen settings on the item so re-rendering preserves them
         # and so the UI can show what was applied. Stored under `style_meta`
-        # to not collide with anything the meme service writes.
+        # to not collide with anything the meme service writes. Also keep a
+        # full snapshot (`last_export`) so the text-free background renderer
+        # (GET /preview-bg) can reproduce the EXACT composite minus the text.
         item["style_meta"] = {
             "bg_mode": bg_mode, "font_family": font_family,
             "text_color": text_color, "stroke_color": stroke_color, "stroke_width": stroke_width,
@@ -256,6 +258,21 @@ async def reexport_meme(
             "mirror_cyclic_enabled": mirror_cyclic_enabled,
             "mirror_cyclic_interval": mirror_cyclic_interval,
             "boost_contrast": boost_contrast,
+        }
+        item["last_export"] = {
+            "bg_color": batch["bg_color"],
+            "text_y": text_y, "text_x": text_x,
+            "video_scale": video_scale, "video_y": video_y,
+            "font_size": font_size, "corner_radius": corner_radius,
+            "bg_mode": bg_mode, "font_family": font_family,
+            "text_color": text_color, "stroke_color": stroke_color, "stroke_width": stroke_width,
+            "visual_filter": visual_filter,
+            "trim_start": trim_start, "trim_end": trim_end,
+            "mirror_cyclic_enabled": mirror_cyclic_enabled,
+            "mirror_cyclic_interval": mirror_cyclic_interval,
+            "boost_contrast": boost_contrast,
+            "crop_top_pct": crop_top_pct, "crop_bottom_pct": crop_bottom_pct,
+            "crop_left_pct": crop_left_pct, "crop_right_pct": crop_right_pct,
         }
         item["status"] = "ready"
     except Exception as e:
@@ -270,6 +287,85 @@ async def reexport_meme(
                 pass
 
     return {"status": "ok"}
+
+
+@router.get("/preview-bg/{batch_id}/{index}")
+async def preview_background(batch_id: str, index: int, bust: int = 0):
+    """Render (or return cached) a text-FREE version of the meme composite.
+
+    The frontend uses this as the live-preview background so its draggable
+    WYSIWYG text overlay is the ONLY text visible (no baked text behind). It
+    reproduces the exact last_export settings minus the caption.
+    """
+    from ..services.meme_service import export_meme_video, crop_video_pct
+    batch = get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    items = batch.get("items", [])
+    if index < 0 or index >= len(items):
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    item = items[index]
+    video_path = item.get("video_path", "")
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Original video not found")
+
+    cfg = item.get("last_export") or {}
+    if not cfg:
+        raise HTTPException(status_code=400, detail="No export settings yet — re-export once first")
+
+    # Reuse the final export path pattern with a distinct suffix so the
+    # background is cached per item. We only re-render when the underlying
+    # composite settings changed (signature of last_export), so opening the
+    # preview repeatedly is instant and moving/editing text never re-renders.
+    import hashlib as _hl
+    sig = _hl.sha1(repr(sorted((k, str(v)) for k, v in cfg.items())).encode()).hexdigest()[:16]
+    p, e = os.path.splitext(item["output_path"])
+    bg_path = f"{p}_bg_{sig}.mp4"
+    if os.path.exists(bg_path):
+        return FileResponse(bg_path, media_type="video/mp4")
+
+    # Crop if any crop % is set (mirrors the reexport flow)
+    cropped_path = None
+    video_path_eff = video_path
+    ct, cb, cl, cr = (float(cfg.get("crop_top_pct", 0)), float(cfg.get("crop_bottom_pct", 0)),
+                      float(cfg.get("crop_left_pct", 0)), float(cfg.get("crop_right_pct", 0)))
+    if ct > 0.001 or cb > 0.001 or cl > 0.001 or cr > 0.001:
+        cropped_path = video_path + "_bg_crop.mp4"
+        try:
+            video_path_eff = crop_video_pct(video_path, cropped_path, ct, cb, cl, cr)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Crop failed: {e}")
+
+    try:
+        export_meme_video(
+            video_path_eff, "", bg_path,
+            cfg.get("bg_color", "black"),
+            text_y=float(cfg.get("text_y", 0.08)), text_x=float(cfg.get("text_x", 0.05)),
+            video_scale=float(cfg.get("video_scale", 0.9)), video_y=float(cfg.get("video_y", 0.6)),
+            font_size=int(cfg.get("font_size", 60)), corner_radius=int(cfg.get("corner_radius", 0)),
+            bg_mode=cfg.get("bg_mode", "color"), font_family=cfg.get("font_family", "calibri"),
+            text_color=cfg.get("text_color", ""), stroke_color=cfg.get("stroke_color", ""),
+            stroke_width=int(cfg.get("stroke_width", 0)),
+            visual_filter=cfg.get("visual_filter", "none"),
+            trim_start=float(cfg.get("trim_start", 0.0)), trim_end=float(cfg.get("trim_end", 0.0)),
+            mirror_cyclic_enabled=bool(cfg.get("mirror_cyclic_enabled", False)),
+            mirror_cyclic_interval=float(cfg.get("mirror_cyclic_interval", 5.0)),
+            boost_contrast=bool(cfg.get("boost_contrast", False)),
+            text_align=cfg.get("text_align", "left"),
+            with_text=False,
+        )
+        return FileResponse(bg_path, media_type="video/mp4")
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cropped_path:
+            try:
+                os.remove(cropped_path)
+            except Exception:
+                pass
 
 
 @router.get("/download/{batch_id}/{index}")

@@ -1,6 +1,6 @@
 const API_BASE = "http://localhost:8000/api";
 
-export function uploadVideo(file, clipCount, minDuration, customPrompt, onProgress, geminiModel = "gemini-2.5-flash", creatorName = "", analyzeStart = 0, analyzeDuration = 0, maxDuration = 90) {
+export function uploadVideo(file, clipCount, minDuration, customPrompt, onProgress, geminiModel = "gemini-2.5-flash", creatorName = "", analyzeStart = 0, analyzeDuration = 0, maxDuration = 90, analyzeLang = "en") {
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append("video", file);
@@ -12,6 +12,7 @@ export function uploadVideo(file, clipCount, minDuration, customPrompt, onProgre
         formData.append("creator_name", creatorName);
         formData.append("analyze_start", analyzeStart);
         formData.append("analyze_duration", analyzeDuration);
+        formData.append("analyze_lang", analyzeLang);
 
         const xhr = new XMLHttpRequest();
         xhr.open("POST", `${API_BASE}/upload`);
@@ -296,11 +297,17 @@ export async function setApiKey(apiKey) {
     return res.json();  // { status, masked }
 }
 
-export async function startExport(projectId, selectedClipIds = null) {
+export async function startExport(projectId, selectedClipIds = null, opts = {}) {
     let url = `${API_BASE}/export/render/${projectId}`;
     if (selectedClipIds && selectedClipIds.length > 0) {
         const params = selectedClipIds.map(id => `clip_ids=${id}`).join("&");
         url += `?${params}`;
+        const extra = [];
+        if (opts.aspectRatio) extra.push(`aspect_ratio=${opts.aspectRatio}`);
+        if (opts.noText) extra.push("no_text=true");
+        if (opts.useWatermark) extra.push("use_watermark=true");
+        if (opts.variant) extra.push(`variant=${opts.variant}`);
+        if (extra.length) url += (params ? "&" : "?") + extra.join("&");
     }
 
     const res = await fetch(url, {
@@ -443,13 +450,15 @@ export function getDownloadFileUrl(jobId) {
     return `${API_BASE}/downloader/file/${jobId}`;
 }
 
-export async function processTwitchClipsBatch(clips, broadcasterName = "", geminiModel = "") {
+export async function processTwitchClipsBatch(clips, broadcasterName = "", geminiModel = "", analyzeWithGemini = true) {
     // clips: [{ slug, title }, ...]  — One project with N clips.
+    // analyzeWithGemini=false → clips land ready without captions, no Gemini/Whisper.
     const res = await fetch(`${API_BASE}/stream/twitch-clips-batch-to-project`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             clips, broadcaster_name: broadcasterName, gemini_model: geminiModel,
+            analyze_with_gemini: analyzeWithGemini,
         }),
     });
     if (!res.ok) {
@@ -582,12 +591,13 @@ export async function clearLiveClipsSession(sessionId) {
     return res.json();
 }
 
-export async function processKickClipsBatch(clips, broadcasterName = "", geminiModel = "") {
+export async function processKickClipsBatch(clips, broadcasterName = "", geminiModel = "", analyzeWithGemini = true) {
     const res = await fetch(`${API_BASE}/stream/kick-clips-batch-to-project`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             clips, broadcaster_name: broadcasterName, gemini_model: geminiModel,
+            analyze_with_gemini: analyzeWithGemini,
         }),
     });
     if (!res.ok) {
@@ -724,6 +734,12 @@ export function getMemeDownloadUrl(batchId, index, bust) {
     return `${API_BASE}/meme/download/${batchId}/${index}${bust ? `?t=${bust}` : ""}`;
 }
 
+// Text-free composite: used as the preview background behind the draggable
+// WYSIWYG text overlay so no baked text shows through.
+export function getMemeBackgroundUrl(batchId, index, bust) {
+    return `${API_BASE}/meme/preview-bg/${batchId}/${index}${bust ? `?bust=${bust}` : ""}`;
+}
+
 export async function retryMeme(batchId, index) {
     const res = await fetch(`${API_BASE}/meme/retry/${batchId}/${index}`, { method: "POST" });
     if (!res.ok) throw new Error("No se pudo reintentar");
@@ -773,11 +789,21 @@ export function getMemeDescriptionUrl(batchId, index) {
     return `${API_BASE}/meme/description/${batchId}/${index}`;
 }
 
-export async function reanalyzeClip(projectId, clipId) {
-    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/reanalyze`, { method: "POST" });
+export async function reanalyzeClip(projectId, clipId, lang = "en") {
+    const qs = lang && lang !== "en" ? `?lang=${encodeURIComponent(lang)}` : "";
+    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/reanalyze${qs}`, { method: "POST" });
     if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || "Reanalyze failed");
+    }
+    return res.json();
+}
+
+export async function generateTweetText(projectId, clipId) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/tweet-text`, { method: "POST" });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Tweet text generation failed");
     }
     return res.json();
 }

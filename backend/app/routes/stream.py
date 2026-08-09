@@ -49,20 +49,25 @@ def get_chat_velocity_status(video_id: str):
 @router.post("/twitch-clips-batch-to-project")
 def twitch_clips_batch_to_project(payload: dict):
     """Batch: many Twitch clips → ONE project with N ClipData entries.
-    Payload: { clips: [{slug, title}, ...], broadcaster_name, gemini_model }
+    Payload: { clips: [{slug, title}, ...], broadcaster_name, gemini_model,
+               analyze_with_gemini (bool, default true) }
+    When analyze_with_gemini=false the clips land ready with empty captions
+    (no Gemini, no Whisper) so the user re-analyzes them manually in ClipsStep.
     """
     items = payload.get("clips") or []
     if not items or not isinstance(items, list):
         raise HTTPException(status_code=400, detail="`clips` array required")
     broadcaster = (payload.get("broadcaster_name") or "").strip()
     model = (payload.get("gemini_model") or "").strip()
+    analyze = bool(payload.get("analyze_with_gemini", True))
     try:
         project_id = twitch_service.process_clips_batch_to_project(
             clips=items, broadcaster_name=broadcaster, gemini_model=model,
+            analyze_with_gemini=analyze,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"project_id": project_id, "status": "analyzing", "count": len(items)}
+    return {"project_id": project_id, "status": "analyzing" if analyze else "ready", "count": len(items)}
 
 
 @router.post("/twitch-clip-to-project")
@@ -153,20 +158,25 @@ def kick_clip_to_project(payload: dict):
 @router.post("/kick-clips-batch-to-project")
 def kick_clips_batch_to_project(payload: dict):
     """Batch: many Kick clips → ONE project with N ClipData entries.
-    Payload: { clips: [{slug, title}, ...], broadcaster_name, gemini_model }
+    Payload: { clips: [{slug, title}, ...], broadcaster_name, gemini_model,
+               analyze_with_gemini (bool, default true) }
+    When analyze_with_gemini=false the clips land ready with empty captions
+    (no Gemini, no Whisper) so the user re-analyzes them manually in ClipsStep.
     """
     items = payload.get("clips") or []
     if not items or not isinstance(items, list):
         raise HTTPException(status_code=400, detail="`clips` array required")
     broadcaster = (payload.get("broadcaster_name") or "").strip()
     model = (payload.get("gemini_model") or "").strip()
+    analyze = bool(payload.get("analyze_with_gemini", True))
     try:
         project_id = kick_service.process_clips_batch_to_project(
             clips=items, broadcaster_name=broadcaster, gemini_model=model,
+            analyze_with_gemini=analyze,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"project_id": project_id, "status": "analyzing", "count": len(items)}
+    return {"project_id": project_id, "status": "analyzing" if analyze else "ready", "count": len(items)}
 
 
 @router.post("/live-clips/start")

@@ -22,9 +22,13 @@ CHUNK_THRESHOLD_SECONDS = 30 * 60   # 30 min — chunk only for genuinely long v
 CHUNK_DURATION_SECONDS = 15 * 60    # ~15 min per chunk (bigger chunks = fewer boundaries)
 
 VIDEO_ANALYSIS_MODELS = {
+    "gemini-3.6-flash",                  # free tier (Flash family, newest)
     "gemini-3.5-flash",                  # paid only
+    "gemini-3.5-flash-lite",             # free tier
+    "gemini-3-flash",                    # free tier (stable alias)
     "gemini-3-flash-preview",            # free 20/day
     "gemini-3.1-pro-preview",            # paid only
+    "gemini-3.1-flash-lite",             # free tier (stable alias)
     "gemini-3.1-flash-lite-preview",     # free
     "gemini-2.5-flash",                  # free 1500/day (recommended)
     "gemini-2.5-flash-lite",             # free 1000/day
@@ -561,6 +565,7 @@ def analyze_video(
     model: str = None,
     creator_name: str = "",
     max_duration: int = 90,
+    lang: str = "en",
 ) -> list[ClipData]:
     """
     Use Gemini to analyze a video and identify viral clip candidates.
@@ -576,6 +581,25 @@ def analyze_video(
     Returns:
         List of ClipData objects
     """
+
+    # Language rule injected into the analysis prompt. English (default)
+    # keeps the historical behavior; es switches captions/descriptions to
+    # neutral Latin-American Spanish.
+    lang = (lang or "en").lower().strip()[:2]
+    if lang == "es":
+        lang_rule = (
+            "Target Audience: Spanish speakers.\n"
+            "    CRITICAL: ALL generated text must be in SPANISH (neutral Latin American): "
+            "the viral_caption, description, viral_reason, viral_score_reason and "
+            "ig_description fields. Captions must still respect the style rules below "
+            "(third person, no punctuation, max 20 words, one emoji from the list)."
+        )
+        desc_lang = "Spanish"
+        ig_lang = "Spanish (neutral Latin American)"
+    else:
+        lang_rule = "Target Audience: USA (English speakers)."
+        desc_lang = "English"
+        ig_lang = "English"
 
     # Build the instruction line
     if custom_prompt.strip():
@@ -620,6 +644,9 @@ def analyze_video(
         INSTRUCTION=instruction,
         CREATOR_SECTION=creator_section,
         TRANSCRIPT_SECTION=transcript_section,
+        LANG_RULE=lang_rule,
+        DESC_LANG=desc_lang,
+        IG_LANG=ig_lang,
     )
 
     active_model = model or settings.GEMINI_MODEL

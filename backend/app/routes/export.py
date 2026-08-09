@@ -159,8 +159,10 @@ async def clear_clip_style(project_id: str, clip_id: int):
 
 
 @router.post("/render/{project_id}")
-async def render_clips(project_id: str, clip_ids: list[int] = Query(default=None)):
-    """Start exporting clips in background. Optionally pass clip_ids to export only selected."""
+async def render_clips(project_id: str, clip_ids: list[int] = Query(default=None), aspect_ratio: str = Query(default=None), no_text: bool = Query(default=False), use_watermark: bool = Query(default=False), variant: str = Query(default="")):
+    """Start exporting clips in background. Optionally pass clip_ids to export only selected.
+    `variant` (e.g. "16x9", "notext", "wm") is appended to filenames so
+    alternate renders of the same clip don't overwrite the standard one."""
     projects = get_project_store()
     if project_id not in projects:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -178,6 +180,18 @@ async def render_clips(project_id: str, clip_ids: list[int] = Query(default=None
     if not clips_to_export:
         raise HTTPException(status_code=400, detail="No matching clips found.")
 
+    # Build a variant style on top of the saved one WITHOUT mutating it, so
+    # the standard export keeps its saved look.
+    eff_style = project.style.model_copy(deep=True)
+    if aspect_ratio:
+        eff_style.aspect_ratio = aspect_ratio
+    eff_style.no_text = bool(no_text)
+    if use_watermark:
+        if not eff_style.watermark_path:
+            raise HTTPException(status_code=400, detail="No watermark uploaded for this project.")
+    else:
+        eff_style.watermark_path = None
+
     project.status = "exporting"
     export_dir = os.path.join(project.output_dir, "exported")
 
@@ -186,9 +200,10 @@ async def render_clips(project_id: str, clip_ids: list[int] = Query(default=None
         project_id=project_id,
         video_path=project.video_path,
         clips=clips_to_export,
-        style=project.style,
+        style=eff_style,
         output_dir=export_dir,
         transcript=getattr(project, 'transcript', None),
+        file_suffix=f"_{variant}" if variant else "",
     )
 
     return {

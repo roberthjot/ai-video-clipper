@@ -33,13 +33,13 @@ DEFAULTS = {
     "analysis_system": {
         "label": "Análisis principal (clips + captions)",
         "description": "El prompt grande que detecta los clips virales, escribe el caption, el score y la descripción de Instagram. El más importante.",
-        "tokens": ["{{TARGET_CLIPS}}", "{{MIN_DURATION}}", "{{MAX_DURATION}}", "{{VIDEO_DURATION}}", "{{DUR_MIN}}", "{{THIRD1}}", "{{THIRD2}}", "{{VIDEO_DURATION_INT}}", "{{START_MAX}}", "{{INSTRUCTION}}", "{{CREATOR_SECTION}}", "{{TRANSCRIPT_SECTION}}"],
+        "tokens": ["{{TARGET_CLIPS}}", "{{MIN_DURATION}}", "{{MAX_DURATION}}", "{{VIDEO_DURATION}}", "{{DUR_MIN}}", "{{THIRD1}}", "{{THIRD2}}", "{{VIDEO_DURATION_INT}}", "{{START_MAX}}", "{{INSTRUCTION}}", "{{CREATOR_SECTION}}", "{{TRANSCRIPT_SECTION}}", "{{LANG_RULE}}", "{{DESC_LANG}}", "{{IG_LANG}}"],
         "text": (
             "\n"
             "    You are the #1 viral video editor on TikTok with 10 years of experience creating content that gets hundreds of millions of views.\n"
             "    Your job is to watch this video and extract the {{TARGET_CLIPS}} most explosive, attention-grabbing clips that will go viral on TikTok, Reels, and Shorts.\n"
             "\n"
-            "    Target Audience: USA (English speakers).\n"
+            "    {{LANG_RULE}}\n"
             "    Platform: TikTok / Instagram Reels / YouTube Shorts.\n"
             "\n"
             "    YOUR GOAL: Find exactly {{TARGET_CLIPS}} clips. Each clip MUST be at least {{MIN_DURATION}} seconds long.\n"
@@ -96,14 +96,14 @@ DEFAULTS = {
             "    Each object must have:\n"
             "    - \"start_time\": (float) Start time in seconds.\n"
             "    - \"end_time\": (float) End time in seconds.\n"
-            "    - \"description\": (string) 3-5 word label for the clip (English).\n"
+            "    - \"description\": (string) 3-5 word label for the clip ({{DESC_LANG}}).\n"
             "    - \"viral_caption\": (string) Short punchy overlay text. MAX 20 words. No punctuation.\n"
             "    - \"viral_reason\": (string) One sentence explaining the viral potential.\n"
             "    - \"viral_score\": (int) A score from 1 to 10 rating the viral potential of this clip. 10 = guaranteed viral, 1 = boring. Be honest and vary the scores.\n"
             "    - \"viral_score_reason\": (string) One short phrase (max 6 words) explaining the score. Examples: \"Strong emotional hook\", \"Slow build-up\", \"Unexpected twist ending\", \"Weak payoff\".\n"
-            "    - \"ig_description\": (string) A long Instagram post caption for this clip. Follow these rules:\n"
-            "        * First, try to identify the creator's name from audio, text on screen, or context in the video. If identified, use their real name naturally throughout.\n"
-            "        * Write 3-4 paragraphs in English. Start with a hook sentence about this specific moment.\n"
+"    - \"ig_description\": (string) A long Instagram post caption for this clip. Follow these rules:\n"
+                "        * First, try to identify the creator's name from audio, text on screen, or context in the video. If identified, use their real name naturally throughout.\n"
+                "        * Write 3-4 paragraphs in {{IG_LANG}}. Start with a hook sentence about this specific moment.\n"
             "        * Paragraph 1: Describe what happens in this clip and why it's a standout moment.\n"
             "        * Paragraph 2: Provide context about the creator — who they are, what they're known for, what makes them interesting.\n"
             "        * Paragraph 3: Why this moment resonates with fans / what the audience reaction will be.\n"
@@ -213,7 +213,7 @@ DEFAULTS = {
             "Return exactly {{NEEDED}} objects."
         ),
     },
-    "reanalyze_clip": {
+"reanalyze_clip": {
         "label": "Reanalizar un clip (botón 🔄)",
         "description": "Genera un caption nuevo mirando SOLO ese clip. Lo mejor cuando un caption quedó incompatible con el video. Si el proyecto tiene nombre de creador, lo inyecta como obligatorio.",
         "tokens": ["{{CREATOR_LINE}}"],
@@ -222,6 +222,21 @@ DEFAULTS = {
             "Write a new viral caption that accurately describes what is ACTUALLY happening in this clip. "
             "{{CREATOR_LINE}}"
             "Rules: English only. Maximum 20 words. Third person only (no I/me/my). "
+            "No punctuation except apostrophes. All lowercase except first letter. "
+            "End with EXACTLY ONE emoji from this list (and no other): "
+            "💀 😂 🥺 ✨ 🔥 ❤️ 💪 👀 🤔 ❤️‍🩹 😱 😭 💔 🤯. "
+            "Return ONLY the caption text — nothing else."
+        ),
+    },
+    "reanalyze_clip_es": {
+        "label": "Reanalizar un clip en español (botón 🇪🇸)",
+        "description": "Igual que 'Reanalizar un clip' pero el caption sale directo en español (neutro latinoamericano). Útil para creadores hispanohablantes.",
+        "tokens": ["{{CREATOR_LINE}}"],
+        "text": (
+            "Watch this short video clip carefully. "
+            "Write a new viral caption that accurately describes what is ACTUALLY happening in this clip. "
+            "{{CREATOR_LINE}}"
+            "Rules: Write in SPANISH only (neutral Latin American). Maximum 20 words. Third person only (no yo/mi/mío). "
             "No punctuation except apostrophes. All lowercase except first letter. "
             "End with EXACTLY ONE emoji from this list (and no other): "
             "💀 😂 🥺 ✨ 🔥 ❤️ 💪 👀 🤔 ❤️‍🩹 😱 😭 💔 🤯. "
@@ -346,6 +361,32 @@ DEFAULTS = {
             "At the very end, after all the text, include EXACTLY 3 relevant music hashtags. "
             "The hashtags must be the absolute last thing in the caption, on their own line. "
             "Return ONLY the caption — no labels, no extra words."
+        ),
+    },
+    "tweet_text": {
+        "label": "Clip · texto para tweet (X)",
+        "description": "Texto viral ragebait/engagement-bait (>=270 caracteres) para publicar el clip en Twitter/X.",
+        "tokens": ["{{CREATOR_TEXT}}"],
+        "text": (
+            "This video clip's viral caption is: \"{{CREATOR_TEXT}}\"\n"
+            "Write the text of a ragebait / engagement-bait tweet for this clip on X (Twitter).\n"
+            "The goal: STOP THE SCROLL and get replies, arguments, and shares.\n\n"
+            "STRICT RULES:\n"
+            "- TARGET 270-280 CHARACTERS — fill the limit with the engagement bait, "
+            "never with filler.\n"
+            "- Write in English, but the tone of an unhinged, confident internet "
+            "user who KNOWS they're right. Slightly arrogant, polarizing, zero "
+            "sarcasm-safety, willing to fight in the replies.\n"
+            "- OPEN with a HOT TAKE or bold claim about the clip that provokes a reaction "
+            "(e.g. \"this is genuinely the most ... thing ever\", \"nobody talks about how...\").\n"
+            "- Challenge the audience: rhetorical question, \"prove me wrong\", \"am I "
+            "the only one...?\", or call out people who do the opposite.\n"
+            "- THIRD PERSON about the clip's subject. No \"I\", \"me\", \"my\" EXCEPT "
+            "for the engagement challenge.\n"
+            "- 2-4 relevant hashtags at the very end to fill the limit.\n"
+            "- Max 2 emojis. Use them to punch the take, not decorate.\n"
+            "- NEVER exceed 280 characters. Count carefully.\n"
+            "- Return ONLY the tweet text. No labels, no quotes, no explanation."
         ),
     },
 }

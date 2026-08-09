@@ -24,6 +24,7 @@ async def upload_video(
     creator_name: str = Form(""),
     analyze_start: float = Form(0.0),
     analyze_duration: float = Form(0.0),
+    analyze_lang: str = Form("en"),
 ):
     """Upload a video and create a new project."""
     # Generate project ID
@@ -66,6 +67,7 @@ async def upload_video(
         creator_name=creator_name.strip(),
         analyze_start=analyze_start,
         analyze_duration=analyze_duration,
+        analyze_lang=(analyze_lang or "en").lower().strip()[:2] or "en",
     )
 
     projects[project_id] = project

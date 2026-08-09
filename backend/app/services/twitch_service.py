@@ -318,18 +318,24 @@ def _run_whisper(project_id: str, video_path: str) -> None:
 
 
 def process_clips_batch_to_project(clips: list[dict], broadcaster_name: str = "",
-                                   gemini_model: str = "") -> str:
+                                   gemini_model: str = "", analyze_with_gemini: bool = True) -> str:
     """Batch flow: N Twitch clip slugs → ONE project with N ClipData entries.
 
     Each input dict needs `slug` and `title`. We download every clip MP4 at
     720p (same format so the concat demuxer doesn't choke), concat them via
     `ffmpeg -f concat -c copy` into one file, and create a project where
     each ClipData covers the time range of its source clip in the combined
-    output. Gemini writes captions for each clip in a background thread.
+    output.
 
-    Returns the project_id immediately. The project's status is
-    `analyzing` → `ready` (or `error`). The status payload also exposes
-    `analyze_progress` like "3/10" so the UI can show a counter.
+    When `analyze_with_gemini=True` (default): Gemini writes captions for
+    each clip in a background thread and Whisper transcribes the combined
+    file. The project starts `analyzing` → `ready` (or `error`), with
+    `analyze_progress` like "3/10" shown in the UI.
+
+    When `analyze_with_gemini=False`: clips land in the project ready to edit
+    immediately with empty captions — no Gemini, no Whisper. The user then
+    runs "Re-analizar" per clip/batch to caption them at their own pace.
+    Returns the project_id immediately (status already `ready`).
     """
     from .. import config as _cfg
     from ..models.project import Project
@@ -436,17 +442,29 @@ def process_clips_batch_to_project(clips: list[dict], broadcaster_name: str = ""
         clip_count=len(clip_records),
         min_duration=1,
         custom_prompt="",
-        status="analyzing",
+        status="analyzing" if analyze_with_gemini else "ready",
         video_duration=total_dur,
         output_dir=os.path.join(_cfg.settings.PROJECTS_DIR, project_id),
         gemini_model=gemini_model or _cfg.settings.GEMINI_MODEL,
         creator_name=broadcaster_name.strip(),
         clips=clip_records,
     )
-    project.analyze_progress = f"0/{len(clip_records)}"
+    # No-Gemini mode: captions/score start empty so the user re-analyses them
+    # at their own pace from ClipsStep.
+    if not analyze_with_gemini:
+        for clip in project.clips:
+            clip.viral_caption = ""
+            clip.viral_score = 0
+            clip.match_confidence = "unverified"
+    project.analyze_progress = f"0/{len(clip_records)}" if analyze_with_gemini else ""
     os.makedirs(project.output_dir, exist_ok=True)
     projects = get_project_store()
     projects[project_id] = project
+
+    if not analyze_with_gemini:
+        print(f"[TwitchBatch] project={project_id} clips={len(clip_records)} "
+              f"total_dur={total_dur:.1f}s — SKIPPING Gemini (user re-analyzes manually)")
+        return project_id
 
     # Whisper transcribes the WHOLE concatenated MP4 in a single pass. Each
     # ClipData's start/end already points at the right time-range inside this

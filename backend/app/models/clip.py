@@ -95,6 +95,7 @@ class ClipData(BaseModel):
     viral_score: int = 5        # 1-10 viral potential score from AI
     viral_score_reason: str = ""  # Short reason for the score
     ig_description: str = ""   # Long Instagram post caption (3-4 paragraphs + hashtags)
+    tweet_text: str = ""       # Short Twitter/X post text (<=280 chars) for publishing the clip
     duration: float = 0.0
     # Caption validation against Whisper transcript
     transcript_snippet: str = ""           # what Whisper heard in this clip's range

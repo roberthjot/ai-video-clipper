@@ -710,6 +710,7 @@ def export_all_clips_background(
     output_dir: str,
     transcript: dict = None,
     language: str = "en",
+    file_suffix: str = "",
 ):
     """Run export in background thread with progress tracking.
 
@@ -718,6 +719,9 @@ def export_all_clips_background(
     caption_es + words_es (populated by translate_clip_to_spanish) and
     appends an "_es" suffix to filenames so the two versions can co-exist
     in the same exported/ folder.
+
+    `file_suffix` (e.g. "_16x9") is appended to output filenames so quick
+    variant renders of the same clip don't overwrite the standard export.
     """
 
     _lang_es = (language or "en").lower().startswith("es")
@@ -737,7 +741,7 @@ def export_all_clips_background(
         for i, clip in enumerate(clips):
             try:
                 title_safe = getattr(clip, 'title', f'clip_{clip.id}').replace(' ', '_').lower()[:30]
-                filename = f"clip_{clip.id:02d}_{title_safe}{_suffix}.mp4"
+                filename = f"clip_{clip.id:02d}_{title_safe}{file_suffix}{_suffix}.mp4"
                 filepath = os.path.join(output_dir, filename)
 
                 export_progress[project_id]["current"] = i + 1

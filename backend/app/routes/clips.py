@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from ..services import gemini_service, video_service, whisper_service, prompts
-from ..models.clip import Keyframe
+from ..models.clip import Keyframe, Segment
 from .upload import get_project_store
 
 router = APIRouter(prefix="/api/clips", tags=["clips"])
@@ -53,6 +53,49 @@ class EditTransformRequest(BaseModel):
     start_time: float | None = None
     end_time: float | None = None
     keyframes: list[KeyframeInput] | None = None
+    # Timeline cuts — if non-empty, the clip exports as the concatenation of
+    # these segments (in ORIGINAL-video seconds). None = unchanged, [] = clear
+    # (revert to single range defined by start_time/end_time).
+    segments: list[dict] | None = None
+
+
+# ─── Lazily-transcribe helper ─────────────────────────────────────────────
+# When clips come in WITHOUT analysis (pescador / viral-modal "enviar a clips"
+# flow), the project has no Whisper transcript, so subtitles can't render.
+# Re-analyze is the natural moment to transcribe; this helper kicks off a
+# single background Whisper pass over the project video (guarded so we never
+# run it twice) and stores the result on the project.
+_whisper_started: set[str] = set()
+
+
+def _ensure_project_transcript(project_id: str) -> None:
+    """Transcribe the whole project video in a background thread, but only if
+    the project still lacks a transcript and no pass is already running."""
+    import threading
+    if project_id in _whisper_started:
+        return
+    projects = get_project_store()
+    project = projects.get(project_id)
+    if not project or project.transcript is not None:
+        return
+    _whisper_started.add(project_id)
+
+    def run():
+        try:
+            print(f"[Whisper] {project_id}: transcribing {os.path.basename(project.video_path)} "
+                  f"(on-demand from re-analyze)…")
+            tr = whisper_service.transcribe(project.video_path)
+            p = get_project_store().get(project_id)
+            if p is not None:
+                p.transcript = tr
+            n = len((tr or {}).get("words", []))
+            print(f"[Whisper] {project_id}: done — {n} words")
+        except Exception as e:
+            print(f"[Whisper] {project_id}: failed: {e}")
+        finally:
+            _whisper_started.discard(project_id)
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 @router.post("/analyze")
@@ -173,6 +216,7 @@ async def analyze_video(req: AnalyzeRequest):
                             project.gemini_model,
                             getattr(project, 'creator_name', ''),
                             getattr(project, 'max_duration', 90),
+                            getattr(project, 'analyze_lang', 'en'),
                         )
                     except Exception as e:
                         last_err = e
@@ -289,6 +333,7 @@ async def _analyze_in_chunks(project, duration: float, transcript: dict, video_p
                     project.gemini_model,
                     getattr(project, 'creator_name', ''),
                     getattr(project, 'max_duration', 90),
+                    getattr(project, 'analyze_lang', 'en'),
                 )
             except Exception as e:
                 last_err = e
@@ -488,6 +533,29 @@ async def edit_clip_transform(project_id: str, clip_id: int, req: EditTransformR
                     normalised.append(Keyframe(time=t, zoom=z, pan_x=px, pan_y=py))
                 normalised.sort(key=lambda k: k.time)
                 clip.keyframes = normalised
+            # Segments replace wholesale. None = unchanged, [] = clear (back to
+            # single-range mode). Clamped to the source video duration; zero or
+            # negative length pieces are dropped.
+            if req.segments is not None:
+                vid_dur = float(getattr(project, "video_duration", 0) or 0)
+                clean: list[Segment] = []
+                for s in req.segments:
+                    a = max(0.0, float(s.get("start", 0.0)))
+                    b = float(s.get("end", 0.0))
+                    if vid_dur > 0:
+                        b = min(b, vid_dur)
+                    if b - a > 0.05:
+                        clean.append(Segment(
+                            start=round(a, 3), end=round(b, 3),
+                            speed=max(0.25, min(4.0, float(s.get("speed", 1.0)))),
+                        ))
+                clip.segments = clean
+                # Keep the single-range in/out in sync with the kept span so
+                # callers that ignore segments still see the right window.
+                if clean:
+                    clip.start_time = min(seg.start for seg in clean)
+                    clip.end_time = max(seg.end for seg in clean)
+                    clip.duration = clip.end_time - clip.start_time
             return {"status": "updated", "clip": clip.model_dump()}
     raise HTTPException(status_code=404, detail="Clip not found")
 
@@ -844,9 +912,14 @@ async def preview_clip_video(project_id: str, clip_id: int):
     # "Play clip" show the actual reframed output. Slower than the regular
     # preview (preset=fast vs ultrafast) but it's the only way to render
     # the dynamic crop correctly here.
-    if (getattr(style, "auto_reframe_enabled", False)
+    _has_cuts = bool(getattr(clip, "segments", None))
+    _needs_full_pipeline = (
+        _has_cuts
+        or (getattr(style, "auto_reframe_enabled", False)
             and getattr(clip, "face_track", None)
-            and clip.face_track.get("samples")):
+            and clip.face_track.get("samples"))
+    )
+    if _needs_full_pipeline:
         from ..services import export_service as _ex
         try:
             await asyncio.to_thread(
@@ -1348,9 +1421,18 @@ async def preview_clip_instagram_frame_es(project_id: str, clip_id: int):
 
 
 @router.post("/{project_id}/{clip_id}/reanalyze")
-async def reanalyze_clip(project_id: str, clip_id: int):
-    """Extract this clip's exact segment and re-analyze with Gemini to fix wrong captions."""
+async def reanalyze_clip(project_id: str, clip_id: int, lang: str = "en"):
+    """Extract this clip's exact segment and re-analyze with Gemini to fix wrong captions.
+
+    `lang` in {"en", "es"}: controls the caption language Gemini writes
+    (English by default; Spanish = neutral Latin American). When es, the
+    result is also cached into clip.caption_es so a Spanish export needs no
+    extra translation step.
+    """
     import uuid as _uuid
+    lang = (lang or "en").lower().strip()
+    if lang not in ("en", "es"):
+        lang = "en"
     projects = get_project_store()
     if project_id not in projects:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1359,6 +1441,11 @@ async def reanalyze_clip(project_id: str, clip_id: int):
     clip = next((c for c in project.clips if c.id == clip_id), None)
     if not clip:
         raise HTTPException(status_code=404, detail="Clip not found")
+
+    # Projects created without Gemini (pescador / viral "enviar a clips")
+    # have no transcript yet — transcribe lazily in the background so the
+    # subtitles become available after the user's first re-analyze.
+    _ensure_project_transcript(project_id)
 
     # Extract the exact clip segment to a temp file
     temp_dir = os.path.join(os.path.dirname(__file__), "..", "services", "temp")
@@ -1414,13 +1501,14 @@ async def reanalyze_clip(project_id: str, clip_id: int):
             )
         else:
             creator_line = ''
-        print(f"[Reanalyze] clip {clip_id} model={active_model} creator={_creator!r}")
+        print(f"[Reanalyze] clip {clip_id} model={active_model} creator={_creator!r} lang={lang}")
+        prompt_key = "reanalyze_clip_es" if lang == "es" else "reanalyze_clip"
         response = await asyncio.to_thread(
             gemini_service.client.models.generate_content,
             model=active_model,
             contents=[_types.Content(role="user", parts=[
                 _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
-                _types.Part.from_text(text=prompts.render("reanalyze_clip", CREATOR_LINE=creator_line)),
+                _types.Part.from_text(text=prompts.render(prompt_key, CREATOR_LINE=creator_line)),
             ])],
             config=_types.GenerateContentConfig(temperature=0.5),
         )
@@ -1447,8 +1535,12 @@ async def reanalyze_clip(project_id: str, clip_id: int):
                     text_part = gemini_service.restore_name_casing(text_part, _creator)
                 new_caption = (text_part + emoji_part).strip()
 
-        # Update the clip in memory + re-validate against transcript
+        # Update the clip in memory + re-validate against transcript.
+        # When lang=es we ALSO cache the result as the Spanish version so the
+        # Spanish export needs no separate translation step.
         clip.viral_caption = new_caption
+        if lang == "es":
+            clip.caption_es = new_caption
         transcript = getattr(project, 'transcript', None)
         if transcript:
             snippet, conf = gemini_service.validate_caption_against_transcript(
@@ -1457,6 +1549,122 @@ async def reanalyze_clip(project_id: str, clip_id: int):
             clip.transcript_snippet = snippet
             clip.match_confidence = conf
         return {"status": "updated", "clip": clip.model_dump()}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if active_file:
+            await asyncio.to_thread(gemini_service.delete_file, active_file)
+        if os.path.exists(segment_path):
+            try:
+                os.remove(segment_path)
+            except:
+                pass
+
+
+@router.post("/{project_id}/{clip_id}/tweet-text")
+async def generate_tweet_text(project_id: str, clip_id: int):
+    """Generate a short viral Twitter/X post text (<=280 chars) for this clip.
+
+    Like reanalyze, we extract the clip's exact segment, feed it to Gemini
+    together with the current caption, and save the result as clip.tweet_text.
+    """
+    import uuid as _uuid
+    import re as _re
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[project_id]
+    clip = next((c for c in project.clips if c.id == clip_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    # Extract the exact clip segment like reanalyze so Gemini sees the moment.
+    temp_dir = os.path.join(os.path.dirname(__file__), "..", "services", "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    segment_path = os.path.join(temp_dir, f"tweettext_{_uuid.uuid4().hex}.mp4")
+
+    duration = clip.end_time - clip.start_time
+    codec_args = video_service.get_video_codec_args(preset="fast", crf=23, prefer_qsv=True)
+    extract_cmd = [
+        video_service.FFMPEG_EXE,
+        "-ss", str(clip.start_time),
+        "-i", project.video_path,
+        "-t", str(duration),
+        *codec_args,
+        "-c:a", "aac", "-y", segment_path
+    ]
+    _extract_timeout = max(180, int(duration * 5))
+
+    active_file = None
+    try:
+        await asyncio.to_thread(
+            __import__("subprocess").run,
+            extract_cmd, capture_output=True, timeout=_extract_timeout
+        )
+        if not os.path.exists(segment_path):
+            raise HTTPException(status_code=500, detail="Failed to extract clip segment")
+
+        active_file = await asyncio.to_thread(gemini_service.upload_video, segment_path)
+        active_file = await asyncio.to_thread(gemini_service.wait_for_processing, active_file)
+
+        from google.genai import types as _types
+        active_model = getattr(project, 'gemini_model', None) or gemini_service.settings.GEMINI_MODEL
+        _creator = (getattr(project, 'creator_name', '') or '').strip()
+        creator_text = clip.viral_caption or clip.description or ""
+        if _creator:
+            _first = _creator.split(',')[0].strip()
+            creator_text = f"{creator_text}\nCreator/person name (use exactly, keep capitalization): {_first}"
+        print(f"[TweetText] clip {clip_id} model={active_model}")
+
+        response = await asyncio.to_thread(
+            gemini_service.client.models.generate_content,
+            model=active_model,
+            contents=[_types.Content(role="user", parts=[
+                _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
+                _types.Part.from_text(text=prompts.render("tweet_text", CREATOR_TEXT=creator_text)),
+            ])],
+            config=_types.GenerateContentConfig(temperature=0.7),
+        )
+
+        tweet = (response.text or "").strip()
+        tweet = _re.sub(r'\s+', ' ', tweet).strip()
+        # Strip surrounding quotes the model sometimes adds.
+        tweet = tweet.strip('"').strip("'").strip()
+        # Hard cap at 280 chars.
+        if len(tweet) > 280:
+            tweet = tweet[:280].rsplit(' ', 1)[0]
+
+        # Retry up to 2 times to reach >=280 chars (short tweets get expanded).
+        retry_prompt = (
+            "The previous tweet was only {cur} characters. Rewrite and EXPAND it "
+            "to reach 270-280 characters (more detail, more hashtags). "
+            "NEVER go over 280. Only output the tweet, nothing else."
+        )
+        for _retry in range(2):
+            if len(tweet) >= 280:
+                break
+            response2 = await asyncio.to_thread(
+                gemini_service.client.models.generate_content,
+                model=active_model,
+                contents=[_types.Content(role="user", parts=[
+                    _types.Part.from_text(text=retry_prompt.format(cur=len(tweet)) + "\n\n" + tweet),
+                ])],
+                config=_types.GenerateContentConfig(temperature=0.7),
+            )
+            t2 = (response2.text or "").strip()
+            t2 = _re.sub(r'\s+', ' ', t2).strip().strip('"').strip("'").strip()
+            if len(t2) > 280:
+                t2 = t2[:280].rsplit(' ', 1)[0]
+            if len(t2) > len(tweet):
+                tweet = t2
+
+        clip.tweet_text = tweet
+        return {"status": "updated", "tweet_text": tweet}
 
     except HTTPException:
         raise

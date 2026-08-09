@@ -319,9 +319,13 @@ function Sidebar({ active, filename, clipCount, hasProject, onNav }) {
 const GEMINI_VIDEO_MODELS = [
   { val: "gemini-2.5-flash",              label: "2.5 Flash",       sub: "1500/día · recomendado" },
   { val: "gemini-2.5-flash-lite",         label: "2.5 Flash Lite",  sub: "1000/día · liviano" },
-  { val: "gemini-3.1-flash-lite-preview", label: "3.1 Flash Lite",  sub: "preview · free" },
+  { val: "gemini-3.6-flash",              label: "3.6 Flash",       sub: "free · más nuevo" },
+  { val: "gemini-3.5-flash-lite",         label: "3.5 Flash Lite",  sub: "free · rápido" },
   { val: "gemini-3.5-flash",              label: "3.5 Flash",       sub: "pago · nuevo I/O 26" },
-  { val: "gemini-3-flash-preview",        label: "3 Flash",         sub: "20/día · preview" },
+  { val: "gemini-3.1-flash-lite",         label: "3.1 Flash Lite",  sub: "stable · free" },
+  { val: "gemini-3.1-flash-lite-preview", label: "3.1 Flash Lite P", sub: "preview · free" },
+  { val: "gemini-3-flash",                label: "3 Flash",         sub: "stable · free" },
+  { val: "gemini-3-flash-preview",        label: "3 Flash P",       sub: "20/día · preview" },
   { val: "gemini-2.5-pro",                label: "2.5 Pro",         sub: "50/día · mejor calidad" },
   { val: "gemini-3.1-pro-preview",        label: "3.1 Pro",         sub: "pago · top calidad" },
 ];
@@ -401,6 +405,7 @@ function UploadStep({ onComplete }) {
   const [maxDuration, setMaxDuration] = useState(90);
   const [customPrompt, setCustomPrompt] = useState("");
   const [contentType, setContentType] = useState("drama"); // "drama" | "motivational"
+  const [analyzeLang, setAnalyzeLang] = useState("en"); // caption language: "en" | "es"
   const { model: geminiModel, setModel: setGeminiModel } = useModel(); // global model (synced w/ sidebar + Ajustes)
   const [creatorName, setCreatorName] = useState(""); // creator name(s) for captions
   // Analyze a sub-range only (mm:ss format, blank = whole video)
@@ -482,7 +487,8 @@ function UploadStep({ onComplete }) {
         creatorName,
         startSec,
         analyzeDuration,
-        maxDuration
+        maxDuration,
+        analyzeLang
       );
 
       setProjectIdRef(uploadRes.project_id);
@@ -717,6 +723,28 @@ function UploadStep({ onComplete }) {
           </div>
         </div>
 
+        {/* Caption language — same EN/ES choice as the reanalyze buttons */}
+        <div style={{ marginBottom: 18 }}>
+          <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 8 }}>
+            Idioma de los captions
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {[
+              { val: "en", label: "🇺🇸 English" },
+              { val: "es", label: "🇪🇸 Español" },
+            ].map(({ val, label }) => (
+              <StChip key={val} active={analyzeLang === val}
+                onClick={() => setAnalyzeLang(val)}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 14px", fontSize: 13 }}>
+                {label}
+              </StChip>
+            ))}
+          </div>
+          <p style={{ fontSize: 11.5, color: "var(--st-faint)", margin: "6px 0 0" }}>
+            Los captions, descripciones y el texto del clip saldrán en ese idioma.
+          </p>
+        </div>
+
         {/* Creator name */}
         <div style={{ marginBottom: 18 }}>
           <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 6 }}>
@@ -821,6 +849,16 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
   );
   const [startTime, setStartTime] = useState(clip.start_time);
   const [endTime, setEndTime] = useState(clip.end_time);
+  // Timeline cuts — kept pieces in ORIGINAL-video seconds. A single piece
+  // spanning the full clip = legacy mode (start/end). Non-empty with >1 piece
+  // = the user removed middles; the export concatenates these segments.
+  const [segments, setSegments] = useState(() => {
+    const orig = clip.segments || [];
+    if (orig.length) return orig.map((s) => ({
+      start: Number(s.start), end: Number(s.end), speed: Number(s.speed) || 1,
+    }));
+    return [{ start: clip.start_time, end: clip.end_time }];
+  });
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -851,15 +889,34 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
   };
 
   // Loop within the trim range — when video reaches endTime, jump back to startTime
+  // When cuts exist, playback only walks the KEPT (green) segments: reaching a
+  // segment end jumps to the next kept segment, and the removed (black) gaps
+  // are never shown.
   const handleTimeUpdate = () => {
     const v = videoRef.current;
     if (!v) return;
     setCurrentTime(v.currentTime);
-    if (v.currentTime >= endTime) {
-      v.currentTime = startTime;
-    }
     if (v.currentTime < startTime - 0.5) {
       v.currentTime = startTime;
+    } else if (v.currentTime >= endTime) {
+      const s = sortedSegs();
+      v.currentTime = s.length ? s[0].start : startTime;
+    } else if (hasCuts) {
+      const t = v.currentTime;
+      const inSeg = segAt(t);
+      if (inSeg !== -1) {
+        const seg = sortedSegs()[inSeg];
+        if (t >= seg.end - 0.05) {
+          const s = sortedSegs();
+          v.currentTime = s[(inSeg + 1) % s.length].start;
+          if (inSeg + 1 >= s.length) v.pause();
+        }
+      } else {
+        // Playhead sits in a removed (black) gap → jump to the next kept segment
+        const s = sortedSegs();
+        const nxt = s.find((seg) => seg.start >= t);
+        v.currentTime = (nxt || s[0]).start;
+      }
     }
     syncBg();
   };
@@ -967,6 +1024,12 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
         start_time: startTime,
         end_time: endTime,
         keyframes: keyframes,  // wire format already (snake_case)
+        // One piece = legacy single-range mode (empty segments on the server).
+        // Multiple pieces = cuts; the server persists them and the export
+        // concatenates the kept parts.
+        segments: hasCuts
+          ? segments.map((s) => ({ start: s.start, end: s.end, speed: s.speed || 1 }))
+          : [],
       });
       onSaved(res.clip);
     } catch (e) {
@@ -980,8 +1043,55 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
     setZoom(1.0); setPanX(0); setPanY(0);
     setKeyframes([]); setSelectedKfIndex(null);
     setStartTime(clip.start_time); setEndTime(clip.end_time);
+    setSegments([{ start: clip.start_time, end: clip.end_time }]);
     if (videoRef.current) videoRef.current.currentTime = clip.start_time;
   };
+
+  // ─── Cuts (remove boring middles) ──────────────────────────────────────
+  // Each segment is in ORIGINAL-video seconds (same coordinate as start/end).
+  // Split the segment currently under the playhead, then the user can delete
+  // any piece to cut it out. Sorted on every mutation.
+  const [cutMsg, setCutMsg] = useState("");
+  const clearCutMsg = () => setCutMsg("");
+  const sortedSegs = () => [...segments].sort((a, b) => a.start - b.start);
+  const segAt = (t) => sortedSegs().findIndex((s) => t >= s.start && t <= s.end);
+  const totalSegDur = segments.reduce((acc, s) => acc + (s.end - s.start), 0);
+
+  const splitAtPlayhead = () => {
+    const t = Math.max(startTime, Math.min(endTime, currentTime));
+    const idx = segAt(t);
+    if (idx === -1) { setCutMsg("El playhead no está sobre un tramo conservado. Arrastrá la línea para moverlo."); return; }
+    const seg = sortedSegs()[idx];
+    if (t - seg.start < 0.15 || seg.end - t < 0.15) {
+      setCutMsg("El playhead está demasiado cerca del borde del tramo. Movelo dentro del tramo verde para cortar.");
+      return;
+    }
+    const next = [...segments].filter((_, i) => i !== idx);
+    next.push({ start: seg.start, end: t }, { start: t, end: seg.end });
+    setSegments(next.sort((a, b) => a.start - b.start));
+    setCutMsg("");
+  };
+
+  const deleteSegAtPlayhead = () => {
+    const idx = segAt(currentTime);
+    if (idx === -1) { setCutMsg("No hay un tramo bajo el playhead para eliminar."); return; }
+    const next = [...segments].filter((_, i) => i !== idx);
+    if (!next.length) return;
+    setSegments(next.sort((a, b) => a.start - b.start));
+    setCutMsg(`Tramo eliminado — quedan los tramos en verde.`);
+  };
+
+  const clearCuts = () => {
+    setSegments([{ start: clip.start_time, end: clip.end_time }]);
+    setCutMsg("");
+  };
+
+  // "Tiene cortes" = cualquier estado distinto del rango original único (o sea,
+  // al eliminar hasta quedar un solo tramo recortado, sigue siendo un corte).
+  const pristineSingle = segments.length === 1
+    && Math.abs(segments[0].start - clip.start_time) < 0.01
+    && Math.abs(segments[0].end - clip.end_time) < 0.01;
+  const hasCuts = !pristineSingle;
 
   const formatTime = (sec) => {
     const m = Math.floor(sec / 60);
@@ -996,7 +1106,7 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}
-           style={{ maxWidth: 1100, width: "92vw" }}>
+           style={{ maxWidth: 1100, width: "92vw", maxHeight: "92vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h3 style={{ margin: 0 }}>🎬 Editor · Clip {clip.id}: {clip.description}</h3>
           <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#999", fontSize: 24, cursor: "pointer" }}>✕</button>
@@ -1190,12 +1300,38 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
                   seekTo(startTime + pct * clipDur);
                 }}
               >
-                {/* Trim range (highlighted) */}
-                <div style={{
-                  position: "absolute", left: 0, top: 0, bottom: 0, right: 0,
-                  background: "linear-gradient(90deg, rgba(99,102,241,0.15), rgba(99,102,241,0.3))",
-                  borderRadius: 8,
-                }} />
+                {/* Trim range — when cuts exist, paint the KEPT segments as
+                    bright blocks and leave removed gaps dark. Otherwise a
+                    single full-highlight gradient (legacy single-range). */}
+                {hasCuts ? segments.map((s, i) => {
+                  const left = clipDur > 0 ? ((s.start - startTime) / clipDur) * 100 : 0;
+                  const width = clipDur > 0 ? ((s.end - s.start) / clipDur) * 100 : 0;
+                  if (left > 100 || left + width < 0) return null;
+                  const isPlayheadSeg = currentTime >= s.start && currentTime <= s.end;
+                  return (
+                    <div key={i}
+                      onClick={(e) => { e.stopPropagation(); seekTo((s.start + s.end) / 2); }}
+                      title={`Kept ${formatTime(s.start)} – ${formatTime(s.end)} (${(s.end - s.start).toFixed(1)}s)`}
+                      style={{
+                        position: "absolute", top: 3, bottom: 3, zIndex: 1,
+                        left: `${Math.max(0, left)}%`,
+                        width: `${(left < 0 ? width + left : width)}%`,
+                        background: isPlayheadSeg
+                          ? "linear-gradient(90deg, rgba(34,197,94,0.5), rgba(34,197,94,0.75))"
+                          : "linear-gradient(90deg, rgba(34,197,94,0.3), rgba(34,197,94,0.55))",
+                        border: "1px solid rgba(34,197,94,0.8)",
+                        borderRadius: 5,
+                        cursor: "pointer",
+                      }}
+                    />
+                  );
+                }) : (
+                  <div style={{
+                    position: "absolute", left: 0, top: 0, bottom: 0, right: 0,
+                    background: "linear-gradient(90deg, rgba(99,102,241,0.15), rgba(99,102,241,0.3))",
+                    borderRadius: 8,
+                  }} />
+                )}
                 {/* Playhead */}
                 <div style={{
                   position: "absolute", left: `${progress}%`, top: 0, bottom: 0,
@@ -1366,6 +1502,46 @@ function ClipEditorModal({ projectId, clip, fillMode = "fit", backgroundStyle = 
               </button>
             </div>
 
+            {/* ─── Cuts (recortar partes del medio) ─────────────────────── */}
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "14px 16px", border: hasCuts ? "1px solid rgba(34,197,94,0.4)" : "1px solid transparent" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <h4 style={{ margin: 0, fontSize: 14 }}>
+                  ✂ Cortes <span style={{ color: "#777", fontWeight: 400 }}>({segments.length} tramo{segments.length > 1 ? "s" : ""})</span>
+                </h4>
+                {hasCuts && (
+                  <button onClick={clearCuts} className="btn btn-secondary"
+                    style={{ padding: "3px 10px", fontSize: 11 }}>
+                    ↻ Quitar cortes
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                <button onClick={splitAtPlayhead} className="btn btn-primary"
+                  style={{ flex: 1, padding: "7px 0", fontSize: 12 }}
+                  title="Divide el tramo bajo el playhead en dos. Repetí para separar distintas secciones y después borrá las que no quieras.">
+                  ✂ Cortar aquí
+                </button>
+                <button onClick={deleteSegAtPlayhead} disabled={!hasCuts}
+                  className="btn btn-secondary"
+                  style={{ flex: 1, padding: "7px 0", fontSize: 12 }}
+                  title="Elimina el tramo que contiene el playhead (se remueve del clip)">
+                  🗑 Eliminar tramo
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: "#888", margin: 0, lineHeight: 1.5 }}>
+                {hasCuts ? (
+                  <>Video resultante: <b style={{ color: "#22c55e" }}>{formatTime(totalSegDur)}</b> (de {formatTime(endTime - startTime)} originales). Mové el playhead sobre un tramo verde y usá "Eliminar tramo" para quitarlo.</>
+                ) : (
+                  <>Ubicá el playhead y "Cortar aquí" para separar secciones. Luego eliminá las que no quieras — se concatenan las que quedan.</>
+                )}
+              </p>
+              {cutMsg && (
+                <p style={{ fontSize: 11.5, color: "#fbbf24", margin: "8px 0 0", lineHeight: 1.45, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 8, padding: "8px 10px" }}>
+                  {cutMsg}
+                </p>
+              )}
+            </div>
+
             <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "14px 16px" }}>
               <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>Trim del clip</h4>
               <label style={{ fontSize: 12, color: "#aaa" }}>Inicio: <b style={{ color: "var(--accent)", fontFamily: "monospace" }}>{formatTime(startTime)}</b></label>
@@ -1431,6 +1607,14 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   const [reanalyzingClip, setReanalyzingClip] = useState(null);
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
+  // ⬇ Per-clip quick export: renders THIS clip in 9:16 and downloads it.
+  const [quickExportId, setQuickExportId] = useState(null);
+  const [copiedTweetId, setCopiedTweetId] = useState(null);
+  // 🐦 Tweet text modal — generate + view + copy the 280-char post text.
+  const [tweetClip, setTweetClip] = useState(null);
+  const [tweetText, setTweetText] = useState("");
+  const [tweetGenerating, setTweetGenerating] = useState(false);
+  const [tweetCopied, setTweetCopied] = useState(false);
   // ── Project-wide music state (Clips screen) ────────────────────────────
   // ClipsStep affects the WHOLE PROJECT's music settings — i.e. all clips
   // in the batch will use this when they export. For per-clip music
@@ -1560,6 +1744,100 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     setVideoUrl(api.getRawVideoUrl(projectId));
   };
 
+    // ⬇ Render THIS single clip in 16:9 WITHOUT text (Twitter-ready) and download
+  // it. One click = render + download. Polls the export progress and grabs the
+  // variant file (clip_XX_title_16x9_notext.mp4) as soon as it appears.
+  const handleQuickExport = async (clip) => {
+    if (quickExportId) return;
+    setQuickExportId(clip.id);
+    const clipPrefix = `clip_${String(clip.id).padStart(2, "0")}_`;
+    const fileMark = "_16x9_notext";
+    try {
+      await api.startExport(projectId, [clip.id], { aspectRatio: "16:9", noText: true, useWatermark: false, variant: "16x9_notext" });
+      const deadline = Date.now() + 600000; // 10 min cap
+      let started = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const p = await api.getExportProgress(projectId);
+        // Wait until the NEW job actually starts (progress resets to running
+        // with total 1) so we never grab a stale file from an old export.
+        if (!started && p.status === "running" && p.total === 1) started = true;
+        if (started) {
+          const f = (p.files || []).find((x) => x.startsWith(clipPrefix) && x.includes(fileMark));
+          if (f) {
+            const a = document.createElement("a");
+            a.href = api.getDownloadUrl(projectId, f);
+            a.download = f;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            break;
+          }
+          if (p.status === "completed" || p.status === "done") break;
+        }
+      }
+    } catch (e) {
+      alert("No se pudo exportar el clip: " + e.message);
+    } finally {
+      setQuickExportId(null);
+    }
+  };
+
+  // 📋 Copy a ready-to-paste post text for this clip (caption + basic tags).
+  const handleCopyTweet = async (clip) => {
+    // If a dedicated tweet_text exists, copy that; otherwise fall back to the caption.
+    const text = (tweet_text_map[clip.id] || "").trim() || stripCaptionMarkers(clip.viral_caption || "").trim() || clip.description || "";
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedTweetId(clip.id);
+      setTimeout(() => setCopiedTweetId((id) => (id === clip.id ? null : id)), 1500);
+    } catch (err) {
+      alert("No se pudo copiar: " + err.message);
+    }
+  };
+
+  // 🐦 Open the tweet text modal for a clip (generate on demand, view + copy).
+  const handleOpenTweet = async (clip) => {
+    setTweetClip(clip);
+    setTweetText(tweet_text_map[clip.id] || "");
+    setTweetGenerating(false);
+    setTweetCopied(false);
+  };
+
+  const handleGenerateTweet = async () => {
+    if (!tweetClip || tweetGenerating) return;
+    setTweetGenerating(true);
+    try {
+      const res = await api.generateTweetText(projectId, tweetClip.id);
+      setTweetText(res.tweet_text || "");
+      setTweet_text_map((m) => ({ ...m, [tweetClip.id]: res.tweet_text || "" }));
+      if (onUpdateClip) onUpdateClip(tweetClip.id, { tweet_text: res.tweet_text || "" });
+    } catch (err) {
+      alert("No se pudo generar el tweet: " + err.message);
+    } finally {
+      setTweetGenerating(false);
+    }
+  };
+
+  const handleCopyTweetModal = async () => {
+    if (!tweetText.trim()) return;
+    try {
+      await navigator.clipboard.writeText(tweetText);
+      setTweetCopied(true);
+      setTimeout(() => setTweetCopied(false), 1500);
+    } catch (err) {
+      alert("No se pudo copiar: " + err.message);
+    }
+  };
+
+  // Load existing tweet_text values for all clips on mount.
+  const [tweet_text_map, setTweet_text_map] = useState({});
+  useEffect(() => {
+    const m = {};
+    (clips || []).forEach((c) => { if (c.tweet_text) m[c.id] = c.tweet_text; });
+    setTweet_text_map(m);
+  }, []);
+
   // Save the manually re-trimmed in/out points (instant, no render).
   const handleSaveTrim = async () => {
     if (!playingClip) return;
@@ -1641,14 +1919,14 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     try { await api.updateProjectCreator(projectId, (creatorName || "").trim()); } catch (_) {}
   };
 
-  const handleReanalyze = async (clip) => {
+  const handleReanalyze = async (clip, lang = "en") => {
     await flushCreatorBeforeReanalyze();
     setReanalyzingClip(clip.id);
     try {
-      const result = await api.reanalyzeClip(projectId, clip.id);
+      const result = await api.reanalyzeClip(projectId, clip.id, lang);
       onEdit(clip.id, result.clip.viral_caption);
     } catch (err) {
-      alert("Re-análisis falló: " + err.message);
+      alert(`Re-análisis falló (${lang === "es" ? "ES" : "EN"}): ` + err.message);
     } finally {
       setReanalyzingClip(null);
     }
@@ -1825,7 +2103,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     });
   };
 
-  const handleReanalyzeBatch = async () => {
+  const handleReanalyzeBatch = async (lang = "en") => {
     if (selectedClips.size === 0) return;
     await flushCreatorBeforeReanalyze();
     const ids = Array.from(selectedClips);
@@ -1835,7 +2113,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
       const clipId = ids[i];
       setBatchProgress({ current: i + 1, total: ids.length, currentId: clipId });
       try {
-        const result = await api.reanalyzeClip(projectId, clipId);
+        const result = await api.reanalyzeClip(projectId, clipId, lang);
         onEdit(clipId, result.clip.viral_caption);
       } catch (err) {
         console.error(`Re-análisis falló para clip ${clipId}:`, err.message);
@@ -2151,8 +2429,11 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
             </span>
           ) : (
             <>
-              <button className="btn btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={handleReanalyzeBatch}>
-                <RefreshCw size={13} /> Re-analizar
+              <button className="btn btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => handleReanalyzeBatch("en")}>
+                <RefreshCw size={13} /> Re-analizar EN
+              </button>
+              <button className="btn btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => handleReanalyzeBatch("es")}>
+                🇪🇸 Re-analizar ES
               </button>
               <button
                 className="btn btn-secondary"
@@ -2238,21 +2519,27 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                   <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--st-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{clip.description}</span>
                 </div>
                 <div style={{ fontSize: 13.5, color: "var(--st-muted)", fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {isBeingAnalyzed ? "Re-analizando…" : `“${stripCaptionMarkers(clip.viral_caption)}”`}
+                  {isBeingAnalyzed ? "Re-analizando…" : clip.viral_caption
+                    ? `“${stripCaptionMarkers(clip.viral_caption)}”`
+                    : <span style={{ color: "#f59e0b" }}>Sin analizar — usá ↻ para pedir caption a Gemini</span>}
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
                 <span style={{ fontFamily: "var(--st-mono)", fontSize: 11.5, color: "var(--st-muted)" }}>{clip.duration.toFixed(0)}s</span>
                 <span style={{ fontFamily: "var(--st-mono)", fontSize: 11.5, color: "var(--st-faint)" }}>{formatTime(clip.start_time)}–{formatTime(clip.end_time)}</span>
-                {clip.viral_score != null && <ScoreBadge score={clip.viral_score} />}
+                {clip.viral_score > 0 && <ScoreBadge score={clip.viral_score} />}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                 {[
+                  { ic: quickExportId === clip.id ? <Loader2 size={16} style={{ animation: "st-spin 1s linear infinite" }} /> : <Download size={16} />, title: "Descargar clip 16:9 sin texto (Twitter)", fn: () => handleQuickExport(clip) },
+                  { ic: tweet_text_map[clip.id] ? <span style={{ fontSize: 13 }}>🐦</span> : <span style={{ fontSize: 13, opacity: 0.65 }}>🐦</span>, title: "Tweet — ver / generar texto (280)", fn: () => handleOpenTweet(clip) },
+                  { ic: copiedTweetId === clip.id ? <Check size={16} style={{ color: "var(--st-accent)" }} /> : <Copy size={16} />, title: "Copiar texto para publicar", fn: () => handleCopyTweet(clip) },
                   { ic: <Play size={16} />, title: "Reproducir", fn: () => handlePlayClip(clip) },
                   { ic: <Scissors size={16} />, title: "Editar (zoom/trim)", fn: () => setEditorClip(clip) },
                   { ic: <Pencil size={16} />, title: "Editar caption", fn: () => { setEditingClip(clip); setEditText(clip.viral_caption); } },
                   { ic: <FileText size={16} />, title: "Corregir subtítulos", fn: () => openSubEditor(clip) },
-                  { ic: <RefreshCw size={16} />, title: "Re-analizar", fn: () => handleReanalyze(clip) },
+                  { ic: <RefreshCw size={16} />, title: "Re-analizar (EN)", fn: () => handleReanalyze(clip, "en") },
+                  { ic: <span style={{ fontSize: 13 }}>🇪🇸</span>, title: "Re-analizar (ES)", fn: () => handleReanalyze(clip, "es") },
                 ].map((a, k) => (
                   <span key={k} title={a.title} onClick={a.fn}
                     style={{ width: 30, height: 30, display: "grid", placeItems: "center", borderRadius: 8, color: "var(--st-muted)", cursor: "pointer" }}
@@ -2404,11 +2691,78 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                 onClick={() => {
                   const clip = scriptViewClip;
                   setScriptViewClip(null);
-                  handleReanalyze(clip);
+                  handleReanalyze(clip, "en");
                 }}
                 disabled={reanalyzingClip === scriptViewClip.id || reanalyzingBatch}
               >
-                🔄 Reanalizar
+                <RefreshCw size={13} /> Reanalizar EN
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  const clip = scriptViewClip;
+                  setScriptViewClip(null);
+                  handleReanalyze(clip, "es");
+                }}
+                disabled={reanalyzingClip === scriptViewClip.id || reanalyzingBatch}
+              >
+                🇪🇸 Reanalizar ES
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🐦 Tweet text modal — generate / view / copy the 280-char post text */}
+      {tweetClip && (
+        <div className="modal-overlay" onClick={() => setTweetClip(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <h3>🐦 Tweet · Clip {tweetClip.id}</h3>
+            <p style={{ color: "var(--text-secondary)", marginBottom: 14, fontSize: 13 }}>
+              {formatTime(tweetClip.start_time)} — {formatTime(tweetClip.end_time)}
+              {" · "}
+              <span style={{ color: "#aaa" }}>{tweetClip.description}</span>
+            </p>
+
+            <div style={{
+              background: "#0a0a0a", border: "1px solid #2a2a2a",
+              borderRadius: 10, padding: "12px 14px", marginBottom: 8,
+            }}>
+              <textarea
+                value={tweetText}
+                onChange={(e) => setTweetText(e.target.value.slice(0, 280))}
+                placeholder={tweetGenerating ? "Generando…" : "Presioná “Generar tweet” para que Gemini escriba el texto (máx 280 caracteres)."}
+                disabled={tweetGenerating}
+                rows={5}
+                style={{
+                  width: "100%", boxSizing: "border-box", resize: "vertical",
+                  background: "transparent", border: "none", outline: "none",
+                  color: "#fff", fontSize: 14, lineHeight: 1.55, fontFamily: "inherit",
+                }}
+              />
+            </div>
+            <div style={{
+              display: "flex", justifyContent: "flex-end", marginBottom: 14,
+              fontSize: 12, fontFamily: "var(--mono, monospace)",
+              color: tweetText.length > 280 ? "#ef4444" : tweetText.length >= 250 ? "#f59e0b" : "var(--text-muted)",
+            }}>
+              {tweetText.length}/280
+            </div>
+
+            <div className="btn-group">
+              <button className="btn btn-secondary" onClick={() => setTweetClip(null)}>
+                Cerrar
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={handleGenerateTweet}
+                disabled={tweetGenerating}
+                style={{ marginLeft: "auto" }}
+              >
+                {tweetGenerating ? <><Loader2 size={13} style={{ animation: "st-spin 1s linear infinite" }} /> Generando…</> : "🔄 Generar tweet"}
+              </button>
+              <button className="btn btn-primary" onClick={handleCopyTweetModal} disabled={!tweetText.trim()}>
+                {tweetCopied ? "✓ Copiado" : "📋 Copiar"}
               </button>
             </div>
           </div>
@@ -4931,7 +5285,8 @@ function LiveStreamStep({ onClipToProject }) {
     });
   };
 
-  // Batch handler — process N selected clips into one project
+  // Batch handler — send N selected clips into ClipsStep WITHOUT Gemini so the
+  // user can re-analyze them (one or a few at a time) at their own pace.
   const processSelectedClips = async () => {
     if (selectedClips.size === 0) return;
     const picks = viralClips.filter((c) => selectedClips.has(c.id));
@@ -4951,41 +5306,25 @@ function LiveStreamStep({ onClipToProject }) {
             picks.map((c) => ({ slug: c.id, title: c.title, url: c.url })),
             picks[0].broadcaster_name || "",
             "",
+            false,   // analyze_with_gemini = false → land in Clips immediately
           )
         : await api.processTwitchClipsBatch(
             picks.map((c) => ({ slug: c.id, title: c.title })),
             picks[0].broadcaster_name || "",
             "",
+            false,   // analyze_with_gemini = false → land in Clips immediately
           );
       const projectId = start.project_id;
-      setProcessingClip({
-        phase: "analyzing", name: `${picks.length} clips`, progress: `0/${picks.length}`,
-      });
-      const deadline = Date.now() + 10 * 60 * 1000;     // 10 min ceiling
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const s = await api.getProjectStatus(projectId).catch(() => null);
-        if (!s) continue;
-        if (s.analyze_progress) {
-          setProcessingClip((prev) => prev ? { ...prev, progress: s.analyze_progress } : prev);
-        }
-        if (s.status === "ready") {
-          const data = await api.getClips(projectId);
-          if (onClipToProject) {
-            onClipToProject(projectId, data.clips || [], `${picks.length} Twitch clips`);
-          }
-          setProcessingClip(null);
-          setViralOpen(false);
-          setSelectedClips(new Set());
-          return;
-        }
-        if (s.status === "error") {
-          throw new Error("Gemini falló al analizar el batch");
-        }
+      // No Gemini: the project is already "ready". Just grab the clips and go.
+      const data = await api.getClips(projectId);
+      if (onClipToProject) {
+        onClipToProject(projectId, data.clips || [], `${picks.length} clips virales`);
       }
-      throw new Error("Tiempo agotado esperando el análisis");
+      setProcessingClip(null);
+      setViralOpen(false);
+      setSelectedClips(new Set());
     } catch (e) {
-      setProcessingError(e.message || "No se pudo procesar el batch");
+      setProcessingError(e.message || "No se pudo enviar el batch a Clips");
       setProcessingClip(null);
     }
   };
@@ -5279,6 +5618,8 @@ function LiveStreamStep({ onClipToProject }) {
     }
   };
 
+  // Send selected pescador clips into ClipsStep WITHOUT Gemini — the user
+  // re-analyzes them (one or a few at a time) at their own pace from Clips.
   const processPescSelected = async () => {
     if (!pescSession || pescSelected.size === 0) return;
     const platform = pescSession.platform;
@@ -5292,32 +5633,19 @@ function LiveStreamStep({ onClipToProject }) {
     try {
       const items = picks.map((c) => ({ slug: c.id, title: c.title, url: c.url }));
       const start = platform === "kick"
-        ? await api.processKickClipsBatch(items, picks[0].broadcaster_name || "", "")
-        : await api.processTwitchClipsBatch(items, picks[0].broadcaster_name || "", "");
+        ? await api.processKickClipsBatch(items, picks[0].broadcaster_name || "", "", false)
+        : await api.processTwitchClipsBatch(items, picks[0].broadcaster_name || "", "", false);
       const projectId = start.project_id;
-      setPescProcessing({ phase: "analyzing", name: `${picks.length} clips`, progress: `0/${picks.length}` });
-      const deadline = Date.now() + 10 * 60 * 1000;
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const s = await api.getProjectStatus(projectId).catch(() => null);
-        if (!s) continue;
-        if (s.analyze_progress) {
-          setPescProcessing((prev) => prev ? { ...prev, progress: s.analyze_progress } : prev);
-        }
-        if (s.status === "ready") {
-          const data = await api.getClips(projectId);
-          if (onClipToProject) {
-            onClipToProject(projectId, data.clips || [], `${picks.length} clips pescados`);
-          }
-          setPescProcessing(null);
-          setPescSelected(new Set());
-          return;
-        }
-        if (s.status === "error") throw new Error("Gemini falló al analizar");
+      // No Gemini: the project is already "ready". Just grab the clips and go.
+      const data = await api.getClips(projectId);
+      if (onClipToProject) {
+        onClipToProject(projectId, data.clips || [], `${picks.length} clips pescados`);
       }
-      throw new Error("Tiempo agotado esperando el análisis");
+      setPescProcessing(null);
+      setPescSelected(new Set());
+      setPescSession({ ...pescSession, found_clips: (pescSession.found_clips || []).filter((c) => !pescSelected.has(c.id)) });
     } catch (e) {
-      setPescError(e.message || "No se pudo procesar el batch");
+      setPescError(e.message || "No se pudo enviar a Clips");
       setPescProcessing(null);
     }
   };
@@ -5635,8 +5963,8 @@ function LiveStreamStep({ onClipToProject }) {
                     }} />
                     <div style={{ fontSize: 14, fontWeight: 600, color: "var(--st-text)" }}>
                       {processingClip.phase === "downloading"
-                        ? `Bajando los clips de ${vodPlatform === "kick" ? "Kick" : "Twitch"}…`
-                        : "Gemini está escribiendo los captions…"}
+                        ? `Bajando los clips de ${vodPlatform === "kick" ? "Kick" : "Twitch"} y armando el proyecto…`
+                        : "Preparando…"}
                     </div>
                     <div style={{ fontSize: 12, color: "var(--st-muted)", maxWidth: 340 }}>
                       {processingClip.name}
@@ -5647,7 +5975,7 @@ function LiveStreamStep({ onClipToProject }) {
                       </div>
                     )}
                     <div style={{ fontSize: 11, color: "var(--st-faint)", fontFamily: "var(--st-mono)" }}>
-                      ~30 seg por clip · te llevamos al editor cuando esté listo
+                      sin Gemini · los re-analizás de a pocos en Clips
                     </div>
                   </div>
                 )}
@@ -5775,7 +6103,7 @@ function LiveStreamStep({ onClipToProject }) {
                     className="st-btn st-btn--primary"
                     style={{ marginLeft: "auto", padding: "8px 16px", fontSize: 13, gap: 6 }}
                   >
-                    <Download size={14} /> Procesar {selectedClips.size > 0 ? selectedClips.size : ""} con Gemini
+                    <Download size={14} /> Enviar a Clips{selectedClips.size > 0 ? ` (${selectedClips.size})` : ""}
                   </button>
                 </div>
               )}
@@ -6010,8 +6338,8 @@ function LiveStreamStep({ onClipToProject }) {
                       className="st-btn st-btn--primary"
                       style={{ width: "100%", justifyContent: "center", padding: "12px 0", fontSize: 14, fontWeight: 600 }}>
                       {pescProcessing
-                        ? `${pescProcessing.phase === "downloading" ? "Bajando" : "Analizando"} ${pescProcessing.name}… ${pescProcessing.progress || ""}`
-                        : `🤖 Procesar ${pescSelected.size} con Gemini`}
+                        ? `Bajando ${pescProcessing.name}… ${pescProcessing.progress || ""}`
+                        : `📥 Enviar ${pescSelected.size} a Clips (sin Gemini)`}
                     </button>
                   </div>
                 )}
@@ -6038,7 +6366,7 @@ const MEME_PRESETS = [
 // ================================================
 // MEME ITEM CARD
 // ================================================
-function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalCropTopPct = 0, globalCropBottomPct = 0, globalCropLeftPct = 0, globalCropRightPct = 0, globalCornerRadius = 0 }) {
+function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalCropTopPct = 0, globalCropBottomPct = 0, globalCropLeftPct = 0, globalCropRightPct = 0, globalCornerRadius = 0, globalTextAlign = "left" }) {
   const [textY, setTextY] = useState(0.22);
   const [textX, setTextX] = useState(0.05);
   const [videoY, setVideoY] = useState(0.55);
@@ -6098,6 +6426,10 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
   useEffect(() => {
     setCornerRadius(globalCornerRadius);
   }, [globalCornerRadius]);
+
+  useEffect(() => {
+    setTextAlign(globalTextAlign);
+  }, [globalTextAlign]);
 
   // Apply global preset whenever parent changes it
   useEffect(() => {
@@ -6351,7 +6683,7 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
             borderRadius: 9, overflow: "hidden", background: "#000",
             containerType: "inline-size",
           }}>
-            <video key={bust} src={api.getMemeDownloadUrl(batchId, index, bust)} controls
+            <video key={`bg${bust}`} src={api.getMemeBackgroundUrl(batchId, index, bust)} controls
               style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 9, background: "#000", display: "block" }} />
 
             {/* Centre guides */}
@@ -6421,6 +6753,86 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
                 boxShadow: "0 1px 3px rgba(0,0,0,.5)",
               }}>altura del texto</span>
             </div>
+
+            {/* Draggable WYSIWYG text overlay — renders the SAME text/colour/
+                size/alignment that gets baked, positioned at textX/textY, and
+                drags over the preview to update BOTH sliders live without any
+                re-export. Width is set in cqw (container-query %) so the
+                wrapped lines match the 1080x1920 baked canvas at any preview
+                size. */}
+{(() => {
+              const displayText = (customText && customText !== item.meme_text) ? customText : (item.meme_text || "");
+              if (!displayText) return null;
+              const isLeft = (textAlign || "left") === "left";
+              const isCenter = (textAlign || "left") === "center";
+              const isRight = (textAlign || "left") === "right";
+              // CSS font stacks mirroring the backend font map keys.
+              const fontMap = {
+                calibri: "Calibri, 'Segoe UI', sans-serif",
+                arial: "Arial, Helvetica, sans-serif",
+                arial_black: "'Arial Black', Arial, sans-serif",
+                segoe: "'Segoe UI', 'Segoe', sans-serif",
+                trebuchet: "'Trebuchet MS', 'Trebuchet', sans-serif",
+                impact: "Impact, 'Arial Black', sans-serif",
+                comic: "'Comic Sans MS', 'Comic Sans', sans-serif",
+              };
+              // The baked text is font_size px in a 1080px-wide canvas → in
+              // container-query % units: fontSize / 1080 * 100.
+              const fsCqw = (fontSize || 60) / 1080 * 100;
+              const fillC = textColor || (bgMode === "blur" ? "rgba(255,255,255,.92)" : "#ffffff");
+              const hasStroke = (strokeWidth || 0) > 0;
+              const strokeClr = strokeColor || "#000000";
+              // Backend geometry (meme_service.create_meme_bg_png): text starts
+              // at x=W*text_x_ratio, y=H*text_y_ratio, wraps up to
+              // W - x_start - 5%, align left/center/right on the canvas.
+              const dragStart = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                memeDragRef.current = {
+                  startX: e.clientX, startY: e.clientY,
+                  startTextX: textX, startTextY: textY,
+                };
+              };
+              return (
+                <div
+                  onPointerDown={dragStart}
+                  title={`Arrastrá el texto para moverlo en vivo (sin exportar) · ${Math.round(textX * 100)}% / ${Math.round(textY * 100)}%`}
+                  style={{
+                    position: "absolute",
+                    top: `${textY * 100}%`,
+                    left: isLeft ? `${textX * 100}%` : 0,
+                    width: isLeft ? `calc(100% - ${textX * 100}% - 5%)` : "100%",
+                    cursor: "grab",
+                    touchAction: "none",
+                    zIndex: 8,
+                    textAlign: isCenter ? "center" : isRight ? "right" : "left",
+                    paddingRight: isRight ? "5%" : 0,
+                    boxSizing: "border-box",
+                    outline: "1.5px dashed rgba(230,194,112,.85)",
+                    outlineOffset: 2,
+                    borderRadius: 3,
+                  }}
+                >
+                  <div style={{
+                    fontSize: `${fsCqw}cqw`,
+                    lineHeight: 1.35,
+                    fontFamily: fontMap[fontFamily] || fontMap.calibri,
+                    fontWeight: fontFamily === "arial_black" || fontFamily === "impact" ? 800 : 700,
+                    color: fillC,
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                    userSelect: "none",
+                    textShadow: hasStroke
+                      ? `-1px -1px 0 ${strokeClr}, 1px -1px 0 ${strokeClr}, -1px 1px 0 ${strokeClr}, 1px 1px 0 ${strokeClr}`
+                      : "none",
+                    WebkitTextStroke: hasStroke ? `${Math.max(1, Math.round(strokeWidth / 6))}px ${strokeClr}` : undefined,
+                    pointerEvents: "none",
+                  }}>
+                    {displayText}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -6662,6 +7074,7 @@ function MemeStep() {
   const [gTextColor, setGTextColor] = useState("");
   const [gStrokeColor, setGStrokeColor] = useState("#000000");
   const [gStrokeWidth, setGStrokeWidth] = useState(0);
+  const [gTextAlign, setGTextAlign] = useState("left"); // "left" | "center" | "right"
   const [gVisualFilter, setGVisualFilter] = useState("none");
   const [gMirrorCyclic, setGMirrorCyclic] = useState(false);
   const [gBoostContrast, setGBoostContrast] = useState(false);
@@ -6822,6 +7235,7 @@ function MemeStep() {
       mirror_cyclic_enabled: gMirrorCyclic,
       mirror_cyclic_interval: 5.0,
       boost_contrast: gBoostContrast,
+      text_align: gTextAlign,
     };
     await Promise.all(readyItems.map(({ i }) =>
       api.reexportMeme(
@@ -7135,6 +7549,26 @@ function MemeStep() {
                           })}
                         </div>
                       </div>
+
+                      {/* Text alignment — global "centrar el texto" like crop */}
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, color: "var(--st-muted)", marginBottom: 4 }}>Centrar texto (alineación)</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
+                          {[["left", "⬅ Izquierda"], ["center", "↔ Centro"], ["right", "Derecha ➡"]].map(([k, label]) => {
+                            const on = gTextAlign === k;
+                            return (
+                              <button key={k} onClick={() => setGTextAlign(k)} style={{
+                                fontSize: 11, padding: "6px 0",
+                                background: on ? "var(--st-accent)" : "transparent",
+                                color: on ? "var(--st-on-accent)" : "var(--st-muted)",
+                                border: `1px solid ${on ? "var(--st-accent)" : "var(--st-border)"}`,
+                                borderRadius: 5, cursor: "pointer", fontWeight: 600,
+                              }}>{label}</button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
                       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                         <label style={{ flex: 1, fontSize: 11.5, color: "var(--st-muted)" }}>
                           <span style={{ display: "block", marginBottom: 3 }}>Color texto</span>
@@ -7230,6 +7664,7 @@ function MemeStep() {
                   globalCropLeftPct={gCropLeftPct}
                   globalCropRightPct={gCropRightPct}
                   globalCornerRadius={gCornerRadius}
+                  globalTextAlign={gTextAlign}
                 />
               ))}
             </div>
@@ -7259,6 +7694,7 @@ function AnalyzerStep() {
   const [sortByScore, setSortByScore] = useState(false);
   const [modelHealth, setModelHealth] = useState({});
   const [checkingModels, setCheckingModels] = useState(false);
+  const [analyzerLang, setAnalyzerLang] = useState("en"); // caption language: "en" | "es"
 
   const handleCheckModels = async () => {
     setCheckingModels(true);
@@ -7301,7 +7737,7 @@ function AnalyzerStep() {
     try {
       // Upload video (pass selected model so user controls quota usage)
       const uploadResult = await api.uploadVideo(
-        file, clipCount, 15, "", (pct) => setUploadPct(pct), analyzerModel
+        file, clipCount, 15, "", (pct) => setUploadPct(pct), analyzerModel, "", 0, 0, 90, analyzerLang
       );
       const projectId = uploadResult.project_id;
 
@@ -7437,6 +7873,22 @@ function AnalyzerStep() {
               <input type="range" min={5} max={30} value={clipCount} onChange={(e) => setClipCount(Number(e.target.value))} style={{ width: "100%" }} />
               <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "var(--st-mono)", fontSize: 10.5, color: "var(--st-faint)", marginTop: 4 }}>
                 <span>5 · rápido</span><span>30 · completo</span>
+              </div>
+            </div>
+
+            <div className="st-card" style={{ padding: "16px 18px" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-muted)", marginBottom: 10 }}>Idioma de los captions</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { val: "en", label: "🇺🇸 English" },
+                  { val: "es", label: "🇪🇸 Español" },
+                ].map(({ val, label }) => (
+                  <StChip key={val} active={analyzerLang === val}
+                    onClick={() => setAnalyzerLang(val)}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 14px", fontSize: 13 }}>
+                    {label}
+                  </StChip>
+                ))}
               </div>
             </div>
 

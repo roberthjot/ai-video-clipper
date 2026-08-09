@@ -374,6 +374,7 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
                       mirror_cyclic_interval: float = 5.0,
                       boost_contrast: bool = False,
                       text_align: str = "left",
+                      with_text: bool = True,
                       ) -> None:
     """Export full video (no cuts) overlaid on meme background.
 
@@ -395,9 +396,12 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
     bg_mode = (bg_mode or "color").lower()
 
     # PNG with text. transparent only for blur mode (so the blurred source
-    # video shows through behind the text).
+    # video shows through behind the text). With with_text=False we render a
+    # text-free background (solid colour for "color" mode, a fully transparent
+    # PNG for "blur") so the frontend can overlay a LIVE draggable text layer
+    # on top — full WYSIWYG without re-exporting.
     bg_png, _text_bottom = create_meme_bg_png(
-        meme_text, bg_color, W, H,
+        meme_text if with_text else "", bg_color, W, H,
         text_y_ratio=text_y, font_size=font_size, text_x_ratio=text_x,
         font_family=font_family, text_color=text_color,
         stroke_color=stroke_color, stroke_width=stroke_width,
@@ -645,6 +649,23 @@ def _process_one_item(batch_id, i, video_path, bg_color, text_y, video_scale, vi
 
         item["video_path"] = video_path
         item["output_path"] = output_path
+        # Snapshot of the settings used for this first export so the text-free
+        # preview background reproduces the same composite (see /preview-bg).
+        item["last_export"] = {
+            "bg_color": bg_color,
+            "text_y": text_y, "text_x": text_x,
+            "video_scale": video_scale, "video_y": video_y,
+            "font_size": font_size,
+            "corner_radius": 0,
+            "bg_mode": "color", "font_family": "calibri",
+            "text_color": "", "stroke_color": "", "stroke_width": 0,
+            "visual_filter": "none",
+            "trim_start": 0.0, "trim_end": 0.0,
+            "mirror_cyclic_enabled": False, "mirror_cyclic_interval": 5.0,
+            "boost_contrast": False,
+            "crop_top_pct": crop_top_pct, "crop_bottom_pct": crop_bottom_pct,
+            "crop_left_pct": crop_left_pct, "crop_right_pct": crop_right_pct,
+        }
         item["status"] = "ready"
         print(f"[Meme] Batch {batch_id} item {i}: done")
 

@@ -2,6 +2,90 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🖼 Meme/Música: preview WYSIWYG real (sin texto viejo atrás)
+
+El preview de cada tarjeta usaba el video final horneado (con el texto viejo
+incrustado) y encima el overlay arrastrable → se veían DOS textos. Ahora el
+preview carga un **video de fondo sin texto** (`GET /meme/preview-bg/{id}/{i}`)
+que reproduce exactamente el último export (`last_export`: bg, video scale/pos,
+crop, filtro, blur, trim, esquinas) pero sin la caption, y encima se dibuja el
+texto WYSIWYG arrastrable. Mover/redimensionar el texto NO re-exporta; el fondo
+se regenera solo ante cambios estructurales (crop/bg/video).
+- `export_meme_video` acepta `with_text=False` (PNG de texto vacío).
+- `_process_batch` y el reexport guardan el snapshot `item["last_export"]`.
+- `api.getMemeBackgroundUrl(batchId, index, bust)` es el `<video>` del preview.
+
+## 🎯 Meme/Música: texto arrastrable WYSIWYG en vivo + más modelos Gemini free
+
+### Draggable live text overlay (sin re-exportar)
+En la tarjeta de item (Memes y Música — mismo `MemeItemCard`), al abrir
+"Preview" ahora hay un overlay del texto REAL (mismo texto, color, borde,
+fuente, alineación y escala `cqw` que el export hornea en 1080×1920) que se
+arrastra con el mouse y actualiza `textX`/`textY` en vivo, sin re-exportar.
+- Se mueve en X e Y según la alineación (left ancla en textX, center/right
+  centran como el backend `create_meme_bg_png`).
+- Borde dorado punteado + título con % para saber que es arrastrable.
+- El texto que se ve durante el drag es el mismo que queda horneado: WYSIWYG.
+
+### Modelos Gemini free faltantes
+- `gemini_service.VIDEO_ANALYSIS_MODELS` suma: `gemini-3.6-flash`
+  (free tier, último Flash), `gemini-3.5-flash-lite` (free), `gemini-3-flash`
+  (alias stable free), `gemini-3.1-flash-lite` (alias stable free). Los Pro
+  siguen paid-only. Coincide con la whitelist SAFE_EMOJIS (14 emojis).
+- `GEMINI_VIDEO_MODELS` en App.jsx ahora incluye los nuevos (3.6/Lite/etc.)
+  con sus etiquetas (antes la lista del selector estaba hardcodeada y no los
+  mostraba).
+
+## 🌐 Re-análisis en español / inglés (EN + ES)
+
+Los botones de re-análisis ahora eligen idioma en lugar de forzar inglés
+(solo en el prompt, sin depender del traductor posterior para ES):
+
+- Backend `POST /clips/{pid}/{cid}/reanalyze?lang=en|es`: nuevo parámetro
+  `lang`. Con `es` usa el prompt `reanalyze_clip_es` (español neutro
+  latinoamericano) y además guarda el resultado en `clip.caption_es`, para que
+  el export ES / guión traducido salga sin paso extra de traducción; `en`
+  es el comportamiento clásico (`reanalyze_clip`).
+- Frontend: dos íconos por clip (↻ EN / 🇪🇸 ES), dos botones en la barra de
+  lote ("Re-analizar EN" / "Re-analizar ES") y el modal "Guión" ahora ofrece
+  "Reanalizar EN" / "Reanalizar ES". `handleReanalyze(clip, lang)` y
+  `handleReanalyzeBatch(lang)` pasan el idioma a la API.
+- El prompt ES emoji sigue la misma whitelist `SAFE_EMOJIS` (14 emojis) para
+  no romper el filtro `filter_emojis_to_whitelist`.
+
+## 🎣 Clips from Pescar / Viral modal → ClipsStep WITHOUT Gemini
+
+Previously "Pescar clips en vivo" and the VOD "Momentos virales" modal sent
+the selected clips through the `*_clips_batch_to_project` flow, which concat-
+downloads → runs Whisper → spawns a Gemini caption thread → only jumps to
+Clips after everything finishes ("Procesar N con Gemini").
+
+Now both buttons call the batch with `analyze_with_gemini=false`:
+- `process_clips_batch_to_project` (Twitch + Kick) accepts the flag; when
+  false it downloads + concatenates, creates the project with empty captions /
+  score (`ready` immediately) and skips Whisper + the Gemini thread.
+- The route (`/twitch-clips-batch-to-project`, `/kick-clips-batch-to-project`)
+  picks `analyze_with_gemini` from the payload.
+- Frontend sends the selected clips and jumps straight to ClipsStep ("Enviar a
+  Clips (sin Gemini)"), where each clip shows "Sin analizar" and the user
+  re-analyzes them one-by-one (↻ icon) or as a small batch (bar button) via the
+  existing reanalyze flow — Gemini runs at their own pace.
+- Whisper is deferred to reanalyze: `reanalyze_clip` calls a new
+  `_ensure_project_transcript` helper that transcribes the project video in a
+  background thread on first re-analyze (guarded so it never runs twice), so
+  subtitles still become available.
+
+## 🐛 Fix: previews now respect clips with cuts (segments)
+
+`▶ Play clip` (backend `video-preview`) used `generate_preview_clip` which
+only honors `start_time`/`end_time`, so after cutting a middle the preview
+kept showing the uncut clip. It now routes through the full export pipeline
+(`export_clip_with_style`, concat-first) whenever the clip has segments —
+same as the auto-reframe path. Also fixed the clip editor save: deleting
+pieces down to a SINGLE kept range was treated as "no cuts" and sent `[]`,
+restoring the full clip; `hasCuts` is now `!pristineSingle` so a lone
+trimmed piece is still persisted as a segment.
+
 ## 📝 Subtitle text correction + pescador clip download
 
 ### Subtitle text correction (fix Whisper words)
