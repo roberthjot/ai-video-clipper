@@ -2517,6 +2517,14 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
                 <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 4 }}>
                   <ConfDot conf={clip.match_confidence} />
                   <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--st-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{clip.description}</span>
+                  {clip.music_vibe && (
+                    <span title={`Música sugerida: ${clip.music_vibe}`} style={{
+                      flexShrink: 0, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 99,
+                      background: "var(--st-soft)", border: "1px solid var(--st-line)", color: "var(--st-muted)",
+                    }}>
+                      🎵 {clip.music_vibe}
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 13.5, color: "var(--st-muted)", fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {isBeingAnalyzed ? "Re-analizando…" : clip.viral_caption
@@ -4045,6 +4053,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: style.caption_style === "highlight" ? 8 : 12 }}>
               <StChip active={style.caption_style === "box"} onClick={() => setStyle((s) => ({ ...s, caption_style: "box" }))}>Caja blanca</StChip>
               <StChip active={style.caption_style === "tiktok"} onClick={() => setStyle((s) => ({ ...s, caption_style: "tiktok" }))}>TikTok</StChip>
+              <StChip active={style.caption_style === "meme"} onClick={() => setStyle((s) => ({ ...s, caption_style: "meme" }))}>Meme</StChip>
               <StChip active={style.caption_style === "clean"} onClick={() => setStyle((s) => ({ ...s, caption_style: "clean" }))}>Blanco limpio</StChip>
               <StChip active={style.caption_style === "yellow"} onClick={() => setStyle((s) => ({ ...s, caption_style: "yellow" }))}>Acento amarillo</StChip>
               <StChip active={style.caption_style === "highlight"} onClick={() => setStyle((s) => ({ ...s, caption_style: "highlight" }))}>Palabras de color</StChip>
@@ -4059,6 +4068,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             <select className="st-select" value={style.caption_font} onChange={(e) => setStyle((s) => ({ ...s, caption_font: e.target.value }))} style={{ marginBottom: 20 }}>
               <optgroup label="Windows (siempre disponibles)">
                 <option value="calibri">Calibri Bold (default)</option>
+                <option value="arial">Arial (como memes)</option>
                 <option value="arial_black">Arial Black</option>
                 <option value="impact">Impact</option>
                 <option value="verdana">Verdana Bold</option>
@@ -4139,6 +4149,17 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                 audio re-mixed). Trim sliders pick which SLICE of the song
                 plays — handy when you want only a drop or a chorus. */}
             <StSection icon={<Music2 size={14} />}>Música</StSection>
+            {selectedClip?.music_vibe && (
+              <div style={{ fontSize: 12, color: "var(--st-muted)", margin: "0 0 10px", lineHeight: 1.5, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{
+                  flexShrink: 0, fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 99,
+                  background: "var(--st-soft)", border: "1px solid var(--st-line)", color: "var(--st-text)",
+                }}>
+                  🎵 sugerido: {selectedClip.music_vibe}
+                </span>
+                <span>Gemini sugiere esta vibe para este clip.</span>
+              </div>
+            )}
             {!style.music_path ? (
               <>
                 <p style={{ fontSize: 12, color: "var(--st-muted)", margin: "0 0 10px", lineHeight: 1.5 }}>

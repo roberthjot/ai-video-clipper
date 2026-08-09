@@ -16,6 +16,7 @@ _FONTS_DIR = os.path.join(os.path.dirname(__file__), "..", "fonts")
 FONT_MAP = {
     # Windows-installed (no download needed)
     "calibri":     "C:/Windows/Fonts/calibrib.ttf",
+    "arial":       "C:/Windows/Fonts/arial.ttf",
     "arial_black": "C:/Windows/Fonts/ariblk.ttf",
     "impact":      "C:/Windows/Fonts/impact.ttf",
     "verdana":     "C:/Windows/Fonts/verdanab.ttf",
@@ -1172,15 +1173,11 @@ def create_tiktok_caption_overlay(lines: list, font_size: int = 72,
         total_w = tw + spacer + ew
         x = (box_w - total_w) // 2
 
-        # Outline + white text — ONLY for the text portion (no emojis here)
+        # Outline + white text — ONLY for the text portion (no emojis here).
+        # Use PIL's native stroke (thin, hugs the glyph) like the meme renderer.
         if text_part:
-            for dx in range(-stroke_width, stroke_width + 1):
-                for dy in range(-stroke_width, stroke_width + 1):
-                    if dx == 0 and dy == 0:
-                        continue
-                    if abs(dx) ** 2 + abs(dy) ** 2 <= stroke_width ** 2 + stroke_width:
-                        draw.text((x + dx, y + dy), text_part, font=font, fill=(0, 0, 0, 255))
-            draw.text((x, y), text_part, font=font, fill=(255, 255, 255, 255))
+            draw.text((x, y), text_part, font=font, fill=(255, 255, 255, 255),
+                      stroke_width=stroke_width, stroke_fill=(0, 0, 0, 255))
 
         # Emoji on top, rendered in color by Pilmoji, no stroke.
         # Pilmoji anchors emoji to the font baseline, which sits ~ascent below
@@ -1399,14 +1396,8 @@ def create_text_caption_overlay(lines: list, variant: str = "clean",
         for t in ln:
             if t["txt"] and paint_text:
                 col = CAPTION_COLORS.get(t["color"], CAPTION_COLORS["white"])
-                # Outline pass (black).
-                for dx in range(-stroke_width, stroke_width + 1):
-                    for dy in range(-stroke_width, stroke_width + 1):
-                        if dx == 0 and dy == 0:
-                            continue
-                        if dx * dx + dy * dy <= stroke_width * stroke_width + stroke_width:
-                            d.text((x + dx, y + dy), t["txt"], font=font, fill=(0, 0, 0, 255))
-                d.text((x, y), t["txt"], font=font, fill=col)
+                d.text((x, y), t["txt"], font=font, fill=col,
+                       stroke_width=stroke_width, stroke_fill=(0, 0, 0, 255))
             # Emoji painted in color (after outline) by Pilmoji.
             if t["em"] and pilmoji_ctx and paint_text:
                 emoji_x = x + t["tw"] + t["spacer"]
@@ -1919,6 +1910,10 @@ def generate_preview_frame(
             rounded_box_path, box_w, box_h = create_tiktok_caption_overlay(
                 lines, font_size=font_size, font_key=caption_font
             )
+        elif caption_style == 'meme':
+            rounded_box_path, box_w, box_h = create_text_caption_overlay(
+                lines, variant='meme', font_size=font_size, font_key='arial'
+            )
         elif caption_style in ('clean', 'highlight', 'yellow'):
             rounded_box_path, box_w, box_h = create_text_caption_overlay(
                 lines, variant=caption_style, font_size=font_size, font_key=caption_font
@@ -2171,6 +2166,10 @@ def generate_preview_clip(
         if caption_style == 'tiktok':
             rounded_box_path, box_w, box_h = create_tiktok_caption_overlay(
                 lines, font_size=font_size, font_key=caption_font
+            )
+        elif caption_style == 'meme':
+            rounded_box_path, box_w, box_h = create_text_caption_overlay(
+                lines, variant='meme', font_size=font_size, font_key='arial'
             )
         elif caption_style in ('clean', 'highlight', 'yellow'):
             rounded_box_path, box_w, box_h = create_text_caption_overlay(

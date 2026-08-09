@@ -380,6 +380,10 @@ def export_clip_with_style(
             rounded_box_path, box_w, box_h = video_service.create_tiktok_caption_overlay(
                 lines, font_size=style.font_size, font_key=_font
             )
+        elif _cap_style == 'meme':
+            rounded_box_path, box_w, box_h = video_service.create_text_caption_overlay(
+                lines, variant='meme', font_size=style.font_size, font_key='arial'
+            )
         elif _cap_style in ('clean', 'highlight', 'yellow'):
             rounded_box_path, box_w, box_h = video_service.create_text_caption_overlay(
                 lines, variant=_cap_style, font_size=style.font_size, font_key=_font

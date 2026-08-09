@@ -2,6 +2,34 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🎬 Meme caption style + Arial + music_vibe
+
+### Caption style "Meme" (clips → mismo look que el Meme Generator)
+- Nuevo chip **Meme** en el panel "Caption style" del Editor (`App.jsx`). Fuerza
+  Arial regular (`arial.ttf`), texto blanco, contorno negro fino nativo de PIL,
+  sin caja y sin sombra — idéntico a `create_meme_bg_png`.
+- Se aplica en preview (`generate_preview_frame` + `generate_preview_clip`) y en
+  export final (`export_service.export_clip_with_style`) vía
+  `create_text_caption_overlay(variant='meme', font_key='arial')`.
+- **Arial agregada a `FONT_MAP` de `video_service.py`** (`"arial":
+  "C:/Windows/Fonts/arial.ttf`) — antes el botón "Arial (meme)" de la zona de
+  captions caía en fallback a Calibri porque la fuente no existía en el mapa.
+  También se añadió la opción "Arial (como memes)" al `<select>` de fuente de
+  captions del Editor.
+- **Contorno con stroke nativo de PIL** en `create_tiktok_caption_overlay` y
+  `create_text_caption_overlay`: se eliminó el loop manual que imprimía el texto
+  en ~20 offsets (letras gordas/chunky). Ahora usa `stroke_width/stroke_fill`
+  en una sola pasada = contorno fino que se pega al glifo (como memes).
+
+### Música sugerida por clip (`music_vibe`)
+- Gemini ahora sugiere la vibe musical de cada clip (prompt `analysis_system`):
+  lista cerrada `tense | hype | emotional | comedy | sad | motivational |
+  calm | romantic`.
+- `ClipData.music_vibe`, normalizado por `_clean_music_vibe()` contra
+  `ALLOWED_MUSIC_VIBES` (module-level de `gemini_service.py`).
+- UI: chip 🎵 en la lista de clips (ClipsStep) y "🎵 sugerido: X" en la sección
+  Música del Editor para el clip seleccionado.
+
 ## 🖼 Meme/Música: preview WYSIWYG real (sin texto viejo atrás)
 
 El preview de cada tarjeta usaba el video final horneado (con el texto viejo

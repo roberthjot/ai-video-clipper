@@ -255,6 +255,19 @@ def restore_name_casing(text: str, creator_name: str) -> str:
     return text
 
 
+# Allowed music-vibe tags Gemini may suggest. Anything else gets normalized to "".
+ALLOWED_MUSIC_VIBES = {
+    "tense", "hype", "emotional", "comedy", "sad", "motivational", "calm", "romantic",
+}
+
+
+def _clean_music_vibe(value) -> str:
+    """Normalize a music_vibe from Gemini to our fixed whitelist ('' if unknown)."""
+    v = (str(value or "").strip().lower())
+    v = v.split()[0] if v else v          # "hype/tense" or "tense music" -> first token
+    return v if v in ALLOWED_MUSIC_VIBES else ""
+
+
 def filter_emojis_to_whitelist(text: str) -> str:
     """Strip any emoji not in SAFE_EMOJIS. Keeps whitespace and text intact."""
     if not text:
@@ -814,6 +827,7 @@ def analyze_video(
                 viral_score=max(1, min(10, int(clip.get("viral_score", 5)))),
                 viral_score_reason=clip.get("viral_score_reason", ""),
                 ig_description=clip.get("ig_description", ""),
+                music_vibe=_clean_music_vibe(clip.get("music_vibe", "")),
             ))
         return clips, skipped
 
