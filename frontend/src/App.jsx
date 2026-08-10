@@ -7117,6 +7117,24 @@ function MemeStep() {
   const [cropDetectError, setCropDetectError] = useState("");
   const pollRef = useRef(null);
   const fileInputRef = useRef(null);
+  // Per-video crop (remove white margins / borders). Index matches `files`.
+  // Each entry: { top, bottom, left, right } as % (0-100) + preview img + open.
+  const [vCrops, setVCrops] = useState([]);
+  const vCropInit = (n) => Array.from({ length: n }, () => ({ top: 0, bottom: 0, left: 0, right: 0, open: false, previewUrl: null, rendering: false, err: "", cw: 0, ch: 0, cx: 0, cy: 0 }));
+  const vCropHas = (c) => c && (c.top > 0.5 || c.bottom > 0.5 || c.left > 0.5 || c.right > 0.5);
+  // Measure the REAL video content rect inside the (possibly letterboxed)
+  // thumbnail box so crop guides sit on the actual video, not the black bars.
+  const vcSized = (i, w, h, vw, vh) => {
+    if (!w || !h || !vw || !vh) return;
+    const sc = Math.min(w / vw, h / vh);
+    updateVCrop(i, { cw: vw * sc, ch: vh * sc, cx: (w - vw * sc) / 2, cy: (h - vh * sc) / 2 });
+  };
+  // Stable object URL per file (avoid recreating on every render).
+  const vObjUrlMap = useRef(new Map());
+  const vObjUrl = (f) => {
+    if (!vObjUrlMap.current.has(f)) vObjUrlMap.current.set(f, URL.createObjectURL(f));
+    return vObjUrlMap.current.get(f);
+  };
 
   // Poll batch status every 2s while the modal is open. We DON'T stop on
   // "completed" — if we did, the per-item Retry button would fire but the
@@ -7138,6 +7156,7 @@ function MemeStep() {
   const handleFiles = (e) => {
     const selected = Array.from(e.target.files);
     setFiles(selected);
+    setVCrops(vCropInit(selected.length));
     setError("");
   };
 
@@ -7146,7 +7165,32 @@ function MemeStep() {
     const dropped = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("video/"));
     if (dropped.length) {
       setFiles(dropped);
+      setVCrops(vCropInit(dropped.length));
       setError("");
+    }
+  };
+
+  const updateVCrop = (i, patch) => {
+    setVCrops(prev => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
+  };
+
+  const loadCropFrame = async (i) => {
+    if (!files[i]) return;
+    try {
+      const url = await api.getVideoFrameUrl(files[i]);
+      updateVCrop(i, { img: url });
+    } catch (e) { /* ignore */ }
+  };
+
+  const renderCropPreview = async (i) => {
+    if (!files[i] || !vCrops[i]) return;
+    const c = vCrops[i];
+    updateVCrop(i, { rendering: true, err: "" });
+    try {
+      const url = await api.renderCropPreview(files[i], c.top, c.bottom, c.left, c.right, 8);
+      updateVCrop(i, { previewUrl: url, rendering: false });
+    } catch (e) {
+      updateVCrop(i, { rendering: false, err: "No se pudo renderizar el preview." });
     }
   };
 
@@ -7191,7 +7235,7 @@ function MemeStep() {
       const bottomPct = cropEnabled ? cropBottomPct / 100 : 0;
       const leftPct = cropEnabled ? cropLeftPct / 100 : 0;
       const rightPct = cropEnabled ? cropRightPct / 100 : 0;
-      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct, contentType, topPct, bottomPct, leftPct, rightPct, memeModel);
+      const result = await api.processMemes(files, bgColor, 0.08, 0.9, setUploadPct, contentType, topPct, bottomPct, leftPct, rightPct, memeModel, vCrops.map(c => ({ top: c.top, bottom: c.bottom, left: c.left, right: c.right })));
       setBatchId(result.batch_id);
     } catch (e) {
       setError(e.message || "Error al subir los videos");
@@ -7215,6 +7259,9 @@ function MemeStep() {
     setCropBottomPct(0);
     setCropFrameUrl(null);
     setCropDetectError("");
+    setVCrops([]);
+    vObjUrlMap.current.forEach(u => URL.revokeObjectURL(u));
+    vObjUrlMap.current.clear();
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -7369,6 +7416,132 @@ function MemeStep() {
                 </>
               )}
             </div>
+
+            {/* Per-video crop section (remove white margins / borders per video) */}
+            {files.length > 0 && (
+              <div className="st-card" style={{ padding: "18px 20px", borderColor: vCrops.some(vCropHas) ? "var(--st-gold)" : "var(--st-line)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ fontSize: 14.5, fontWeight: 600 }}>Quitar blancos / bordes — por video</div>
+                    <div style={{ fontSize: 12.5, color: "var(--st-muted)", marginTop: 3 }}>Cada video puede recortar sus propias esquinas (fondos blancos) arriba/abajo/izquierda/derecha. Se aplica ANTES de que Gemini analice.</div>
+                  </div>
+                  {vCrops.some(vCropHas) && (
+                    <button onClick={() => setVCrops(vCropInit(files.length))} className="st-btn st-btn--ghost" style={{ padding: "6px 10px", fontSize: 11.5 }}>Quitar recortes</button>
+                  )}
+                </div>
+
+                <div style={{ maxHeight: 480, overflowY: "auto", marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  {files.map((f, i) => {
+                    const c = vCrops[i] || { top: 0, bottom: 0, left: 0, right: 0, img: null, open: false };
+                    const clipped = vCropHas(c);
+                    return (
+                      <div key={i} style={{ background: "var(--st-alt)", borderRadius: 8, border: `1px solid ${clipped && !c.open ? "var(--st-gold)" : "var(--st-line)"}`, overflow: c.open ? "visible" : "hidden" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 12px" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
+                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+                              {["top", "bottom", "left", "right"].map(k => c[k] > 0 && (
+                                <span key={k} style={{ fontFamily: "var(--st-mono)", fontSize: 9.5, fontWeight: 700, padding: "1px 5px", borderRadius: 99, background: "rgba(255,193,7,0.15)", color: "var(--st-gold)" }}>
+                                  {k === "top" ? "↑" : k === "bottom" ? "↓" : k === "left" ? "←" : "→"}{c[k]}%
+                                </span>
+                              )).filter(Boolean)}
+                              {!clipped && <span style={{ fontSize: 10, color: "var(--st-faint)" }}>sin recorte</span>}
+                            </div>
+                          </div>
+                          {clipped && (
+                            <button onClick={() => updateVCrop(i, { top: 0, bottom: 0, left: 0, right: 0 })} title="Quitar recorte" style={{ border: "none", background: "transparent", color: "var(--st-muted)", cursor: "pointer", fontSize: 13, padding: 2 }}>×</button>
+                          )}
+                          <button onClick={() => updateVCrop(i, { open: !c.open })} className="st-btn st-btn--ghost" style={{ padding: "5px 10px", fontSize: 11.5, borderColor: clipped ? "var(--st-gold)" : undefined }}>
+                            {c.open ? "Cerrar" : clipped ? "Editar" : "Recortar…"}
+                          </button>
+                        </div>
+
+                        {c.open && (
+                          <div style={{ padding: "14px 16px", borderTop: "1px solid var(--st-line)" }}>
+                            {c.previewUrl ? (
+                              <div style={{ marginBottom: 10 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "var(--st-ok)", marginBottom: 4 }}>
+                                  <span style={{ width: 7, height: 7, borderRadius: 99, background: "var(--st-ok)" }} />
+                                  Recorte renderizado — guardado en la carpeta de renders (_meme_exports)
+                                </div>
+                                <video src={c.previewUrl} controls style={{ width: "100%", borderRadius: 8, background: "#000", display: "block", maxHeight: 420 }} />
+                                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                                  <a href={c.previewUrl} download={`recortado_${f.name}`} className="st-btn st-btn--ghost" style={{ padding: "5px 10px", fontSize: 11, textDecoration: "none" }}>⬇ Descargar mp4</a>
+                                  <button onClick={() => updateVCrop(i, { previewUrl: null })} className="st-btn st-btn--ghost" style={{ padding: "5px 10px", fontSize: 11 }}>Seguir ajustando</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ position: "relative", marginBottom: 10, borderRadius: 8, overflow: "hidden", border: "1px solid var(--st-border)", background: "#000" }}>
+                                <video key={i} src={vObjUrl(f)} controls
+                                  onLoadedMetadata={e => { const v = e.target; requestAnimationFrame(() => vcSized(i, v.clientWidth, v.clientHeight, v.videoWidth, v.videoHeight)); }}
+                                  style={{ width: "100%", display: "block", maxHeight: 420 }} />
+                                {c.ch > 0 && (<>
+                                  {c.top > 0 && (
+                                    <div key="top-line" style={{ position: "absolute", top: c.cy + (c.ch * c.top) / 100, left: c.cx, width: c.cw, height: 0, borderTop: "2px solid var(--st-live)", pointerEvents: "none", zIndex: 2 }}>
+                                      <span style={{ position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)", fontSize: 11, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,0.75)", padding: "2px 7px", borderRadius: 3, whiteSpace: "nowrap", border: "1px solid var(--st-live)" }}>↑ {c.top}%</span>
+                                    </div>
+                                  )}
+                                  {c.bottom > 0 && (
+                                    <div key="bottom-line" style={{ position: "absolute", top: c.cy + (c.ch * (100 - c.bottom)) / 100, left: c.cx, width: c.cw, height: 0, borderTop: "2px solid var(--st-live)", pointerEvents: "none", zIndex: 2 }}>
+                                      <span style={{ position: "absolute", bottom: 6, left: "50%", transform: "translateX(-50%)", fontSize: 11, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,0.75)", padding: "2px 7px", borderRadius: 3, whiteSpace: "nowrap", border: "1px solid var(--st-live)" }}>↓ {c.bottom}%</span>
+                                    </div>
+                                  )}
+                                  {c.left > 0 && (
+                                    <div key="left-line" style={{ position: "absolute", top: c.cy, left: c.cx + (c.cw * c.left) / 100, width: 0, height: c.ch, borderLeft: "2px solid var(--st-live)", pointerEvents: "none", zIndex: 2 }}>
+                                      <span style={{ position: "absolute", left: 6, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,0.75)", padding: "2px 7px", borderRadius: 3, whiteSpace: "nowrap", border: "1px solid var(--st-live)" }}>← {c.left}%</span>
+                                    </div>
+                                  )}
+                                  {c.right > 0 && (
+                                    <div key="right-line" style={{ position: "absolute", top: c.cy, left: c.cx + (c.cw * (100 - c.right)) / 100, width: 0, height: c.ch, borderLeft: "2px solid var(--st-live)", pointerEvents: "none", zIndex: 2 }}>
+                                      <span style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,0.75)", padding: "2px 7px", borderRadius: 3, whiteSpace: "nowrap", border: "1px solid var(--st-live)" }}>→ {c.right}%</span>
+                                    </div>
+                                  )}
+                                </>)}
+                              </div>
+                            )}
+
+                            {c.err && <div style={{ color: "var(--st-live)", fontSize: 11.5, marginBottom: 8 }}>{c.err}</div>}
+
+                            <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 8 }}>
+                              {[
+                                { label: "Arriba", key: "top", max: 80 },
+                                { label: "Abajo", key: "bottom", max: 80 },
+                                { label: "Izquierda", key: "left", max: 60 },
+                                { label: "Derecha", key: "right", max: 60 },
+                              ].map(({ label, key, max }) => (
+                                <div key={key}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--st-muted)", marginBottom: 5 }}>
+                                    <span style={{ flex: 1 }}>{label}</span>
+                                    {c[key] > 0 && (
+                                      <button onClick={() => updateVCrop(i, { [key]: 0 })} title={`Quitar ${label}`} style={{ border: "none", background: "transparent", color: "var(--st-faint)", cursor: "pointer", fontSize: 11 }}>×</button>
+                                    )}
+                                    <span style={{ fontFamily: "var(--st-mono)", fontSize: 13, fontWeight: 700, background: c[key] > 0 ? "rgba(255,193,7,0.12)" : "var(--st-surface)", color: c[key] > 0 ? "var(--st-gold)" : "var(--st-faint)", padding: "2px 9px", borderRadius: 6, border: "1px solid var(--st-line)" }}>{c[key]}%</span>
+                                    <button onClick={() => updateVCrop(i, { [key]: Math.max(0, c[key] - 1) })} className="st-btn st-btn--ghost" style={{ padding: "4px 10px", fontSize: 14 }}>−</button>
+                                    <button onClick={() => updateVCrop(i, { [key]: Math.min(max, c[key] + 1) })} className="st-btn st-btn--ghost" style={{ padding: "4px 10px", fontSize: 14 }}>+</button>
+                                  </div>
+                                  <input
+                                    type="range" min={0} max={max} step={1} value={c[key]}
+                                    onChange={e => updateVCrop(i, { [key]: Number(e.target.value) })}
+                                    style={{ width: "100%" }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+
+                            <button onClick={() => renderCropPreview(i)} disabled={c.rendering} className="st-btn st-btn--primary" style={{ width: "100%", justifyContent: "center", padding: "12px 0", marginTop: 14, fontSize: 13.5 }}>
+                              {c.rendering ? "Renderizando…" : <><Play size={13} /> Previsualizar recorte (sin Gemini)</>}
+                            </button>
+                            <div style={{ fontSize: 10.5, color: "var(--st-faint)", textAlign: "center", marginTop: 5 }}>
+                              Renderiza los primeros 8s y guarda el mp4 en la carpeta de renders.
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Crop section */}
             {files.length > 0 && (

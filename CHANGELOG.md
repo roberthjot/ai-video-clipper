@@ -2,6 +2,31 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## ✂️ Meme: recorte de blancos/bordes POR video en la subida
+
+- Nueva sección **"Quitar blancos / bordes — por video"** en la vista de subida
+  del Meme Generator: cada video tiene sus propios sliders de recorte
+  (arriba/abajo/izquierda/derecha) con **video real reproducible**, badges de
+  recorte por lado y chip de estado. El botón **"Previsualizar recorte (sin
+  Gemini)"** (`POST /meme/crop-preview`, FFmpeg local) renderiza un mp4 corto
+  ya recortado y lo **guarda en la carpeta de renders** (`_meme_exports/`, como
+  `recortado_<nombre>_<uid>.mp4`) además de reproducirlo y permitir descargarlo.
+- **Guías de corte precisas**: las 4 líneas rojas de guía se posicionan sobre
+  el **área real del video** (no sobre el contenedor con barras negras), usando
+  `videoWidth/videoHeight` reales para calcular el rectángulo de contenido en
+  videos verticales (9:16) que se centran con letterbox. Cada línea tiene su
+  etiqueta con el porcentaje visible.
+- **URLs memoizadas**: el `<video>` del thumbnail no se recrea en cada
+  movimiento del slider (evita parpadeo y recarga de metadata).
+- **Panel ampliado**: contenedor scrollable más alto (480px), video más grande
+  (420px), fuentes y botones más grandes, padding más generoso.
+- El recorte se aplica con FFmpeg (`crop_video_pct`, `-vf crop`) ANTES de
+  arrancar el batch: Gemini analiza (y el export usa) el video ya recortado.
+  Los retries reutilizan el archivo recortado, así el recorte se conserva.
+- Backend: `POST /meme/process` acepta `crops` (JSON array `[{top,bottom,left,right}]`
+  en %, uno por video). Frontend: `api.processMemes(..., crops)` + `renderCropPreview`
+  + estado/UI por video en `MemeStep` (reset al cambiar archivos, badge dorado).
+
 ## 🎬 Meme caption style + Arial + music_vibe
 
 ### Caption style "Meme" (clips → mismo look que el Meme Generator)

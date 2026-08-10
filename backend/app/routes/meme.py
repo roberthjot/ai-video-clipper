@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from ..services.meme_service import (
     start_meme_batch, get_batch, retry_meme_item, MEME_UPLOAD_DIR, MEME_OUTPUT_DIR, TEMP_DIR,
-    extract_video_frame, detect_crop_boundaries,
+    extract_video_frame, detect_crop_boundaries, crop_video_pct,
 )
 
 router = APIRouter()
@@ -56,6 +56,63 @@ async def detect_crop(video: UploadFile = File(...)):
                 pass
 
 
+@router.post("/crop-preview")
+async def crop_preview_video(
+    video: UploadFile = File(...),
+    top: float = Form(0.0),
+    bottom: float = Form(0.0),
+    left: float = Form(0.0),
+    right: float = Form(0.0),
+    seconds: float = Form(8.0),
+):
+    """Render a short preview MP4 with the crop applied (NO Gemini call, local
+    FFmpeg only) so the user can watch the cut before generating memes. The
+    rendered file is SAVED to the meme exports folder (same place as the final
+    meme renders) and is NOT cleaned up."""
+    import imageio_ffmpeg as _iio
+    import subprocess as _sp
+    _ffmpeg = _iio.get_ffmpeg_exe()
+    os.makedirs(MEME_OUTPUT_DIR, exist_ok=True)
+
+    base_name = os.path.splitext(os.path.basename(video.filename or "video"))[0]
+    safe_base = "".join(ch for ch in base_name if ch.isalnum() or ch in " _-").strip() or "video"
+    out_name = f"recortado_{safe_base}_{uuid.uuid4().hex[:6]}.mp4"
+    out_path = os.path.join(MEME_OUTPUT_DIR, out_name)
+    tmp_video = os.path.join(TEMP_DIR, f"cprev_src_{uuid.uuid4().hex[:8]}{os.path.splitext(video.filename)[1] or '.mp4'}")
+    try:
+        content = await video.read()
+        with open(tmp_video, "wb") as f:
+            f.write(content)
+
+        ct = max(0.0, min(100.0, top)) / 100.0
+        cb = max(0.0, min(100.0, bottom)) / 100.0
+        cl = max(0.0, min(100.0, left)) / 100.0
+        cr = max(0.0, min(100.0, right)) / 100.0
+        left_expr = f"trunc(iw*{cl:.6f}/2)*2"
+        w_expr    = f"trunc(iw*(1-{cl:.6f}-{cr:.6f})/2)*2"
+        top_expr  = f"trunc(ih*{ct:.6f}/2)*2"
+        h_expr    = f"trunc(ih*(1-{ct:.6f}-{cb:.6f})/2)*2"
+        vf = f"crop={w_expr}:{h_expr}:{left_expr}:{top_expr}"
+
+        cmd = [_ffmpeg, "-y", "-ss", "0", "-t", f"{max(2.0, seconds):.1f}",
+               "-i", tmp_video,
+               "-vf", vf, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+               "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path]
+        r = _sp.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if r.returncode != 0 or not os.path.exists(out_path):
+            raise RuntimeError(f"Preview render failed: {r.stderr[-300:]}")
+        print(f"[Meme] crop preview saved -> {out_path}")
+        return FileResponse(out_path, media_type="video/mp4",
+                            filename=f"recortado_{safe_base}.mp4")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            os.remove(tmp_video)
+        except Exception:
+            pass
+
+
 @router.post("/process")
 async def process_memes(
     bg_color: str = Form("black"),
@@ -70,21 +127,53 @@ async def process_memes(
     crop_left_pct: float = Form(0.0),
     crop_right_pct: float = Form(0.0),
     gemini_model: str = Form(""),
+    crops: str = Form(""),   # JSON: [{top,bottom,left,right}, ...] % per video (edges/white removal)
     videos: list[UploadFile] = File(...),
 ):
-    """Upload multiple videos and start meme batch processing."""
+    """Upload multiple videos and start meme batch processing.
+
+    `crops` (optional) is a JSON array with one entry per uploaded video, each
+    `{"top": %, "bottom": %, "left": %, "right": %}` (0-100) to remove white
+    margins / borders ON THAT video. Each video is pre-cropped with FFmpeg
+    BEFORE the batch runs, so Gemini only analyzes (and the meme exports) the
+    already-cropped source.
+    """
+    import json as _json
     os.makedirs(MEME_UPLOAD_DIR, exist_ok=True)
+
+    crops_list = []
+    if crops and crops.strip():
+        try:
+            parsed = _json.loads(crops)
+            crops_list = parsed if isinstance(parsed, list) else []
+        except Exception:
+            crops_list = []
 
     video_paths = []
     filenames = []
 
-    for video in videos:
+    for i, video in enumerate(videos):
         ext = os.path.splitext(video.filename)[1] or ".mp4"
         saved_name = f"{uuid.uuid4().hex[:8]}{ext}"
         saved_path = os.path.join(MEME_UPLOAD_DIR, saved_name)
         content = await video.read()
         with open(saved_path, "wb") as f:
             f.write(content)
+
+        # Per-video pre-crop (remove white/borders) BEFORE Gemini sees it.
+        c = crops_list[i] if i < len(crops_list) and isinstance(crops_list[i], dict) else {}
+        ct = max(0.0, min(100.0, float(c.get("top", 0) or 0))) / 100.0
+        cb = max(0.0, min(100.0, float(c.get("bottom", 0) or 0))) / 100.0
+        cl = max(0.0, min(100.0, float(c.get("left", 0) or 0))) / 100.0
+        cr = max(0.0, min(100.0, float(c.get("right", 0) or 0))) / 100.0
+        if ct > 0.001 or cb > 0.001 or cl > 0.001 or cr > 0.001:
+            cropped_name = f"{uuid.uuid4().hex[:8]}_crop.mp4"
+            cropped_path = os.path.join(MEME_UPLOAD_DIR, cropped_name)
+            try:
+                saved_path = crop_video_pct(saved_path, cropped_path, ct, cb, cl, cr)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Crop failed for {video.filename}: {e}")
+
         video_paths.append(saved_path)
         filenames.append(video.filename)
 

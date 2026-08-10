@@ -685,7 +685,24 @@ export function getVideoFrameUrl(file) {
     });
 }
 
-export function processMemes(files, bgColor, textY, videoScale, onProgress, contentType = "meme", cropTopPct = 0, cropBottomPct = 0, cropLeftPct = 0, cropRightPct = 0, geminiModel = "") {
+export function renderCropPreview(file, top, bottom, left, right, seconds = 8) {
+    // Renders a short MP4 with the crop applied (local FFmpeg, no Gemini).
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append("video", file);
+        formData.append("top", top);
+        formData.append("bottom", bottom);
+        formData.append("left", left);
+        formData.append("right", right);
+        formData.append("seconds", seconds);
+        fetch(`${API_BASE}/meme/crop-preview`, { method: "POST", body: formData })
+            .then(r => { if (!r.ok) throw new Error("Preview render failed"); return r.blob(); })
+            .then(blob => resolve(URL.createObjectURL(blob)))
+            .catch(reject);
+    });
+}
+
+export function processMemes(files, bgColor, textY, videoScale, onProgress, contentType = "meme", cropTopPct = 0, cropBottomPct = 0, cropLeftPct = 0, cropRightPct = 0, geminiModel = "", crops = null) {
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append("bg_color", bgColor);
@@ -697,6 +714,7 @@ export function processMemes(files, bgColor, textY, videoScale, onProgress, cont
         formData.append("crop_left_pct", cropLeftPct);
         formData.append("crop_right_pct", cropRightPct);
         if (geminiModel) formData.append("gemini_model", geminiModel);
+        if (crops && crops.length) formData.append("crops", JSON.stringify(crops));
         for (const file of files) {
             formData.append("videos", file);
         }
