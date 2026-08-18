@@ -3126,6 +3126,8 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     flip_horizontal: false,
     zoom_uniquify: false,
     boost_contrast: false,
+    hdr_4k: false,
+    sharpness_pct: 0,
     split_screen_enabled: false,
     split_ratio: 0.5,
     caption_style: "box",
@@ -3521,7 +3523,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y, style.mirror_cyclic_enabled, style.mirror_cyclic_interval, style.sway_enabled, style.sway_period, style.sway_amplitude, style.auto_reframe_enabled, style.auto_reframe_mode, style.auto_reframe_follow_id, style.auto_reframe_padding, style.auto_reframe_smoothing, style.music_path, style.music_volume, style.original_volume, style.music_start, style.music_end, previewLanguage, editorTranslated]);
+  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.hdr_4k, style.sharpness_pct, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y, style.mirror_cyclic_enabled, style.mirror_cyclic_interval, style.sway_enabled, style.sway_period, style.sway_amplitude, style.auto_reframe_enabled, style.auto_reframe_mode, style.auto_reframe_follow_id, style.auto_reframe_padding, style.auto_reframe_smoothing, style.music_path, style.music_volume, style.original_volume, style.music_start, style.music_end, previewLanguage, editorTranslated]);
 
   // Poll progress
   useEffect(() => {
@@ -4525,7 +4527,8 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
 
             {/* Anti-Detect (expandable) */}
             <StRow icon={<Sparkles size={15} />} label="Anti-Detect" summary={(() => {
-              const n = [style.strip_metadata, style.flip_horizontal, style.zoom_uniquify, style.boost_contrast,
+              const n = [style.strip_metadata, style.flip_horizontal, style.zoom_uniquify, style.boost_contrast, style.hdr_4k,
+                         (style.sharpness_pct || 0) > 0,
                          style.mirror_cyclic_enabled, style.sway_enabled].filter(Boolean).length;
               return n > 0 ? `${n} activo${n > 1 ? "s" : ""}` : "off";
             })()}>
@@ -4535,6 +4538,31 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                 <StChip active={style.flip_horizontal} onClick={() => setStyle(s => ({ ...s, flip_horizontal: !s.flip_horizontal }))} title="Espejo horizontal">{style.flip_horizontal ? "✓ " : ""}Flip</StChip>
                 <StChip active={style.zoom_uniquify} onClick={() => setStyle(s => ({ ...s, zoom_uniquify: !s.zoom_uniquify }))} title="Zoom +2%">{style.zoom_uniquify ? "✓ " : ""}Zoom +2%</StChip>
                 <StChip active={style.boost_contrast} onClick={() => setStyle(s => ({ ...s, boost_contrast: !s.boost_contrast }))} title="Contraste/brillo">{style.boost_contrast ? "✓ " : ""}Boost</StChip>
+                <StChip active={style.hdr_4k} onClick={() => setStyle(s => ({ ...s, hdr_4k: !s.hdr_4k }))} title="Upscale a 4K + look HDR + nitidez (truco anti shadowban)">{style.hdr_4k ? "✓ " : ""}4K HDR</StChip>
+              </div>
+
+              {/* 4K HDR + sharpness (CapCut anti-detect trick) */}
+              <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 9, background: "var(--st-soft)", border: `1px solid ${(style.hdr_4k || style.sharpness_pct > 0) ? "var(--st-gold)" : "var(--st-line)"}` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--st-text)" }}>✨ 4K HDR + Nitidez</div>
+                    <div style={{ fontSize: 11, color: "var(--st-faint)", marginTop: 2 }}>Truco CapCut: upscale a 4K, look HDR, sin blur ni glow. Export only.</div>
+                  </div>
+                  <StChip active={!!style.hdr_4k}
+                    onClick={() => setStyle(s => ({ ...s, hdr_4k: !s.hdr_4k }))}>
+                    {style.hdr_4k ? "ON" : "OFF"}
+                  </StChip>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 11.5, color: "var(--st-muted)", width: 90, flexShrink: 0 }}>Nitidez</span>
+                  <input
+                    type="range" min={0} max={100} step={1} value={style.sharpness_pct || 0}
+                    onChange={e => setStyle(s => ({ ...s, sharpness_pct: Number(e.target.value) }))}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ fontFamily: "var(--st-mono)", fontSize: 12, fontWeight: 700, color: style.sharpness_pct > 0 ? "var(--st-gold)" : "var(--st-faint)", width: 42, textAlign: "right" }}>{style.sharpness_pct || 0}%</span>
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--st-faint)", marginTop: 6 }}>Recomendado: 40–60%. Con 4K HDR el look queda pulido, no "deepfried".</div>
               </div>
 
               {/* Cyclic mirror — toggle + interval slider */}

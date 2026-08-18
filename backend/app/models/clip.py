@@ -270,6 +270,12 @@ class StyleConfig(BaseModel):
     flip_horizontal: bool = False
     zoom_uniquify: bool = False   # zoom +2% to break fingerprint
     boost_contrast: bool = False  # subtle eq boost
+    # 4K HDR effect (CapCut-style anti-detect trick): upscale to 4K + HDR-like
+    # tone + built-in sharpening. Export only.
+    hdr_4k: bool = False
+    # Sharpness 0–100 (mapped to FFmpeg unsharp luma amount). 40–60 is the
+    # sweet spot used to dodge TikTok's unoriginal-content visual kill switch.
+    sharpness_pct: float = 0.0
 
     # Cyclic mirror: hflip toggles ON for N seconds, then OFF for N seconds,
     # repeating. Breaks perceptual hashing without leaving text/UI mirrored

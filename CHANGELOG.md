@@ -2,6 +2,26 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🛡 Anti-detect: 4K HDR + Nitidez (truco CapCut anti shadowban)
+
+Basado en el formato anti "unoriginal content" de TikTok. Los cambios
+obligatorios ya existían (Flip = espejar, fill_mode = fullscreen sin barras,
+Zoom +2% y sway/mirror_cyclic/auto_reframe = movimiento, text_x/text_y =
+posición del caption). Se agregó el **Pro Tip 4K HDR**:
+
+- `StyleConfig.hdr_4k` (bool) + `StyleConfig.sharpness_pct` (0–100).
+- `build_hdr_4k_sharpness_chain(style, W, H)` en `export_service.py`: si
+  `hdr_4k` → `scale={W*2}:{H*2}:flags=lanczos` (4K) + look HDR
+  (`eq=contrast=1.08:saturation=1.12:gamma=1.03` + `colorbalance`). Si
+  `sharpness_pct > 0` → `unsharp=5:5:{amt}` con 40% → 0.54, 50% → 0.65,
+  100% → 1.20. Sin blur ni glow (como pide el truco).
+- Se aplica en ambos exports finales (TikTok `export_clip_with_style` e
+  Instagram `export_instagram_clip`), solo en export — no toca el preview.
+- UI Editor (EditorStep → Anti-Detect): chip **4K HDR** + caja **"✨ 4K HDR +
+  Nitidez"** con slider de nitidez 0–100% y nota "Recomendado 40–60%".
+- El contador de "N activos" y el auto-refresh del preview incluyen los campos
+  nuevos. `updateStyle` ya envía el style completo → no hizo falta tocar la API.
+
 ## ✂️ Meme: recorte de blancos/bordes POR video en la subida
 
 - Nueva sección **"Quitar blancos / bordes — por video"** en la vista de subida

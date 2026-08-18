@@ -13,6 +13,28 @@ export_progress = {}
 instagram_export_progress = {}
 
 
+def build_hdr_4k_sharpness_chain(style: StyleConfig, W: int, H: int) -> list:
+    """Return extra FFmpeg vf steps for the 4K HDR anti-detect trick.
+
+    - `hdr_4k`: upscale the composed frame to 4K (2x canvas, lanczos) and apply
+      an HDR-like tone (punchy contrast/saturation with a slight gamma lift).
+    - `sharpness_pct` (0-100): mapped to FFmpeg `unsharp` luma amount; the
+      recommended 40-60 range becomes roughly 0.54-0.76.
+    Both are export-only. Returns [] when nothing is enabled.
+    """
+    chain = []
+    if style.hdr_4k:
+        chain.append(f"scale={W * 2}:{H * 2}:flags=lanczos")
+        chain.append("eq=contrast=1.08:saturation=1.12:gamma=1.03,"
+                     "colorbalance=rs=-0.04:bs=0.05:rh=0.03:bh=0.02")
+    pct = max(0.0, min(100.0, float(style.sharpness_pct or 0.0)))
+    if pct > 0:
+        # 0% -> 0.10 (very light), 40% -> 0.54, 50% -> 0.65, 100% -> 1.20
+        amt = round(0.10 + (pct / 100.0) * 1.10, 3)
+        chain.append(f"unsharp=5:5:{amt}:5:5:0.0")
+    return chain
+
+
 def get_instagram_progress(project_id: str) -> dict:
     """Get the current instagram export progress for a project."""
     return instagram_export_progress.get(project_id, {
@@ -534,6 +556,7 @@ def export_clip_with_style(
         extra_vf.append(f"scale={zoom_w}:{zoom_h},crop={W}:{H}")
     if style.boost_contrast:
         extra_vf.append("eq=contrast=1.05:brightness=0.02:saturation=1.05")
+    extra_vf.extend(build_hdr_4k_sharpness_chain(style, W, H))
     # Cinematic visual filter (last so it shapes the final look)
     cinematic = video_service.get_visual_filter_chain(getattr(style, 'visual_filter', 'none'))
     if cinematic:
@@ -868,6 +891,7 @@ def export_instagram_clip(
         extra_vf.append(f"scale={zoom_w}:{zoom_h},crop={W}:{H}")
     if style.boost_contrast:
         extra_vf.append("eq=contrast=1.05:brightness=0.02:saturation=1.05")
+    extra_vf.extend(build_hdr_4k_sharpness_chain(style, W, H))
     if extra_vf:
         filter_complex += f";[{current_label}]{','.join(extra_vf)}[uniquified]"
         current_label = "uniquified"
