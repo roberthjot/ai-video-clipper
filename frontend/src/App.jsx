@@ -3151,6 +3151,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     auto_reframe_follow_id: null,
     auto_reframe_padding: 0.30,
     auto_reframe_smoothing: 0.85,
+    auto_reframe_zoom: 1.0,
     // Background music — mixed in as a fast post-step on export. Follows the
     // existing "Aplicar a" scope (Todos / Este clip / Varios), so a project
     // can have a default track AND a specific clip can override with another.
@@ -3523,7 +3524,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       } catch (_) {}
     }, 300);
     return () => clearTimeout(timer);
-  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.hdr_4k, style.sharpness_pct, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y, style.mirror_cyclic_enabled, style.mirror_cyclic_interval, style.sway_enabled, style.sway_period, style.sway_amplitude, style.auto_reframe_enabled, style.auto_reframe_mode, style.auto_reframe_follow_id, style.auto_reframe_padding, style.auto_reframe_smoothing, style.music_path, style.music_volume, style.original_volume, style.music_start, style.music_end, previewLanguage, editorTranslated]);
+  }, [style.fill_mode, style.fill_mode_scale, style.ig_fill_mode, style.ig_top_padding, style.ig_watermark_y, style.split_screen_enabled, style.split_ratio, style.text_x, style.text_y, style.flip_horizontal, style.boost_contrast, style.hdr_4k, style.sharpness_pct, style.subtitle_style, style.caption_style, style.visual_filter, style.subtitle_size_scale, style.subtitle_y, style.background_style, style.no_text, style.caption_font, style.no_emojis, style.caption_box_radius, style.caption_box_opacity, style.caption_box_color, style.caption_box_pad_x, style.caption_box_pad_y, style.mirror_cyclic_enabled, style.mirror_cyclic_interval, style.sway_enabled, style.sway_period, style.sway_amplitude, style.auto_reframe_enabled, style.auto_reframe_mode, style.auto_reframe_follow_id, style.auto_reframe_padding, style.auto_reframe_smoothing, style.auto_reframe_zoom, style.music_path, style.music_volume, style.original_volume, style.music_start, style.music_end, previewLanguage, editorTranslated]);
 
   // Poll progress
   useEffect(() => {
@@ -4426,6 +4427,10 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                     min={0} max={1} step={0.02} value={style.auto_reframe_padding ?? 0.30}
                     onChange={(e) => setStyle((s) => ({ ...s, auto_reframe_padding: parseFloat(e.target.value) }))}
                     onReset={() => setStyle((s) => ({ ...s, auto_reframe_padding: 0.30 }))} />
+                  <StSlider label="Zoom de encuadre" display={`${Math.round((style.auto_reframe_zoom ?? 1.0) * 100)}%`}
+                    min={100} max={160} step={5} value={Math.round((style.auto_reframe_zoom ?? 1.0) * 100)}
+                    onChange={(e) => setStyle((s) => ({ ...s, auto_reframe_zoom: parseInt(e.target.value) / 100 }))}
+                    onReset={() => setStyle((s) => ({ ...s, auto_reframe_zoom: 1.0 }))} />
 
                   <div style={{ marginTop: 10 }}>
                     <button onClick={() => handleAnalyzeClipFaces(cur)} disabled={isAnalyzing}

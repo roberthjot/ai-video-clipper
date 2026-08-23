@@ -1559,6 +1559,39 @@ def get_video_duration(file_path: str) -> float:
     return 600.0
 
 
+HDR_LOOK_FILTER = (
+    "eq=contrast=1.18:saturation=1.28:gamma=1.04:brightness=0.02,"
+    "colorbalance=rs=-0.05:bs=0.06:rh=0.05:bh=0.03,"
+    "vibrance=0.15"
+)
+
+
+def unsharp_vf(sharpness_pct: float) -> str:
+    """Map the 0-100 sharpness slider to an FFmpeg unsharp luma amount."""
+    pct = max(0.0, min(100.0, float(sharpness_pct or 0.0)))
+    amt = round(0.10 + (pct / 100.0) * 1.10, 3)
+    return f"unsharp=5:5:{amt}:5:5:0.0"
+
+
+def build_hdr_sharpen_vf(hdr_4k: bool, sharpness_pct: float, scale_dim: tuple = None) -> list:
+    """FFmpeg vf steps for the 4K HDR + sharpness anti-detect trick.
+
+    hdr_4k adds the HDR tone look; when scale_dim is given it ALSO upscales to
+    that size (previews pass scale_dim=None so they stay fast at 720/1080p and
+    still show the HDR + sharpening look live in the editor).
+    sharpness_pct (0-100) adds an unsharp pass. Returns [] when nothing is on.
+    """
+    vf = []
+    if hdr_4k:
+        if scale_dim:
+            vf.append(f"scale={scale_dim[0]}:{scale_dim[1]}:flags=lanczos")
+        vf.append(HDR_LOOK_FILTER)
+    pct = max(0.0, min(100.0, float(sharpness_pct or 0.0)))
+    if pct > 0:
+        vf.append(unsharp_vf(pct))
+    return vf
+
+
 def generate_instagram_preview_clip(
     video_path: str,
     start_time: float,
@@ -1573,6 +1606,8 @@ def generate_instagram_preview_clip(
     watermark_opacity: float = 0.9,
     flip_horizontal: bool = False,
     boost_contrast: bool = False,
+    hdr_4k: bool = False,
+    sharpness_pct: float = 0.0,
     max_seconds: float = 10.0,
 ) -> str:
     """Generate a short Instagram-format preview: white frame + caption above + video below."""
@@ -1621,6 +1656,7 @@ def generate_instagram_preview_clip(
         preview_vf.append("hflip")
     if boost_contrast:
         preview_vf.append("eq=contrast=1.05:brightness=0.02:saturation=1.05")
+    preview_vf.extend(build_hdr_sharpen_vf(hdr_4k, sharpness_pct))
     if preview_vf:
         filter_complex += f";[{current_label}]{','.join(preview_vf)}[detected]"
         current_label = "detected"
@@ -1677,6 +1713,8 @@ def generate_instagram_preview_frame(
     watermark_opacity: float = 0.9,
     flip_horizontal: bool = False,
     boost_contrast: bool = False,
+    hdr_4k: bool = False,
+    sharpness_pct: float = 0.0,
 ) -> str:
     """Generate a JPEG in Instagram post format: white bg + caption text above + video frame below.
     Step 1: FFmpeg extracts a single raw video frame.
@@ -1771,6 +1809,14 @@ def generate_instagram_preview_frame(
         bg = ImageEnhance.Contrast(bg).enhance(1.05)
         bg = ImageEnhance.Brightness(bg).enhance(1.02)
         bg = ImageEnhance.Color(bg).enhance(1.05)
+    if hdr_4k:
+        bg = ImageEnhance.Contrast(bg).enhance(1.18)
+        bg = ImageEnhance.Brightness(bg).enhance(1.02)
+        bg = ImageEnhance.Color(bg).enhance(1.28)
+    sp = max(0.0, min(100.0, float(sharpness_pct or 0.0)))
+    if sp > 0:
+        amt = int(round((0.10 + (sp / 100.0) * 1.10) * 100))
+        bg = bg.filter(ImageFilter.UnsharpMask(radius=5, percent=amt, threshold=0))
 
     bg.save(output_path, quality=90)
 
@@ -1805,6 +1851,8 @@ def generate_preview_frame(
     split_ratio: float = 0.5,
     flip_horizontal: bool = False,
     boost_contrast: bool = False,
+    hdr_4k: bool = False,
+    sharpness_pct: float = 0.0,
     caption_style: str = "box",
     background_style: str = "blur",
     no_text: bool = False,
@@ -1946,6 +1994,7 @@ def generate_preview_frame(
         preview_vf.append("hflip")
     if boost_contrast:
         preview_vf.append("eq=contrast=1.05:brightness=0.02:saturation=1.05")
+    preview_vf.extend(build_hdr_sharpen_vf(hdr_4k, sharpness_pct))
     if preview_vf:
         filter_parts.append(f"[{last}]{','.join(preview_vf)}[detected]")
         last = "detected"
@@ -2011,6 +2060,8 @@ def generate_preview_clip(
     split_ratio: float = 0.5,
     flip_horizontal: bool = False,
     boost_contrast: bool = False,
+    hdr_4k: bool = False,
+    sharpness_pct: float = 0.0,
     caption_style: str = "box",
     subtitle_style: str = "none",
     transcript: dict = None,
@@ -2194,6 +2245,7 @@ def generate_preview_clip(
         preview_vf.append("hflip")
     if boost_contrast:
         preview_vf.append("eq=contrast=1.05:brightness=0.02:saturation=1.05")
+    preview_vf.extend(build_hdr_sharpen_vf(hdr_4k, sharpness_pct))
     # Cinematic visual filter applied last
     cinematic = get_visual_filter_chain(visual_filter)
     if cinematic:

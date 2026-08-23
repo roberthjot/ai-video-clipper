@@ -264,6 +264,7 @@ class StyleConfig(BaseModel):
     auto_reframe_follow_id: int | None = None   # face id when mode=="follow"
     auto_reframe_padding: float = 0.30      # 0..1 — headroom around faces
     auto_reframe_smoothing: float = 0.85    # 0..0.99 — EMA factor (higher = smoother camera)
+    auto_reframe_zoom: float = 1.0          # 0.8..1.6 — manual framing zoom (>1 = closer)
 
     # Anti-detect / uniquify (export only, not applied to preview)
     strip_metadata: bool = False

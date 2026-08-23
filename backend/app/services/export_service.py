@@ -22,17 +22,11 @@ def build_hdr_4k_sharpness_chain(style: StyleConfig, W: int, H: int) -> list:
       recommended 40-60 range becomes roughly 0.54-0.76.
     Both are export-only. Returns [] when nothing is enabled.
     """
-    chain = []
-    if style.hdr_4k:
-        chain.append(f"scale={W * 2}:{H * 2}:flags=lanczos")
-        chain.append("eq=contrast=1.08:saturation=1.12:gamma=1.03,"
-                     "colorbalance=rs=-0.04:bs=0.05:rh=0.03:bh=0.02")
-    pct = max(0.0, min(100.0, float(style.sharpness_pct or 0.0)))
-    if pct > 0:
-        # 0% -> 0.10 (very light), 40% -> 0.54, 50% -> 0.65, 100% -> 1.20
-        amt = round(0.10 + (pct / 100.0) * 1.10, 3)
-        chain.append(f"unsharp=5:5:{amt}:5:5:0.0")
-    return chain
+    return video_service.build_hdr_sharpen_vf(
+        bool(getattr(style, "hdr_4k", False)),
+        float(getattr(style, "sharpness_pct", 0.0) or 0.0),
+        scale_dim=(W * 2, H * 2),
+    )
 
 
 def get_instagram_progress(project_id: str) -> dict:
@@ -218,8 +212,21 @@ def export_clip_with_style(
             # crop only "pans" around the frame, no buffer reallocation.
             # Loses the close-up zoom effect (we always show the widest
             # window the trajectory ever needed) but the system stays solid.
-            fixed_cw = max(p["cw"] for p in shifted)
-            fixed_ch = max(p["ch"] for p in shifted)
+            # Only samples where a face was actually present count — a brief
+            # detection dropout produces a fallback-sized window that would
+            # otherwise blow the fixed window up to full-frame and leave the
+            # person tiny for the whole clip ("desencuadra").
+            present = [p for p in shifted if not p.get("miss")]
+            size_pts = present if present else shifted
+            fixed_cw = max(p["cw"] for p in size_pts)
+            fixed_ch = max(p["ch"] for p in size_pts)
+            # Manual framing zoom (StyleConfig.auto_reframe_zoom, 0.8–1.6).
+            # >1 shrinks the fixed window = closer to the person. The window
+            # stays CONSTANT for the whole clip, so this is safe (no mid-stream
+            # size changes). Clamped so it never gets absurdly tight.
+            _rfm_zoom = max(0.8, min(1.6, float(getattr(style, 'auto_reframe_zoom', 1.0) or 1.0)))
+            fixed_cw = max(2, int(round(fixed_cw / _rfm_zoom)))
+            fixed_ch = max(2, int(round(fixed_ch / _rfm_zoom)))
             # Re-clamp x/y so the fixed window fits the source frame at every
             # sample (cx/cy may have been chosen for a smaller window).
             src_w = int(clip.face_track.get("width") or W)

@@ -774,6 +774,8 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             split_ratio=style.split_ratio,
             flip_horizontal=style.flip_horizontal,
             boost_contrast=style.boost_contrast,
+            hdr_4k=getattr(style, 'hdr_4k', False),
+            sharpness_pct=getattr(style, 'sharpness_pct', 0),
             caption_style=getattr(style, 'caption_style', 'box'),
             background_style=getattr(style, 'background_style', 'blur'),
             no_text=getattr(style, 'no_text', False),
@@ -858,6 +860,8 @@ async def preview_clip_frame_es(project_id: str, clip_id: int):
             split_ratio=style.split_ratio,
             flip_horizontal=style.flip_horizontal,
             boost_contrast=style.boost_contrast,
+            hdr_4k=getattr(style, 'hdr_4k', False),
+            sharpness_pct=getattr(style, 'sharpness_pct', 0),
             caption_style=getattr(style, 'caption_style', 'box'),
             background_style=getattr(style, 'background_style', 'blur'),
             no_text=getattr(style, 'no_text', False),
@@ -960,6 +964,8 @@ async def preview_clip_video(project_id: str, clip_id: int):
             split_ratio=style.split_ratio,
             flip_horizontal=style.flip_horizontal,
             boost_contrast=style.boost_contrast,
+            hdr_4k=getattr(style, 'hdr_4k', False),
+            sharpness_pct=getattr(style, 'sharpness_pct', 0),
             caption_style=getattr(style, 'caption_style', 'box'),
             subtitle_style=getattr(style, 'subtitle_style', 'none'),
             transcript=getattr(project, 'transcript', None),
@@ -1171,6 +1177,8 @@ async def preview_clip_video_es(project_id: str, clip_id: int):
             split_ratio=style.split_ratio,
             flip_horizontal=style.flip_horizontal,
             boost_contrast=style.boost_contrast,
+            hdr_4k=getattr(style, 'hdr_4k', False),
+            sharpness_pct=getattr(style, 'sharpness_pct', 0),
             caption_style=getattr(style, 'caption_style', 'box'),
             subtitle_style=getattr(style, 'subtitle_style', 'none'),
             transcript=es_transcript,
@@ -1247,6 +1255,8 @@ async def preview_clip_instagram_frame(project_id: str, clip_id: int):
             watermark_opacity=style.watermark_opacity,
             flip_horizontal=style.flip_horizontal,
             boost_contrast=style.boost_contrast,
+            hdr_4k=getattr(style, 'hdr_4k', False),
+            sharpness_pct=getattr(style, 'sharpness_pct', 0),
         )
     except Exception as e:
         import traceback
@@ -1408,6 +1418,8 @@ async def preview_clip_instagram_frame_es(project_id: str, clip_id: int):
             watermark_opacity=style.watermark_opacity,
             flip_horizontal=style.flip_horizontal,
             boost_contrast=style.boost_contrast,
+            hdr_4k=getattr(style, 'hdr_4k', False),
+            sharpness_pct=getattr(style, 'sharpness_pct', 0),
         )
     except Exception as e:
         import traceback
@@ -1719,6 +1731,8 @@ async def preview_clip_instagram(project_id: str, clip_id: int):
             watermark_opacity=style.watermark_opacity,
             flip_horizontal=style.flip_horizontal,
             boost_contrast=style.boost_contrast,
+            hdr_4k=getattr(style, 'hdr_4k', False),
+            sharpness_pct=getattr(style, 'sharpness_pct', 0),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Instagram preview failed: {str(e)}")

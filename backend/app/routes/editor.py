@@ -248,6 +248,7 @@ class ReframeStyleRequest(BaseModel):
     auto_reframe_follow_id: int | None = None
     auto_reframe_padding: float | None = None
     auto_reframe_smoothing: float | None = None
+    auto_reframe_zoom: float | None = None
 
 
 @router.post("/{project_id}/analyze-faces")
@@ -330,6 +331,8 @@ async def editor_update_reframe_style(project_id: str, req: ReframeStyleRequest)
         s.auto_reframe_padding = max(0.0, min(1.0, float(req.auto_reframe_padding)))
     if req.auto_reframe_smoothing is not None:
         s.auto_reframe_smoothing = max(0.0, min(0.99, float(req.auto_reframe_smoothing)))
+    if req.auto_reframe_zoom is not None:
+        s.auto_reframe_zoom = max(0.8, min(1.6, float(req.auto_reframe_zoom)))
     return {
         "status": "ok",
         "auto_reframe_enabled": s.auto_reframe_enabled,
@@ -337,6 +340,7 @@ async def editor_update_reframe_style(project_id: str, req: ReframeStyleRequest)
         "auto_reframe_follow_id": s.auto_reframe_follow_id,
         "auto_reframe_padding": s.auto_reframe_padding,
         "auto_reframe_smoothing": s.auto_reframe_smoothing,
+        "auto_reframe_zoom": s.auto_reframe_zoom,
     }
 
 

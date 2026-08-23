@@ -2,6 +2,49 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🎯 Auto-encuadre: sin temblor + modo Manual estable + zoom de encuadre
+
+- **Fin del temblor**: la trayectoria de caras ahora se **interpola a ~30 FPS**
+  (`interpolate_trajectory` con smoothstep) antes de escribir el `sendcmd` de
+  FFmpeg. Antes `sendcmd` sostenía cada valor a 5 FPS → la cámara se movía a
+  escalones de 200 ms (percibido como temblor). Ahora panea continuo.
+- **Modo Manual (follow) ya no se desencuadra**:
+  - Si el ID de la persona elegida "parpadea" (el matching greedy IoU puede
+    cambiar IDs cuando las caras se cruzan), la cámara cae a **la cara más
+    cercana al centro actual** en vez de saltar.
+  - Si la persona desaparece del frame sin otras caras, la cámara **mantiene
+    el último encuadre** (antes derivaba hacia el centro y "perdía" a la
+    persona).
+- **Encuadre fijo inteligente**: el tamaño fijo del recorte se calcula solo
+  sobre muestras con cara presente. Antes, una caída breve de detección metía
+  un recorte tamaño-frame-completo en el `max()` y dejaba a la persona
+  diminuta todo el clip.
+- **Zoom de encuadre manual** (`StyleConfig.auto_reframe_zoom`, 0.8–1.6):
+  nuevo slider "Zoom de encuadre" en el panel 🎯 Auto-encuadre (100–160%).
+  >1 acerca el recorte a la persona. Seguro porque el tamaño del recorte se
+  mantiene constante todo el clip. Persistido vía `persistStyle` y también
+  aceptado por `POST /editor/{id}/reframe-style`.
+
+## 🛡 Anti-detect 4K HDR + Nitidez: look más marcado y visible en preview
+
+- El look HDR ahora es **más intenso** para que se note el efecto:
+  `eq=contrast=1.18:saturation=1.28:gamma=1.04:brightness=0.02` +
+  `colorbalance=rs=-0.05:bs=0.06:rh=0.05:bh=0.03` + `vibrance=0.15`
+  (antes era sutil: contrast=1.08/sat=1.12).
+- **El efecto ahora también se ve en el preview del editor** (Play Clip, frame
+  y previews de Instagram): se aplica el look HDR + nitidez en vivo al tocar
+  los toggles, sin el upscale 4K (el preview sigue en 720×1280 para ser
+  rápido). El upscale 4K queda solo en el export final.
+- Fuente única de verdad: `video_service.build_hdr_sharpen_vf(hdr_4k,
+  sharpness_pct, scale_dim)` + `HDR_LOOK_FILTER` + `unsharp_vf(pct)`; los 4
+  previews (`generate_preview_clip`, `generate_preview_frame`,
+  `generate_instagram_preview_clip`, `generate_instagram_preview_frame`) y el
+  export (`build_hdr_4k_sharpness_chain` → delega al helper compartido) usan
+  los mismos valores.
+- Se pasan `hdr_4k` / `sharpness_pct` desde todos los endpoints de preview de
+  `clips.py` (7 call sites) usando `getattr` para compatibilidad con styles
+  viejos.
+
 ## 🛡 Anti-detect: 4K HDR + Nitidez (truco CapCut anti shadowban)
 
 Basado en el formato anti "unoriginal content" de TikTok. Los cambios

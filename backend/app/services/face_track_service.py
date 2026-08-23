@@ -318,6 +318,17 @@ def compute_crop_trajectory(
     for sample in face_track["samples"]:
         if mode == "follow":
             faces = _faces_at_sample(sample, follow_id)
+            if not faces:
+                # The chosen person's ID can flicker (greedy IoU matching swaps
+                # IDs when faces cross/overlap). Don't lose them: fall back to
+                # whichever face is nearest the current crop center so the
+                # framing stays on the active person instead of jumping away.
+                sf = sample.get("faces") or []
+                if sf:
+                    faces = [min(sf, key=lambda f: math.hypot(
+                        (f["x"] + f["w"] / 2.0) - last_cx,
+                        (f["y"] + f["h"] / 2.0) - last_cy,
+                    ))]
         elif mode == "biggest":
             faces = _biggest_face(sample)
         else:
@@ -325,13 +336,20 @@ def compute_crop_trajectory(
 
         if not faces:
             miss_streak += 1
+            if mode == "follow":
+                # Hold the last framing — don't drift back toward center when
+                # the chosen person is briefly off-camera (that's what made
+                # manual mode "lose" the person and look un-framed).
+                raw.append({"t": sample["t"], "cx": last_cx, "cy": last_cy,
+                            "cw": last_cw, "ch": last_ch, "miss": True})
+                continue
             # Drift toward fallback over ~2 seconds of misses (5 samples).
             drift = min(1.0, miss_streak / 5.0)
             cx = last_cx + (fallback_cx - last_cx) * drift * 0.15
             cy = last_cy + (fallback_cy - last_cy) * drift * 0.15
             cw = last_cw + (fallback_cw - last_cw) * drift * 0.15
             ch = last_ch + (fallback_ch - last_ch) * drift * 0.15
-            raw.append({"t": sample["t"], "cx": cx, "cy": cy, "cw": cw, "ch": ch})
+            raw.append({"t": sample["t"], "cx": cx, "cy": cy, "cw": cw, "ch": ch, "miss": True})
             last_cx, last_cy, last_cw, last_ch = cx, cy, cw, ch
             continue
 
@@ -400,6 +418,7 @@ def compute_crop_trajectory(
             "cy": prev["cy"] * a + r["cy"] * (1 - a),
             "cw": prev["cw"] * a + r["cw"] * (1 - a),
             "ch": prev["ch"] * a + r["ch"] * (1 - a),
+            "miss": r.get("miss", False),
         })
 
     # Round to ints — FFmpeg sendcmd wants integer crop coords anyway.
@@ -473,6 +492,46 @@ def remap_face_track_to_segments(face_track: dict, segments: list) -> dict:
     return out
 
 
+def interpolate_trajectory(trajectory: list[dict], fps: float = 30.0) -> list[dict]:
+    """Resample a trajectory onto a uniform `fps` grid with smoothstep-eased
+    linear interpolation between adjacent samples.
+
+    FFmpeg's `sendcmd` HOLDS each value until the next timestamped command, so
+    a raw 5 FPS track pans the camera in visible 200 ms steps (reads as the
+    camera "trembling"). Resampling to ~30 FPS makes the pan continuous.
+    """
+    if not trajectory:
+        return []
+    if len(trajectory) == 1:
+        return [dict(trajectory[0])]
+
+    t0 = trajectory[0]["t"]
+    t1 = trajectory[-1]["t"]
+    n = max(2, int(round((t1 - t0) * fps)) + 1)
+    step = (t1 - t0) / (n - 1) if n > 1 else 0.0
+
+    out: list[dict] = []
+    idx = 0
+    for i in range(n):
+        t = t0 + step * i
+        while idx < len(trajectory) - 1 and trajectory[idx + 1]["t"] < t:
+            idx += 1
+        a = trajectory[idx]
+        b = trajectory[min(idx + 1, len(trajectory) - 1)]
+        span = max(1e-9, b["t"] - a["t"])
+        f = max(0.0, min(1.0, (t - a["t"]) / span))
+        f = f * f * (3.0 - 2.0 * f)   # smoothstep — rounds the corners
+        out.append({
+            "t": round(t, 3),
+            "cx": a["cx"] + (b["cx"] - a["cx"]) * f,
+            "cy": a["cy"] + (b["cy"] - a["cy"]) * f,
+            "cw": a["cw"] + (b["cw"] - a["cw"]) * f,
+            "ch": a["ch"] + (b["ch"] - a["ch"]) * f,
+            "miss": a.get("miss", False),
+        })
+    return out
+
+
 def build_sendcmd_file(trajectory: list[dict], output_path: str, label: str = "rfm") -> str:
     """Write an FFmpeg `sendcmd` file from a trajectory list.
 
@@ -486,9 +545,13 @@ def build_sendcmd_file(trajectory: list[dict], output_path: str, label: str = "r
         <t> crop@<label> x <x1>, crop@<label> y <y1>;
     where x1/y1 are top-left coords (FFmpeg crop wants top-left; trajectory
     stores center, so we convert here).
+
+    The trajectory is resampled to ~30 FPS first (see interpolate_trajectory)
+    so the camera pans smoothly instead of stepping between 5 FPS samples.
     """
     if not trajectory:
         raise ValueError("empty trajectory")
+    trajectory = interpolate_trajectory(trajectory, fps=30.0)
     with open(output_path, "w", encoding="utf-8") as f:
         for p in trajectory:
             x1 = max(0, int(p["cx"] - p["cw"] / 2))
