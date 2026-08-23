@@ -3564,7 +3564,9 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       if (mode === "instagram") {
         await api.startInstagramExport(projectId, idsToExport);
       } else {
-        await api.startExport(projectId, idsToExport);
+        await api.startExport(projectId, idsToExport, {
+          useWatermark: !!watermarkPreview,
+        });
       }
       // Polling will handle the rest via useEffect
     } catch (err) {
