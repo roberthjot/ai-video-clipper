@@ -6095,6 +6095,26 @@ function LiveStreamStep({ onClipToProject }) {
                             {c.creator_name && <><span>·</span><span style={{ color: "var(--st-faint)" }}>{c.creator_name}</span></>}
                           </div>
                         </div>
+                        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}
+                          onClick={(e) => e.stopPropagation()}>
+                          <button title="Reproducir clip"
+                            onClick={() => c.url && window.open(c.url, "_blank")}
+                            style={{ background: "var(--st-alt)", border: "1px solid var(--st-border)", borderRadius: 5, padding: "4px 7px", cursor: "pointer", color: "var(--st-muted)", fontSize: 12, lineHeight: 1 }}
+                          >▶</button>
+                          <button title="Descargar MP4"
+                            onClick={async () => {
+                              try {
+                                const blob = await api.downloadPescClipBlob(vodPlatform, c.id, c.url, c.title);
+                                const a = document.createElement("a");
+                                a.href = URL.createObjectURL(blob);
+                                a.download = `${(c.title || "clip").replace(/[^\w\-]+/g, "_").slice(0, 50)}.mp4`;
+                                a.click();
+                                URL.revokeObjectURL(a.href);
+                              } catch (err) { alert("Error al descargar: " + err.message); }
+                            }}
+                            style={{ background: "var(--st-alt)", border: "1px solid var(--st-border)", borderRadius: 5, padding: "4px 7px", cursor: "pointer", color: "var(--st-muted)", fontSize: 12, lineHeight: 1 }}
+                          >⬇</button>
+                        </div>
                       </div>
                       );
                     })}
