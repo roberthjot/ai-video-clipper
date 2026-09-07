@@ -2,6 +2,31 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## ⏹ Botón "Detener" en re-análisis batch
+
+- Nuevo botón **⏹ Detener** al lado de "Analizando X/Y.." en el Paso 2
+  (Clips). Cancela **inmediatamente** el request de Gemini en vuelo
+  (`AbortController`) y el loop no arranca el siguiente clip.
+- `api.reanalyzeClip` ahora acepta un `signal` para soportar abort.
+- La espera de 20 segundos entre clips también se interrumpe al toque.
+
+## ▶⬇ Botones Play + Download en clips virales del VOD
+
+- En el modal **"Momentos virales del VOD"** (Twitch/Kick), cada clip ahora
+  tiene dos botones a la derecha:
+  - **▶** — abre el clip en Twitch/Kick en nueva pestaña (reproducir).
+  - **⬇** — descarga el MP4 del clip a la compu (usa `downloadPescClipBlob`
+    → `POST /api/stream/clip-download` → yt-dlp).
+- Los botones no rompen la selección ni el "Enviar a Clips".
+
+## 🔧 Fix: watermark no se aplicaba en export TikTok
+
+- Bug: `handleExport` no pasaba `useWatermark: true` al backend, y el
+  endpoint `render_clips` tiene `use_watermark: bool = Query(default=False)`.
+  Resultado: el watermark **nunca** aparecía en el archivo exportado.
+- Fix: ahora se pasa `useWatermark: !!watermarkPreview` (truthy cuando el
+  usuario subió un PNG). Instagram ya lo aplicaba directo del style.
+
 ## 🎯 Auto-encuadre: sin temblor + modo Manual estable + zoom de encuadre
 
 - **Fin del temblor**: la trayectoria de caras ahora se **interpola a ~30 FPS**
