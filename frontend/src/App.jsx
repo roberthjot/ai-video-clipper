@@ -1607,6 +1607,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   const [reanalyzingClip, setReanalyzingClip] = useState(null);
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
+  const batchCancelledRef = useRef(false);
   // ⬇ Per-clip quick export: renders THIS clip in 9:16 and downloads it.
   const [quickExportId, setQuickExportId] = useState(null);
   const [copiedTweetId, setCopiedTweetId] = useState(null);
@@ -2108,8 +2109,10 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     await flushCreatorBeforeReanalyze();
     const ids = Array.from(selectedClips);
     setReanalyzingBatch(true);
+    batchCancelledRef.current = false;
     setBatchProgress({ current: 0, total: ids.length, currentId: null });
     for (let i = 0; i < ids.length; i++) {
+      if (batchCancelledRef.current) break;
       const clipId = ids[i];
       setBatchProgress({ current: i + 1, total: ids.length, currentId: clipId });
       try {
@@ -2119,8 +2122,13 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
         console.error(`Re-análisis falló para clip ${clipId}:`, err.message);
       }
       // Wait 20s between requests to avoid Gemini 503 rate limit errors
-      if (i < ids.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 20000));
+      if (i < ids.length - 1 && !batchCancelledRef.current) {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 20000);
+          const check = setInterval(() => {
+            if (batchCancelledRef.current) { clearTimeout(timer); clearInterval(check); resolve(); }
+          }, 200);
+        });
       }
     }
     setReanalyzingBatch(false);
@@ -2420,8 +2428,12 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
             {selectedClips.size} seleccionado{selectedClips.size > 1 ? "s" : ""}
           </span>
           {reanalyzingBatch ? (
-            <span style={{ fontSize: 12.5, color: "var(--st-text)", fontFamily: "var(--st-mono)" }}>
+            <span style={{ fontSize: 12.5, color: "var(--st-text)", fontFamily: "var(--st-mono)", display: "flex", alignItems: "center", gap: 8 }}>
               Analizando {batchProgress.current}/{batchProgress.total}…
+              <button onClick={() => { batchCancelledRef.current = true; }}
+                style={{ background: "var(--st-alt)", border: "1px solid var(--st-border)", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "var(--st-muted)", fontSize: 11, fontFamily: "var(--st-ui)" }}>
+                ⏹ Detener
+              </button>
             </span>
           ) : spanishBatchRunning ? (
             <span style={{ fontSize: 12.5, color: "var(--st-text)", fontFamily: "var(--st-mono)" }}>
