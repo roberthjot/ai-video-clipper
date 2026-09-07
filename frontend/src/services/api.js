@@ -758,8 +758,12 @@ export function getMemeBackgroundUrl(batchId, index, bust) {
     return `${API_BASE}/meme/preview-bg/${batchId}/${index}${bust ? `?bust=${bust}` : ""}`;
 }
 
-export async function retryMeme(batchId, index) {
-    const res = await fetch(`${API_BASE}/meme/retry/${batchId}/${index}`, { method: "POST" });
+export async function retryMeme(batchId, index, model = null) {
+    const res = await fetch(`${API_BASE}/meme/retry/${batchId}/${index}`, {
+        method: "POST",
+        headers: model ? { "Content-Type": "application/json" } : undefined,
+        body: model ? JSON.stringify({ model }) : undefined,
+    });
     if (!res.ok) throw new Error("No se pudo reintentar");
     return res.json();
 }

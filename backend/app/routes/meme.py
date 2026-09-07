@@ -2,6 +2,7 @@ import os
 import uuid
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from ..services.meme_service import (
     start_meme_batch, get_batch, retry_meme_item, MEME_UPLOAD_DIR, MEME_OUTPUT_DIR, TEMP_DIR,
@@ -196,12 +197,14 @@ async def meme_status(batch_id: str):
 
 
 @router.post("/retry/{batch_id}/{index}")
-async def retry_item(batch_id: str, index: int):
-    """Re-run a single meme item (after a failure or to regenerate it)."""
-    ok = retry_meme_item(batch_id, index)
+async def retry_item(batch_id: str, index: int, body: dict = None):
+    """Re-run a single meme item (after a failure or to regenerate it).
+    Optional JSON body: { "model": "gemini-2.5-pro" } to override model."""
+    model = (body or {}).get("model")
+    ok = retry_meme_item(batch_id, index, model=model)
     if not ok:
         raise HTTPException(status_code=404, detail="Batch or item not found")
-    return {"status": "retrying", "batch_id": batch_id, "index": index}
+    return {"status": "retrying", "batch_id": batch_id, "index": index, "model": model}
 
 
 @router.get("/crop-preview/{batch_id}/{index}")

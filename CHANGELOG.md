@@ -2,6 +2,19 @@
 
 A running log of all the improvements added on top of v9.5 base.
 
+## 🔄 Selector de modelo para reintentar memes
+
+- Cuando un meme falla (ej: 503 UNAVAILABLE), ahora aparece un **dropdown
+  de modelo Gemini** encima del botón "Reintentar este meme".
+- Opciones: "Mantener modelo original" (default) + todos los modelos de
+  la lista `GEMINI_VIDEO_MODELS`.
+- El modelo elegido se envía al backend y sobreescribe el modelo original
+  solo para ese retry.
+- Si no elegís ninguno, se usa el modelo con el que se generó el batch.
+- `retry_meme_item()` (backend) ahora acepta param `model: str = None`.
+- `POST /meme/retry/{batch_id}/{index}` ahora acepta JSON body
+  `{ "model": "gemini-2.5-pro" }` opcional.
+
 ## ⏹ Botón "Detener" en re-análisis batch
 
 - Nuevo botón **⏹ Detener** al lado de "Analizando X/Y.." en el Paso 2

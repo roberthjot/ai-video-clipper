@@ -6610,6 +6610,7 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
   const dotColor = isReady ? "var(--st-ok)" : isError ? "var(--st-live)" : "var(--st-faint)";
 
   const [retrying, setRetrying] = useState(false);
+  const [retryModel, setRetryModel] = useState(null); // null = keep original model
   // Track the meme_text we had at the moment of clicking Retry. The
   // spinner stays up until the parent's poll surfaces a DIFFERENT text
   // (or an error), confirming Gemini actually regenerated.
@@ -6618,7 +6619,7 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
     retryStartTextRef.current = item.meme_text || "";
     setRetrying(true);
     try {
-      await api.retryMeme(batchId, index);
+      await api.retryMeme(batchId, index, retryModel);
       // No fixed timeout — the effect below clears `retrying` when the
       // parent's poll picks up a new meme_text or an error.
     } catch (e) {
@@ -6717,6 +6718,16 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
             <div style={{ fontSize: 11.5, color: "var(--st-muted)", lineHeight: 1.45, wordBreak: "break-word" }}>
               {item.error || "Gemini devolvió un error. Probá de nuevo."}
             </div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "var(--st-muted)", display: "block", marginBottom: 4 }}>Modelo Gemini</label>
+            <select value={retryModel || ""} onChange={e => setRetryModel(e.target.value || null)}
+              style={{ width: "100%", padding: "7px 10px", borderRadius: 8, border: "1px solid var(--st-line)", background: "var(--st-soft)", color: "var(--st-text)", fontSize: 12 }}>
+              <option value="">Mantener modelo original</option>
+              {GEMINI_VIDEO_MODELS.map(m => (
+                <option key={m.val} value={m.val}>{m.label} — {m.sub}</option>
+              ))}
+            </select>
           </div>
           <button onClick={handleRetry} disabled={retrying} className="st-btn st-btn--primary"
             style={{ width: "100%", justifyContent: "center", padding: "9px 0" }}>

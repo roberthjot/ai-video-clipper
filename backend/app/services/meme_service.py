@@ -722,7 +722,7 @@ def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black"
     return batch_id
 
 
-def retry_meme_item(batch_id: str, index: int) -> bool:
+def retry_meme_item(batch_id: str, index: int, model: str = None) -> bool:
     """Re-run a single item (after a failure, or to regenerate). Reuses the
     original video + job params stored on the batch. Runs in a background
     thread so the request returns immediately. Returns False if not found."""
@@ -738,6 +738,10 @@ def retry_meme_item(batch_id: str, index: int) -> bool:
     item["status"] = "pending"
     item["error"] = ""
     batch["status"] = "processing"
+
+    # Allow caller to override the model (e.g. switch to a different one on retry).
+    if model:
+        params["gemini_model"] = model
 
     def _run():
         tid = threading.get_ident()
