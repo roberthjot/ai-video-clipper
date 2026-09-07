@@ -807,9 +807,9 @@ export function getMemeDescriptionUrl(batchId, index) {
     return `${API_BASE}/meme/description/${batchId}/${index}`;
 }
 
-export async function reanalyzeClip(projectId, clipId, lang = "en") {
+export async function reanalyzeClip(projectId, clipId, lang = "en", signal = null) {
     const qs = lang && lang !== "en" ? `?lang=${encodeURIComponent(lang)}` : "";
-    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/reanalyze${qs}`, { method: "POST" });
+    const res = await fetch(`${API_BASE}/clips/${projectId}/${clipId}/reanalyze${qs}`, { method: "POST", signal });
     if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || "Reanalyze failed");

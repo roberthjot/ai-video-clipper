@@ -1608,6 +1608,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
   const [selectedClips, setSelectedClips] = useState(new Set());
   const [reanalyzingBatch, setReanalyzingBatch] = useState(false);
   const batchCancelledRef = useRef(false);
+  const batchAbortRef = useRef(null);
   // ⬇ Per-clip quick export: renders THIS clip in 9:16 and downloads it.
   const [quickExportId, setQuickExportId] = useState(null);
   const [copiedTweetId, setCopiedTweetId] = useState(null);
@@ -2110,15 +2111,18 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
     const ids = Array.from(selectedClips);
     setReanalyzingBatch(true);
     batchCancelledRef.current = false;
+    const abortCtrl = new AbortController();
+    batchAbortRef.current = abortCtrl;
     setBatchProgress({ current: 0, total: ids.length, currentId: null });
     for (let i = 0; i < ids.length; i++) {
       if (batchCancelledRef.current) break;
       const clipId = ids[i];
       setBatchProgress({ current: i + 1, total: ids.length, currentId: clipId });
       try {
-        const result = await api.reanalyzeClip(projectId, clipId, lang);
+        const result = await api.reanalyzeClip(projectId, clipId, lang, abortCtrl.signal);
         onEdit(clipId, result.clip.viral_caption);
       } catch (err) {
+        if (err.name === "AbortError") break;
         console.error(`Re-análisis falló para clip ${clipId}:`, err.message);
       }
       // Wait 20s between requests to avoid Gemini 503 rate limit errors
@@ -2131,6 +2135,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
         });
       }
     }
+    batchAbortRef.current = null;
     setReanalyzingBatch(false);
     setBatchProgress({ current: 0, total: 0, currentId: null });
     setSelectedClips(new Set());
@@ -2430,7 +2435,7 @@ function ClipsStep({ projectId, clips, onEdit, onUpdateClip, onReorder, onNext }
           {reanalyzingBatch ? (
             <span style={{ fontSize: 12.5, color: "var(--st-text)", fontFamily: "var(--st-mono)", display: "flex", alignItems: "center", gap: 8 }}>
               Analizando {batchProgress.current}/{batchProgress.total}…
-              <button onClick={() => { batchCancelledRef.current = true; }}
+              <button onClick={() => { batchCancelledRef.current = true; batchAbortRef.current?.abort(); }}
                 style={{ background: "var(--st-alt)", border: "1px solid var(--st-border)", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "var(--st-muted)", fontSize: 11, fontFamily: "var(--st-ui)" }}>
                 ⏹ Detener
               </button>
