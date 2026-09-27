@@ -177,6 +177,17 @@ Open `http://localhost:5173`
 4. Click **Start Recording**
 5. When a segment finishes → **Download** it → **Upload** to Video Clipper
 
+### Buscar clips de un VOD de Kick
+1. Pega la URL completa del VOD, con el canal incluido:
+   `https://kick.com/<canal>/videos/<id-del-vod>`.
+2. Abre **Momentos virales del VOD** y pulsa **Top clips**.
+
+Kick cambió los identificadores de sus VOD recientes a UUIDv7. La aplicación
+resuelve estos VOD mediante el endpoint actual de Kick cuando la URL contiene
+el canal. Las URLs antiguas o los VOD eliminados/no públicos no pueden listar
+clips. Kick no ofrece una API pública estable para esta función, por lo que un
+reto de Cloudflare puede requerir reintentar unos minutos después.
+
 ---
 
 ## 📁 Project Structure

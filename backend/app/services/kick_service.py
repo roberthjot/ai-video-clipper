@@ -96,7 +96,17 @@ _DEFAULT_HEADERS = {
 }
 
 
-def _kick_get(path: str, params: Optional[dict] = None, timeout: int = 20) -> dict:
+class KickAPIError(RuntimeError):
+    """An HTTP failure from Kick's web API, retaining the status code."""
+
+    def __init__(self, status: int, path: str, detail: str):
+        self.status = status
+        self.path = path
+        super().__init__(f"Kick API {status} on {path}: {detail}")
+
+
+def _kick_get_from(origin: str, path: str, params: Optional[dict] = None,
+                   timeout: int = 20) -> dict:
     """Authenticated-ish GET to kick.com/api/<path>. Returns parsed JSON.
 
     Cloudflare is the failure surface — if it serves the JS challenge instead
@@ -105,7 +115,7 @@ def _kick_get(path: str, params: Optional[dict] = None, timeout: int = 20) -> di
     or wait a few minutes.
     """
     qs = ("?" + urllib.parse.urlencode(params, doseq=True)) if params else ""
-    full = f"https://kick.com/api/{path.lstrip('/')}{qs}"
+    full = f"{origin.rstrip('/')}/api/{path.lstrip('/')}{qs}"
     req = urllib.request.Request(full, headers=_DEFAULT_HEADERS)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -114,7 +124,7 @@ def _kick_get(path: str, params: Optional[dict] = None, timeout: int = 20) -> di
         body = ""
         try: body = e.read().decode("utf-8", errors="replace")[:500]
         except Exception: pass
-        raise RuntimeError(f"Kick API {e.code} on {path}: {body or e.reason}")
+        raise KickAPIError(e.code, path, body or e.reason)
     text = raw.decode("utf-8", errors="replace").lstrip()
     # Cloudflare JS challenge returns HTML — bail with a useful message.
     if text.startswith("<"):
@@ -126,6 +136,10 @@ def _kick_get(path: str, params: Optional[dict] = None, timeout: int = 20) -> di
         return json.loads(text)
     except Exception as e:
         raise RuntimeError(f"Kick API gave bad JSON on {path}: {e}")
+
+
+def _kick_get(path: str, params: Optional[dict] = None, timeout: int = 20) -> dict:
+    return _kick_get_from("https://kick.com", path, params, timeout)
 
 
 # ─── Video info ──────────────────────────────────────────────────────────────
@@ -152,33 +166,64 @@ def _pick_url(v) -> str:
     return ""
 
 
-def get_video_info(video_id: str) -> dict:
+def get_video_info(video_id: str, channel_slug: str = "") -> dict:
     """Fetch VOD metadata. Returns:
         {video_id, channel_slug, channel_name, title, started_at,
          duration_seconds, thumbnail_url, livestream_id}
     """
-    data = _kick_get(f"v1/video/{video_id}")
+    uses_current_video_shape = False
+    try:
+        data = _kick_get(f"v1/video/{video_id}")
+    except KickAPIError as exc:
+        # Since 2026 Kick has issued UUIDv7 VOD ids.  The old endpoint above
+        # returns Laravel's misleading "No query results" 404 for those ids.
+        # The current endpoint is channel-scoped, so a canonical VOD URL is
+        # needed to obtain its channel id.
+        if exc.status != 404:
+            raise
+        if not channel_slug:
+            raise RuntimeError(
+                "Kick no reconoce este VOD en su API antigua. Pega la URL "
+                "canónica con el canal: https://kick.com/<canal>/videos/<id>."
+            ) from exc
+        channel_data = _kick_get(f"v2/channels/{channel_slug}")
+        # The response is currently a top-level channel object, while some
+        # deployments wrap it in `data`.  Keep both shapes working.
+        if isinstance(channel_data, dict):
+            channel_data = _safe_dict(channel_data.get("data") or channel_data)
+        else:
+            channel_data = _safe_dict(channel_data)
+        channel_id = channel_data.get("id")
+        if not channel_id:
+            raise RuntimeError(f"Kick channel {channel_slug}: missing channel id")
+        data = _kick_get_from(
+            "https://web.kick.com",
+            f"v1/channels/{channel_id}/videos/{video_id}",
+        )
+        data = _safe_dict(data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data)
+        uses_current_video_shape = True
     if not isinstance(data, dict) or not data:
         raise RuntimeError(f"Kick VOD {video_id}: empty response")
 
     livestream = _safe_dict(data.get("livestream"))
     channel = _safe_dict(livestream.get("channel") or data.get("channel"))
-    # Kick stores duration in MILLISECONDS on the video object — keep the
-    # heuristic so we don't divide a real-seconds value.
+    # Legacy `/v1/video` reports milliseconds. The current channel-scoped
+    # endpoint reports seconds, even for multi-hour VODs.
     dur_raw = data.get("duration") or livestream.get("duration") or 0
     try:
         dur_n = float(dur_raw or 0)
     except (TypeError, ValueError):
         dur_n = 0.0
-    duration_s = dur_n / 1000.0 if dur_n > 1000 else dur_n
+    duration_s = dur_n if uses_current_video_shape else (dur_n / 1000.0 if dur_n > 1000 else dur_n)
     return {
         "video_id": data.get("id") or video_id,
         "video_uuid": data.get("uuid") or video_id,
-        "livestream_id": livestream.get("id"),
-        "channel_slug": (channel.get("slug") or "").lower(),
+        "livestream_id": livestream.get("id") or data.get("livestream_id"),
+        "channel_slug": (channel.get("slug") or channel_slug or "").lower(),
         "channel_name": channel.get("name") or channel.get("username") or "",
-        "title": (livestream.get("session_title") or data.get("title") or "").strip(),
-        "started_at": livestream.get("start_time") or data.get("created_at") or "",
+        "title": (livestream.get("session_title") or data.get("session_title") or data.get("title") or "").strip(),
+        "started_at": (livestream.get("start_time") or data.get("start_time") or
+                       data.get("started_at") or data.get("created_at") or ""),
         "duration_seconds": int(duration_s),
         "thumbnail_url": _pick_url(livestream.get("thumbnail")) or _pick_url(data.get("thumbnail")),
         "url": f"https://kick.com/video/{data.get('uuid') or video_id}",
@@ -187,7 +232,8 @@ def get_video_info(video_id: str) -> dict:
 
 # ─── Clip listing ────────────────────────────────────────────────────────────
 
-def get_clips_for_video(video_id: str, max_clips: int = 500) -> list[dict]:
+def get_clips_for_video(video_id: str, max_clips: int = 500,
+                        channel_slug: str = "") -> list[dict]:
     """List clips that were made FROM this specific VOD, sorted by views desc.
 
     Approach:
@@ -198,7 +244,7 @@ def get_clips_for_video(video_id: str, max_clips: int = 500) -> list[dict]:
     """
     if not video_id:
         return []
-    vod = get_video_info(video_id)
+    vod = get_video_info(video_id, channel_slug=channel_slug)
     channel = vod.get("channel_slug")
     if not channel:
         raise RuntimeError(f"Kick VOD {video_id}: missing channel slug")

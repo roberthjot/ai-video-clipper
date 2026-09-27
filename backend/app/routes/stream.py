@@ -123,7 +123,11 @@ def get_kick_clips(url: str = "", video_id: str = "", limit: int = 500):
     if not vid:
         raise HTTPException(status_code=400, detail="Provide a Kick VOD URL or video_id")
     try:
-        clips = kick_service.get_clips_for_video(vid, max_clips=max(10, min(2000, int(limit))))
+        clips = kick_service.get_clips_for_video(
+            vid,
+            max_clips=max(10, min(2000, int(limit))),
+            channel_slug=kick_service.extract_channel(url) or "",
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return {"video_id": vid, "count": len(clips), "clips": clips}

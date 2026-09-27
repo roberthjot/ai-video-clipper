@@ -1,5 +1,13 @@
 # AI Video Clipper — Changelog
 
+## 🐛 Kick VOD UUIDv7 lookup
+
+- Kick now returns a 404 from its legacy `/api/v1/video/<id>` endpoint for
+  newer UUIDv7 VOD IDs. The VOD-clip search now falls back to Kick's current
+  channel-scoped endpoint when given a canonical
+  `kick.com/<channel>/videos/<id>` URL. URLs without the channel now explain
+  how to paste a usable link instead of exposing Kick's raw Laravel error.
+
 A running log of all the improvements added on top of v9.5 base.
 
 ## 🔄 Selector de modelo para reintentar memes
