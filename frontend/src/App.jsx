@@ -319,6 +319,7 @@ function Sidebar({ active, filename, clipCount, hasProject, onNav }) {
 const GEMINI_VIDEO_MODELS = [
   { val: "gemini-2.5-flash",              label: "2.5 Flash",       sub: "1500/día · recomendado" },
   { val: "gemini-2.5-flash-lite",         label: "2.5 Flash Lite",  sub: "1000/día · liviano" },
+  { val: "gemini-3.8-flash",              label: "3.8 Flash",       sub: "nuevo · mejor razonamiento" },
   { val: "gemini-3.6-flash",              label: "3.6 Flash",       sub: "free · más nuevo" },
   { val: "gemini-3.5-flash-lite",         label: "3.5 Flash Lite",  sub: "free · rápido" },
   { val: "gemini-3.5-flash",              label: "3.5 Flash",       sub: "pago · nuevo I/O 26" },

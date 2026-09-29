@@ -22,7 +22,8 @@ CHUNK_THRESHOLD_SECONDS = 30 * 60   # 30 min — chunk only for genuinely long v
 CHUNK_DURATION_SECONDS = 15 * 60    # ~15 min per chunk (bigger chunks = fewer boundaries)
 
 VIDEO_ANALYSIS_MODELS = {
-    "gemini-3.6-flash",                  # free tier (Flash family, newest)
+    "gemini-3.8-flash",                  # GA Sep 2026 (Flash family, newest)
+    "gemini-3.6-flash",                  # free tier (Flash family)
     "gemini-3.5-flash",                  # paid only
     "gemini-3.5-flash-lite",             # free tier
     "gemini-3-flash",                    # free tier (stable alias)

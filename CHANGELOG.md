@@ -1,5 +1,13 @@
 # AI Video Clipper — Changelog
 
+## ✨ Nuevo modelo Gemini 3.8 Flash
+
+- Agregado `gemini-3.8-flash` (GA Sep 2026) a la whitelist del backend
+  (`VIDEO_ANALYSIS_MODELS`) y al selector del frontend.
+- Disponible en todos lados: análisis inicial, cambio de modelo,
+  health-check, re-análisis y retry de memes.
+- No cambia el default (sigue `gemini-2.5-flash`); se elige a mano.
+
 ## 🐛 Kick VOD UUIDv7 lookup
 
 - Kick now returns a 404 from its legacy `/api/v1/video/<id>` endpoint for
