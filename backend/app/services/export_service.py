@@ -746,7 +746,7 @@ def export_all_clips_background(
     language: str = "en",
     file_suffix: str = "",
 ):
-    """Run export in background thread with progress tracking.
+    """Run export in background thread with progress tracking — clips exported in parallel.
 
     `language` controls the burned-in caption + subtitle language. "en"
     (default) keeps current behaviour. "es" uses each clip's cached
@@ -757,9 +757,14 @@ def export_all_clips_background(
     `file_suffix` (e.g. "_16x9") is appended to output filenames so quick
     variant renders of the same clip don't overwrite the standard export.
     """
+    import concurrent.futures
 
     _lang_es = (language or "en").lower().startswith("es")
     _suffix = "_es" if _lang_es else ""
+
+    # Use up to 3 workers — each clip spawns its own FFmpeg process which is
+    # CPU/IO bound, so more than 3-4 workers rarely helps on a typical machine.
+    MAX_WORKERS = 3
 
     def _run():
         os.makedirs(output_dir, exist_ok=True)
@@ -772,23 +777,34 @@ def export_all_clips_background(
             "errors": []
         }
 
-        for i, clip in enumerate(clips):
-            try:
-                title_safe = getattr(clip, 'title', f'clip_{clip.id}').replace(' ', '_').lower()[:30]
-                filename = f"clip_{clip.id:02d}_{title_safe}{file_suffix}{_suffix}.mp4"
-                filepath = os.path.join(output_dir, filename)
+        completed_lock = threading.Lock()
 
-                export_progress[project_id]["current"] = i + 1
+        def _export_one(clip):
+            title_safe = getattr(clip, 'title', f'clip_{clip.id}').replace(' ', '_').lower()[:30]
+            filename = f"clip_{clip.id:02d}_{title_safe}{file_suffix}{_suffix}.mp4"
+            filepath = os.path.join(output_dir, filename)
+
+            with completed_lock:
                 export_progress[project_id]["current_file"] = filename
 
-                eff_style = getattr(clip, "style_override", None) or style
-                export_clip_with_style(video_path, clip, eff_style, filepath, transcript=transcript, language=language)
-                export_progress[project_id]["files"].append(filename)
+            eff_style = getattr(clip, "style_override", None) or style
+            export_clip_with_style(video_path, clip, eff_style, filepath, transcript=transcript, language=language)
+            return filename
 
-            except Exception as e:
-                error_msg = f"Clip {clip.id}: {str(e)}"
-                export_progress[project_id]["errors"].append(error_msg)
-                print(f"[Export] Error: {error_msg}")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(_export_one, clip): clip for clip in clips}
+            for future in concurrent.futures.as_completed(futures):
+                clip = futures[future]
+                try:
+                    filename = future.result()
+                    with completed_lock:
+                        export_progress[project_id]["files"].append(filename)
+                        export_progress[project_id]["current"] = len(export_progress[project_id]["files"])
+                except Exception as e:
+                    error_msg = f"Clip {clip.id}: {str(e)}"
+                    with completed_lock:
+                        export_progress[project_id]["errors"].append(error_msg)
+                    print(f"[Export] Error: {error_msg}")
 
         # Generate clips_info.txt
         try:
@@ -818,6 +834,7 @@ def export_all_clips_background(
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
+
 
 
 def export_instagram_clip(
@@ -956,7 +973,10 @@ def export_all_instagram_clips_background(
     style,
     output_dir: str,
 ):
-    """Run instagram export in background thread with progress tracking."""
+    """Run instagram export in background thread with progress tracking — clips exported in parallel."""
+    import concurrent.futures
+
+    MAX_WORKERS = 3
 
     def _run():
         os.makedirs(output_dir, exist_ok=True)
@@ -969,26 +989,38 @@ def export_all_instagram_clips_background(
             "errors": []
         }
 
-        for i, clip in enumerate(clips):
-            try:
-                title_safe = getattr(clip, 'title', f'clip_{clip.id}').replace(' ', '_').lower()[:30]
-                filename = f"ig_clip_{clip.id:02d}_{title_safe}.mp4"
-                filepath = os.path.join(output_dir, filename)
+        completed_lock = threading.Lock()
 
-                instagram_export_progress[project_id]["current"] = i + 1
+        def _export_one(clip):
+            title_safe = getattr(clip, 'title', f'clip_{clip.id}').replace(' ', '_').lower()[:30]
+            filename = f"ig_clip_{clip.id:02d}_{title_safe}.mp4"
+            filepath = os.path.join(output_dir, filename)
+
+            with completed_lock:
                 instagram_export_progress[project_id]["current_file"] = filename
 
-                eff_style = getattr(clip, "style_override", None) or style
-                export_instagram_clip(video_path, clip, eff_style, filepath)
-                instagram_export_progress[project_id]["files"].append(filename)
+            eff_style = getattr(clip, "style_override", None) or style
+            export_instagram_clip(video_path, clip, eff_style, filepath)
+            return filename
 
-            except Exception as e:
-                error_msg = f"Clip {clip.id}: {str(e)}"
-                instagram_export_progress[project_id]["errors"].append(error_msg)
-                print(f"[Instagram Export] Error: {error_msg}")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(_export_one, clip): clip for clip in clips}
+            for future in concurrent.futures.as_completed(futures):
+                clip = futures[future]
+                try:
+                    filename = future.result()
+                    with completed_lock:
+                        instagram_export_progress[project_id]["files"].append(filename)
+                        instagram_export_progress[project_id]["current"] = len(instagram_export_progress[project_id]["files"])
+                except Exception as e:
+                    error_msg = f"Clip {clip.id}: {str(e)}"
+                    with completed_lock:
+                        instagram_export_progress[project_id]["errors"].append(error_msg)
+                    print(f"[Instagram Export] Error: {error_msg}")
 
         instagram_export_progress[project_id]["status"] = "completed"
         print(f"[Instagram Export] All clips exported to {output_dir}")
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
+

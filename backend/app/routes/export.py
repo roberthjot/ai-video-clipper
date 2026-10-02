@@ -62,6 +62,10 @@ async def upload_project_music(project_id: str, audio: UploadFile = File(...)):
     except Exception:
         peaks = []
 
+    # Immediately save music_path on the project so export finds it
+    # even if the frontend's separate updateStyle call is delayed or lost.
+    project.style.music_path = fpath
+
     return {
         "path": fpath,
         "url": f"/api/export/music/{project_id}/{fname}",
@@ -117,9 +121,15 @@ async def update_style(project_id: str, style: StyleConfig):
         style.watermark_path = project.style.watermark_path
     if style.split_image_path is None and project.style.split_image_path:
         style.split_image_path = project.style.split_image_path
+    # Preserve an existing music track — only clear it when the frontend
+    # explicitly sends a non-null path (i.e. the user chose a new track or
+    # the path is the same one already on the project).
+    if style.music_path is None and project.style.music_path:
+        style.music_path = project.style.music_path
 
     project.style = style
     return {"status": "updated", "style": style.model_dump()}
+
 
 
 @router.put("/style/{project_id}/{clip_id}")

@@ -123,17 +123,31 @@ async def get_project_status(project_id: str):
     if p.token_count > 0:
         pct_used = round(p.token_count / 1_048_576 * 100)
         token_info = f" ({p.token_count:,} tokens — {pct_used}% of limit)"
+
+    # Live retry info from gemini_service (populated when model is overloaded)
+    from ..services import gemini_service as _gs
+    retry_info = _gs.retry_state.get(project_id, {})
+    retry_message = retry_info.get("message", "")
+    retry_model = retry_info.get("model", "")
+
     status_map = {
         "uploaded": {"phase": "uploaded", "message": "Video uploaded", "percent": 0},
         "uploading": {"phase": "uploading", "message": "Uploading to AI...", "percent": 15},
         "processing": {"phase": "processing", "message": "AI is processing video...", "percent": 35},
-        "analyzing": {"phase": "analyzing", "message": f"AI is finding viral moments...{token_info}", "percent": 65},
+        "analyzing": {"phase": "analyzing", "message": retry_message or f"AI is finding viral moments...{token_info}", "percent": 65},
         "ready": {"phase": "ready", "message": f"Analysis complete!{token_info}", "percent": 100},
         "error": {"phase": "error", "message": "An error occurred", "percent": 0},
     }
     info = status_map.get(p.status, {"phase": p.status, "message": p.status, "percent": 0})
     progress = getattr(p, "analyze_progress", "") or ""
-    return {"status": p.status, "analyze_progress": progress, **info}
+    return {
+        "status": p.status,
+        "analyze_progress": progress,
+        "retry_message": retry_message,
+        "retry_model": retry_model,
+        **info,
+    }
+
 
 
 def get_project_store():

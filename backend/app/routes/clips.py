@@ -200,38 +200,25 @@ async def analyze_video(req: AnalyzeRequest):
             # blip ("empty response") doesn't return 0 clips and force the
             # user to re-upload — most empty-response failures clear within
             # a few seconds when Google's load shifts.
-            async def _single_shot_with_retry(max_attempts=3):
-                last_err = None
-                for attempt in range(1, max_attempts + 1):
-                    try:
-                        return await asyncio.to_thread(
-                            gemini_service.analyze_video,
-                            active_file,
-                            duration,
-                            project.clip_count,
-                            project.min_duration,
-                            project.custom_prompt,
-                            0,
-                            transcript,
-                            project.gemini_model,
-                            getattr(project, 'creator_name', ''),
-                            getattr(project, 'max_duration', 90),
-                            getattr(project, 'analyze_lang', 'en'),
-                        )
-                    except Exception as e:
-                        last_err = e
-                        msg = str(e).lower()
-                        # Permanent failures — don't burn retries.
-                        if any(p in msg for p in ("quota", "permission", "invalid", "not found", "400 ", "403 ", "404 ")):
-                            raise
-                        if attempt < max_attempts:
-                            delay = 5 if attempt == 1 else 15
-                            print(f"[Analyze] single-shot attempt {attempt} failed ({e}) — retrying in {delay}s")
-                            await asyncio.sleep(delay)
-                raise last_err
-
-            clips = await _single_shot_with_retry()
+            # gemini_call_with_retry inside analyze_video handles retries and
+            # fallbacks automatically — no extra wrapper needed here.
+            clips = await asyncio.to_thread(
+                gemini_service.analyze_video,
+                active_file,
+                duration,
+                project.clip_count,
+                project.min_duration,
+                project.custom_prompt,
+                0,
+                transcript,
+                project.gemini_model,
+                getattr(project, 'creator_name', ''),
+                getattr(project, 'max_duration', 90),
+                getattr(project, 'analyze_lang', 'en'),
+                req.project_id,
+            )
             print(f"[Analyze] single-shot got {len(clips)}/{project.clip_count} clips")
+
 
         # Shift BOTH clips and transcript to the ORIGINAL video timeline if we
         # analyzed a sub-range. After this, all timestamps refer to the original
@@ -1003,7 +990,25 @@ async def preview_clip_video(project_id: str, clip_id: int):
     if not os.path.exists(video_preview_path):
         raise HTTPException(status_code=500, detail="Video preview not generated")
 
+    # Mix background music into the preview (same as export) so the user
+    # hears exactly what the exported clip will sound like.
+    music_path = getattr(style, "music_path", None)
+    if music_path and os.path.exists(music_path):
+        try:
+            await asyncio.to_thread(
+                video_service.mix_music_track,
+                video_preview_path, music_path,
+                music_volume=getattr(style, "music_volume", 0.8),
+                original_volume=getattr(style, "original_volume", 1.0),
+                music_start=float(getattr(style, "music_start", 0.0) or 0.0),
+                music_end=float(getattr(style, "music_end", 0.0) or 0.0),
+            )
+            print(f"[Preview] Clip {clip_id}: mixed music {os.path.basename(music_path)}")
+        except Exception as e:
+            print(f"[Preview] Clip {clip_id}: music mix failed (preview without music): {e}")
+
     return FileResponse(video_preview_path, media_type="video/mp4")
+
 
 
 @router.post("/{project_id}/{clip_id}/translate-only")
@@ -1515,14 +1520,22 @@ async def reanalyze_clip(project_id: str, clip_id: int, lang: str = "en"):
             creator_line = ''
         print(f"[Reanalyze] clip {clip_id} model={active_model} creator={_creator!r} lang={lang}")
         prompt_key = "reanalyze_clip_es" if lang == "es" else "reanalyze_clip"
+
+        def _reanalyze_call(m):
+            return gemini_service.client.models.generate_content(
+                model=m,
+                contents=[_types.Content(role="user", parts=[
+                    _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
+                    _types.Part.from_text(text=prompts.render(prompt_key, CREATOR_LINE=creator_line)),
+                ])],
+                config=_types.GenerateContentConfig(temperature=0.5),
+            )
+
         response = await asyncio.to_thread(
-            gemini_service.client.models.generate_content,
-            model=active_model,
-            contents=[_types.Content(role="user", parts=[
-                _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
-                _types.Part.from_text(text=prompts.render(prompt_key, CREATOR_LINE=creator_line)),
-            ])],
-            config=_types.GenerateContentConfig(temperature=0.5),
+            gemini_service.gemini_call_with_retry,
+            _reanalyze_call,
+            active_model,
+            project_id,
         )
 
         import re as _re
@@ -1633,14 +1646,21 @@ async def generate_tweet_text(project_id: str, clip_id: int):
             creator_text = f"{creator_text}\nCreator/person name (use exactly, keep capitalization): {_first}"
         print(f"[TweetText] clip {clip_id} model={active_model}")
 
+        def _tweet_call(m):
+            return gemini_service.client.models.generate_content(
+                model=m,
+                contents=[_types.Content(role="user", parts=[
+                    _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
+                    _types.Part.from_text(text=prompts.render("tweet_text", CREATOR_TEXT=creator_text)),
+                ])],
+                config=_types.GenerateContentConfig(temperature=0.7),
+            )
+
         response = await asyncio.to_thread(
-            gemini_service.client.models.generate_content,
-            model=active_model,
-            contents=[_types.Content(role="user", parts=[
-                _types.Part.from_uri(file_uri=active_file.uri, mime_type=active_file.mime_type),
-                _types.Part.from_text(text=prompts.render("tweet_text", CREATOR_TEXT=creator_text)),
-            ])],
-            config=_types.GenerateContentConfig(temperature=0.7),
+            gemini_service.gemini_call_with_retry,
+            _tweet_call,
+            active_model,
+            project_id,
         )
 
         tweet = (response.text or "").strip()
@@ -1660,13 +1680,19 @@ async def generate_tweet_text(project_id: str, clip_id: int):
         for _retry in range(2):
             if len(tweet) >= 280:
                 break
+            def _tweet_expand_call(m):
+                return gemini_service.client.models.generate_content(
+                    model=m,
+                    contents=[_types.Content(role="user", parts=[
+                        _types.Part.from_text(text=retry_prompt.format(cur=len(tweet)) + "\n\n" + tweet),
+                    ])],
+                    config=_types.GenerateContentConfig(temperature=0.7),
+                )
             response2 = await asyncio.to_thread(
-                gemini_service.client.models.generate_content,
-                model=active_model,
-                contents=[_types.Content(role="user", parts=[
-                    _types.Part.from_text(text=retry_prompt.format(cur=len(tweet)) + "\n\n" + tweet),
-                ])],
-                config=_types.GenerateContentConfig(temperature=0.7),
+                gemini_service.gemini_call_with_retry,
+                _tweet_expand_call,
+                active_model,
+                project_id,
             )
             t2 = (response2.text or "").strip()
             t2 = _re.sub(r'\s+', ' ', t2).strip().strip('"').strip("'").strip()

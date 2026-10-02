@@ -36,6 +36,121 @@ VIDEO_ANALYSIS_MODELS = {
     "gemini-2.5-pro",                    # free 50/day
 }
 
+# Keywords that indicate the model is temporarily overloaded/unavailable.
+# On these errors we retry with backoff and optionally switch to a fallback.
+OVERLOAD_ERRORS = (
+    "resource_exhausted", "rate_limit", "429",
+    "overloaded", "unavailable", "high demand",
+    "503", "quota", "too many requests",
+)
+
+# Ordered fallback chain: if a model is saturated, try the next one down.
+# Each entry is tried in order until one works or all fail.
+FALLBACK_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+]
+
+
+# Shared state so the routes can read which model/attempt is active and show
+# a friendly message on the frontend.
+retry_state: dict = {}   # project_id -> {"attempt": int, "model": str, "message": str}
+
+
+def _is_overload_error(exc: Exception) -> bool:
+    """Return True when the exception looks like a transient capacity error."""
+    msg = str(exc).lower()
+    code = getattr(exc, "status_code", None)
+    return (
+        code in (429, 503)
+        or any(kw in msg for kw in OVERLOAD_ERRORS)
+    )
+
+
+def gemini_call_with_retry(
+    call_fn,          # callable() → result; may call client.models.generate_content
+    preferred_model: str,
+    project_id: str = "",
+    max_retries: int = 1,
+    base_delay: float = 2.0,
+    use_fallbacks: bool = True,
+):
+    """Call call_fn(), retrying on overload/rate-limit errors.
+
+    Strategy:
+    1. Try preferred_model up to max_retries times with exponential backoff
+       (8s → 16s → 32s → ...).
+    2. If still failing and use_fallbacks=True, try each model in FALLBACK_MODELS
+       (skipping the preferred one) once each with a shorter delay.
+    3. If everything fails, raise the last exception.
+
+    `retry_state[project_id]` is updated on each attempt so the status
+    endpoint can surface a live "Retrying with model X (attempt N)..." message.
+    """
+    last_exc = None
+    active_model = preferred_model
+
+    def _set_state(attempt: int, model: str, msg: str):
+        if project_id:
+            retry_state[project_id] = {
+                "attempt": attempt,
+                "model": model,
+                "message": msg,
+            }
+        print(f"[Gemini] {msg}")
+
+    # ── Phase 1: retry with the preferred model ──────────────────────────────
+    for attempt in range(1, max_retries + 1):
+        try:
+            _set_state(attempt, active_model,
+                       f"Llamando a {active_model} (intento {attempt}/{max_retries})...")
+            result = call_fn(active_model)
+            # Success — clear retry state
+            if project_id:
+                retry_state.pop(project_id, None)
+            return result
+        except Exception as exc:
+            last_exc = exc
+            if not _is_overload_error(exc):
+                # Permanent error (bad API key, invalid request, etc.) — don't retry.
+                if project_id:
+                    retry_state.pop(project_id, None)
+                raise
+            delay = base_delay
+            _set_state(attempt, active_model,
+                       f"⚠️ {active_model} está saturado (intento {attempt}/{max_retries}). "
+                       f"Reintentando en {int(delay)}s...")
+            time.sleep(delay)
+
+    # ── Phase 2: try fallback models ─────────────────────────────────────────
+    if use_fallbacks:
+        for fallback in FALLBACK_MODELS:
+            if fallback == preferred_model:
+                continue
+            try:
+                _set_state(1, fallback,
+                           f"🔄 Probando modelo alternativo: {fallback}...")
+                result = call_fn(fallback)
+                if project_id:
+                    retry_state.pop(project_id, None)
+                return result
+            except Exception as exc:
+                last_exc = exc
+                if not _is_overload_error(exc):
+                    break   # Non-overload error on a fallback — bail out
+                _set_state(1, fallback,
+                           f"⚠️ {fallback} también saturado, probando siguiente...")
+                time.sleep(5)
+
+    if project_id:
+        retry_state.pop(project_id, None)
+    raise last_exc
+
 
 # ── Gemini API key (editable at runtime from Ajustes) ──────────────────────
 # The key comes from .env by default, but can be overridden from the UI; the
@@ -580,9 +695,11 @@ def analyze_video(
     creator_name: str = "",
     max_duration: int = 90,
     lang: str = "en",
+    project_id: str = "",
 ) -> list[ClipData]:
     """
     Use Gemini to analyze a video and identify viral clip candidates.
+
     
     Args:
         file_obj: Gemini file object (already processed)
@@ -666,28 +783,35 @@ def analyze_video(
     active_model = model or settings.GEMINI_MODEL
     print(f"[Gemini] Analyzing video: model={active_model}, duration={video_duration:.1f}s, target={target_clips} clips, min_duration={min_duration}s, transcript={'yes' if transcript else 'no'}")
 
-    response = client.models.generate_content(
-        model=active_model,
-        contents=[
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_uri(
-                        file_uri=file_obj.uri,
-                        mime_type=file_obj.mime_type,
-                    ),
-                    types.Part.from_text(
-                        text=f"Find {target_clips} viral clips in this video, starting from {start_time_offset} seconds onwards."
-                    ),
-                ],
-            )
-        ],
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            response_mime_type="application/json",
-            temperature=0.85,
-        ),
-    )
+    # Use retry + fallback wrapper so a transient 429/503 doesn't abort the
+    # whole analysis. The project_id is forwarded so the status endpoint can
+    # surface a live "Retrying with model X..." message to the frontend.
+    _pid = project_id
+    def _call(m):
+        return client.models.generate_content(
+            model=m,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_uri(
+                            file_uri=file_obj.uri,
+                            mime_type=file_obj.mime_type,
+                        ),
+                        types.Part.from_text(
+                            text=f"Find {target_clips} viral clips in this video, starting from {start_time_offset} seconds onwards."
+                        ),
+                    ],
+                )
+            ],
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                response_mime_type="application/json",
+                temperature=0.85,
+            ),
+        )
+
+    response = gemini_call_with_retry(_call, preferred_model=active_model, project_id=_pid)
 
     # Parse response
     if not response.text:

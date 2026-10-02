@@ -416,6 +416,7 @@ function UploadStep({ onComplete }) {
   const [phase, setPhase] = useState(""); // upload, analyzing
   const [statusMsg, setStatusMsg] = useState("");
   const [percent, setPercent] = useState(0);
+  const [retryMsg, setRetryMsg] = useState(""); // shown when Gemini is retrying due to overload
   const [dragover, setDragover] = useState(false);
   const [modelHealth, setModelHealth] = useState({});
   const [checkingModels, setCheckingModels] = useState(false);
@@ -508,15 +509,19 @@ function UploadStep({ onComplete }) {
           const status = await api.getAnalysisStatus(uploadRes.project_id);
           setStatusMsg(status.message);
           setPercent(status.percent);
+          // Show a visible warning banner when Gemini is retrying/switching models
+          setRetryMsg(status.retry_message || "");
 
           if (status.status === "ready" || status.status === "error") {
             clearInterval(pollingRef.current);
             pollingRef.current = null;
+            setRetryMsg("");
           }
         } catch {
           // ignore polling errors
         }
       }, 2000);
+
 
       // Wait for analysis to complete
       const analyzeRes = await analyzePromise;
@@ -623,11 +628,27 @@ function UploadStep({ onComplete }) {
                 </p>
               </div>
             )}
+
+            {/* Retry / fallback banner — shown when Gemini is overloaded */}
+            {retryMsg && (
+              <div style={{
+                marginTop: 14, padding: "11px 14px",
+                background: "rgba(255, 160, 0, 0.10)",
+                border: "1px solid rgba(255, 160, 0, 0.35)",
+                borderRadius: 10, textAlign: "left", display: "flex", gap: 10, alignItems: "flex-start",
+              }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+                <p style={{ margin: 0, fontSize: 12.5, color: "var(--st-text)", lineHeight: 1.55 }}>
+                  {retryMsg}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
   }
+
 
   return (
     <div style={{ maxWidth: 600, margin: "0 auto", padding: "30px 32px" }}>

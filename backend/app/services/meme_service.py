@@ -54,14 +54,16 @@ def detect_crop_boundaries(frame_path: str) -> dict:
     with open(frame_path, "rb") as f:
         img_bytes = f.read()
 
-    response = gemini_service.client.models.generate_content(
-        model=_resolve_model(),
-        contents=[types.Content(role="user", parts=[
-            types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
-            types.Part.from_text(text=prompts.render("meme_crop")),
-        ])],
-        config=types.GenerateContentConfig(temperature=0.0),
-    )
+    def _call(m):
+        return gemini_service.client.models.generate_content(
+            model=m,
+            contents=[types.Content(role="user", parts=[
+                types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
+                types.Part.from_text(text=prompts.render("meme_crop")),
+            ])],
+            config=types.GenerateContentConfig(temperature=0.0),
+        )
+    response = gemini_service.gemini_call_with_retry(_call, preferred_model=_resolve_model())
     raw = response.text.strip().upper()
     crop_top = 0.0
     crop_bottom = 0.0
@@ -119,14 +121,16 @@ def crop_video_pct(video_path: str, output_path: str,
 
 def generate_meme_text(file_obj) -> str:
     """Ask Gemini to generate meme text for this video."""
-    response = gemini_service.client.models.generate_content(
-        model=_resolve_model(),
-        contents=[types.Content(role="user", parts=[
-            types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-            types.Part.from_text(text=prompts.render("meme_text")),
-        ])],
-        config=types.GenerateContentConfig(temperature=1.0),
-    )
+    def _call(m):
+        return gemini_service.client.models.generate_content(
+            model=m,
+            contents=[types.Content(role="user", parts=[
+                types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+                types.Part.from_text(text=prompts.render("meme_text")),
+            ])],
+            config=types.GenerateContentConfig(temperature=1.0),
+        )
+    response = gemini_service.gemini_call_with_retry(_call, preferred_model=_resolve_model())
     raw = response.text.strip().rstrip(".")
     raw = raw.lower().rstrip(".")
     raw = raw[:1].upper() + raw[1:] if raw else raw
@@ -135,14 +139,16 @@ def generate_meme_text(file_obj) -> str:
 
 def detect_music_artist(file_obj) -> dict:
     """Ask Gemini to identify the artist in the music video. Returns dict with artist/instagram or empty strings."""
-    response = gemini_service.client.models.generate_content(
-        model=_resolve_model(),
-        contents=[types.Content(role="user", parts=[
-            types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-            types.Part.from_text(text=prompts.render("music_artist")),
-        ])],
-        config=types.GenerateContentConfig(temperature=0.1),
-    )
+    def _call(m):
+        return gemini_service.client.models.generate_content(
+            model=m,
+            contents=[types.Content(role="user", parts=[
+                types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+                types.Part.from_text(text=prompts.render("music_artist")),
+            ])],
+            config=types.GenerateContentConfig(temperature=0.1),
+        )
+    response = gemini_service.gemini_call_with_retry(_call, preferred_model=_resolve_model())
     raw = response.text.strip()
     artist = ""
     instagram = ""
@@ -161,14 +167,16 @@ def detect_music_artist(file_obj) -> dict:
 
 def generate_music_vibe(file_obj) -> str:
     """Ask Gemini to generate an emotion-driven vibe phrase for a music video."""
-    response = gemini_service.client.models.generate_content(
-        model=_resolve_model(),
-        contents=[types.Content(role="user", parts=[
-            types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-            types.Part.from_text(text=prompts.render("music_vibe")),
-        ])],
-        config=types.GenerateContentConfig(temperature=1.0),
-    )
+    def _call(m):
+        return gemini_service.client.models.generate_content(
+            model=m,
+            contents=[types.Content(role="user", parts=[
+                types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+                types.Part.from_text(text=prompts.render("music_vibe")),
+            ])],
+            config=types.GenerateContentConfig(temperature=1.0),
+        )
+    response = gemini_service.gemini_call_with_retry(_call, preferred_model=_resolve_model())
     raw = response.text.strip().rstrip(".")
     raw = raw.lower().rstrip(".")
     raw = raw[:1].upper() + raw[1:] if raw else raw
@@ -181,15 +189,18 @@ def generate_ig_description(file_obj, meme_text: str, content_type: str = "meme"
         prompt = prompts.render("ig_description_music", MEME_TEXT=meme_text)
     else:
         prompt = prompts.render("ig_description_meme", MEME_TEXT=meme_text)
-    response = gemini_service.client.models.generate_content(
-        model=_resolve_model(),
-        contents=[types.Content(role="user", parts=[
-            types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
-            types.Part.from_text(text=prompt),
-        ])],
-        config=types.GenerateContentConfig(temperature=0.9),
-    )
+    def _call(m):
+        return gemini_service.client.models.generate_content(
+            model=m,
+            contents=[types.Content(role="user", parts=[
+                types.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
+                types.Part.from_text(text=prompt),
+            ])],
+            config=types.GenerateContentConfig(temperature=0.9),
+        )
+    response = gemini_service.gemini_call_with_retry(_call, preferred_model=_resolve_model())
     return response.text.strip()
+
 
 
 def _wrap_text_px(text: str, font, max_width: int) -> list:
