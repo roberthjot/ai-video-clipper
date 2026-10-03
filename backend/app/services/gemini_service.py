@@ -609,7 +609,13 @@ def translate_clip_to_spanish(
     caption_es = re.sub(r"\s+", " ", caption_es).strip()
     caption_es = filter_emojis_to_whitelist(caption_es)
     if caption_es:
-        caption_es = caption_es[:1].upper() + caption_es[1:]
+        m = re.match(r"^(.*?)(\s*[\U0001F300-\U0001FAFF\U00002600-\U000027BF]+)?\s*$", caption_es)
+        if m:
+            text_part, emoji_part = m.group(1) or "", m.group(2) or ""
+            text_part = text_part[:1].upper() + text_part[1:].lower()
+            caption_es = (text_part + emoji_part).strip()
+        else:
+            caption_es = caption_es[:1].upper() + caption_es[1:].lower()
 
     words_es: list[dict] = []
 
@@ -1148,9 +1154,21 @@ def _fill_with_alternates(file_obj, clips: list, needed: int, system_prompt: str
             alt = alt_by_start.get(orig.start_time) or (alt_data[i] if i < len(alt_data) else {})
             caption = alt.get("viral_caption", orig.viral_caption)
             caption = caption.replace('\u2019', "'").replace('\u2018', "'")
-            caption = re.sub(r"[^\w\s'*]", '', caption).strip()
+            caption = re.sub(
+                r"[^\w\s\'\*\U0001F300-\U0001FAFF\U00002600-\U000027BF]+",
+                '', caption
+            ).strip()
             caption = re.sub(r'\s+', ' ', caption).strip()
-            caption = caption[:1].upper() + caption[1:].lower() if caption else caption
+            caption = filter_emojis_to_whitelist(caption)
+            if caption:
+                import re as _re
+                m = _re.match(r"^(.*?)(\s*[\U0001F300-\U0001FAFF\U00002600-\U000027BF]+)?\s*$", caption)
+                if m:
+                    text_part, emoji_part = m.group(1) or "", m.group(2) or ""
+                    text_part = text_part[:1].upper() + text_part[1:].lower()
+                    # Can't easily use restore_name_casing here since creator_name isn't passed down,
+                    # but we enforce sentence case exactly.
+                    caption = (text_part + emoji_part).strip()
 
             new_clip = ClipData(
                 id=len(clips) + 1,
