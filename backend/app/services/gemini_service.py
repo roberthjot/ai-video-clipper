@@ -751,7 +751,7 @@ def analyze_video(
         words_summary = " ".join(
             f"{w['word']}[{w['start']:.1f}s]" for w in transcript["words"]
         )
-        words_summary = words_summary[:3000] + ("..." if len(words_summary) > 3000 else "")
+        words_summary = words_summary[:100000] + ("..." if len(words_summary) > 100000 else "")
         transcript_section = prompts.render(
             "transcript_section",
             LANGUAGE=transcript.get("language", "unknown"),
