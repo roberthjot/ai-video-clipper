@@ -20,7 +20,7 @@ import {
   List, LayoutGrid, Clock, GripVertical, Check, Play, Pencil, RefreshCw,
   ZoomIn, Type, Wand2, SkipBack, SkipForward, Pause,
   Copy, AlertCircle, Loader2, X, Plus, Square, CheckCircle2, Crosshair,
-  Undo2, Redo2, FileText, Trash2, Music2,
+  Undo2, Redo2, FileText, Trash2, Music2, Mic, BookOpen,
 } from "lucide-react";
 
 
@@ -405,7 +405,7 @@ function UploadStep({ onComplete }) {
   const [minDuration, setMinDuration] = useState(15);
   const [maxDuration, setMaxDuration] = useState(90);
   const [customPrompt, setCustomPrompt] = useState("");
-  const [contentType, setContentType] = useState("drama"); // "drama" | "motivational"
+  const [contentType, setContentType] = useState("drama"); // "drama" | "motivational" | "educational" | "podcast"
   const [analyzeLang, setAnalyzeLang] = useState("en"); // caption language: "en" | "es"
   const { model: geminiModel, setModel: setGeminiModel } = useModel(); // global model (synced w/ sidebar + Ajustes)
   const [creatorName, setCreatorName] = useState(""); // creator name(s) for captions
@@ -730,19 +730,26 @@ function UploadStep({ onComplete }) {
             {[
               { val: "drama", label: "Drama / Entretenimiento", icon: <Film size={15} /> },
               { val: "motivational", label: "Motivacional", icon: <Sparkles size={15} /> },
+              { val: "educational", label: "Educativo / Informativo", icon: <BookOpen size={15} /> },
+              { val: "podcast", label: "Podcast / Debate", icon: <Mic size={15} /> },
             ].map(({ val, label, icon }) => (
               <StChip key={val} active={contentType === val}
                 onClick={() => {
                   setContentType(val);
-                  setCustomPrompt(val === "motivational"
-                    ? "Find the most powerful, inspiring, and motivational moments. Prioritize: life-changing quotes, transformation stories, breakthrough realizations, words of wisdom, advice that hits hard, success principles, mindset shifts, and statements that make viewers want to take action. Skip drama, conflict, complaints, or negative emotions. Each clip MUST leave the viewer feeling inspired, motivated, or with a powerful insight. Start at the PEAK of the impactful statement — not before it builds up."
-                    : "");
+                  const prompts = {
+                    drama: "",
+                    motivational: "Find the most powerful, inspiring, and motivational moments. Prioritize: life-changing quotes, transformation stories, breakthrough realizations, words of wisdom, advice that hits hard, success principles, mindset shifts, and statements that make viewers want to take action. Skip drama, conflict, complaints, or negative emotions. Each clip MUST leave the viewer feeling inspired, motivated, or with a powerful insight. Start at the PEAK of the impactful statement — not before it builds up.",
+                    educational: "Find the most interesting, surprising, and educational moments. Prioritize: fascinating facts, myth-busting reveals, expert explanations that simplify complex topics, shocking statistics, little-known truths, counterintuitive insights, and 'I didn't know that' moments. Skip small talk, intros, and filler. Each clip MUST teach the viewer something new or challenge what they thought they knew. The viral caption MUST be written in THIRD PERSON — describe what is being explained or revealed, NEVER use 'I' or 'my'. Examples: 'The real reason why...', 'What nobody tells you about...', 'Scientists just discovered that...'.",
+                    podcast: "Find the most compelling, thought-provoking, and debate-worthy moments. Prioritize: strong opinions, hot takes, controversial statements, deep reflections, powerful arguments, surprising revelations, moments where someone makes an undeniable point, raw honesty, and statements that make people stop and think. Skip small talk, intros, jokes, and filler. Each clip MUST present a strong perspective or insight that sparks conversation. The viral caption MUST be written in THIRD PERSON — describe what the speaker said or argued, NEVER use 'I' or 'my'. Examples: 'He finally said what everyone was thinking...', 'She made a point nobody could argue with...', 'The truth about... that nobody wants to hear'.",
+                  };
+                  setCustomPrompt(prompts[val] || "");
                 }}
                 style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 14px", fontSize: 13 }}>
                 {icon} {label}
               </StChip>
             ))}
           </div>
+
         </div>
 
         {/* Caption language — same EN/ES choice as the reanalyze buttons */}
