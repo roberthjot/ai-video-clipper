@@ -26,8 +26,6 @@ VIDEO_ANALYSIS_MODELS = {
     "gemini-3.6-flash",                  # free tier (Flash family)
     "gemini-3.5-flash",                  # paid only
     "gemini-3.5-flash-lite",             # free tier
-    "gemini-3-flash",                    # free tier (stable alias)
-    "gemini-3-flash-preview",            # free 20/day
     "gemini-3.1-pro-preview",            # paid only
     "gemini-3.1-flash-lite",             # free tier (stable alias)
     "gemini-3.1-flash-lite-preview",     # free
@@ -51,7 +49,7 @@ FALLBACK_MODELS = [
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3-flash",
+    "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
 ]
