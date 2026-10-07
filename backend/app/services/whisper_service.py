@@ -43,11 +43,12 @@ def transcribe(video_path: str) -> dict:
         print(f"[Whisper] Extracting audio from: {video_path}")
         extract_audio(video_path, audio_path)
 
-        print("[Whisper] Loading model (base, CPU int8)...")
-        model = WhisperModel("base", device="cpu", compute_type="int8")
+        threads = os.cpu_count() or 8
+        print(f"[Whisper] Loading model (base, CPU int8, {threads} threads)...")
+        model = WhisperModel("base", device="cpu", compute_type="int8", cpu_threads=threads)
 
-        print("[Whisper] Transcribing...")
-        segments, info = model.transcribe(audio_path, word_timestamps=True)
+        print("[Whisper] Transcribing (fast beam + VAD)...")
+        segments, info = model.transcribe(audio_path, word_timestamps=True, beam_size=1, vad_filter=True)
 
         words = []
         full_text = []
