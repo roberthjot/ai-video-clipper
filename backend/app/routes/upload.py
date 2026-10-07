@@ -150,6 +150,55 @@ async def get_project_status(project_id: str):
 
 
 
+@router.post("/import-preanalyzed")
+async def import_preanalyzed(payload: dict):
+    """Import an agent-pre-analyzed video directly into the project store."""
+    video_path = payload.get("video_path")
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(status_code=400, detail="Invalid video_path")
+
+    filename = os.path.basename(video_path)
+    project_id = str(uuid.uuid4())[:8]
+    output_dir = os.path.join(settings.PROJECTS_DIR, project_id)
+    os.makedirs(output_dir, exist_ok=True)
+
+    dest_path = os.path.join(settings.UPLOAD_DIR, f"{project_id}_{filename}")
+    shutil.copy2(video_path, dest_path)
+
+    duration = video_service.get_video_duration(dest_path)
+
+    from ..models.clip import ClipData
+    raw_clips = payload.get("clips", [])
+    clips = []
+    for c in raw_clips:
+        clip_obj = ClipData(**c)
+        if not clip_obj.caption_es:
+            clip_obj.caption_es = clip_obj.viral_caption
+        clips.append(clip_obj)
+
+    transcript = payload.get("transcript")
+
+    project = Project(
+        id=project_id,
+        video_filename=filename,
+        video_path=dest_path,
+        clip_count=len(clips),
+        min_duration=15,
+        max_duration=90,
+        custom_prompt="",
+        status="ready",
+        clips=clips,
+        video_duration=duration,
+        output_dir=output_dir,
+        transcript=transcript,
+        creator_name=(payload.get("creator_name") or "").strip(),
+        analyze_lang="es",
+    )
+    projects[project_id] = project
+    print(f"[Import] Pre-analyzed project {project_id} imported with {len(clips)} clips!")
+    return {"project_id": project_id, "status": "ready", "clips_count": len(clips)}
+
+
 def get_project_store():
     """Access the in-memory project store (used by other routes)."""
     return projects
