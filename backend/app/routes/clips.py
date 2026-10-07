@@ -558,6 +558,15 @@ async def edit_clip_caption(project_id: str, clip_id: int, req: EditCaptionReque
     for clip in project.clips:
         if clip.id == clip_id:
             clip.viral_caption = req.viral_caption
+            clip.caption_es = req.viral_caption
+            if project.output_dir:
+                for fname in [f"preview_clip_{clip_id}.jpg", f"preview_clip_{clip_id}_es.jpg", f"ig_preview_clip_{clip_id}.jpg", f"ig_preview_clip_{clip_id}_es.jpg"]:
+                    fp = os.path.join(project.output_dir, fname)
+                    if os.path.exists(fp):
+                        try:
+                            os.remove(fp)
+                        except Exception:
+                            pass
             return {"status": "updated", "clip": clip.model_dump()}
 
     raise HTTPException(status_code=404, detail="Clip not found")

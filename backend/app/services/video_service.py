@@ -1276,7 +1276,7 @@ def _smart_title_words(words: list) -> list:
 
 def create_text_caption_overlay(lines: list, variant: str = "clean",
                                  font_size: int = 72, font_key: str = "calibri",
-                                 stroke_width: int = 3, title_case: bool = True,
+                                 stroke_width: int = 3, title_case: bool = False,
                                  line_gap: int = 8) -> tuple:
     """Render one of the modern text-only caption styles (no background box):
 
