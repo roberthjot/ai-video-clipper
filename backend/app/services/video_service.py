@@ -1874,6 +1874,7 @@ def generate_preview_frame(
     edit_pan_x: float = 0.0,
     edit_pan_y: float = 0.0,
     fill_mode_scale: float = 1.0,
+    crop_override: tuple = None,
     **kwargs,
 ) -> str:
     """Generate preview frame (JPEG)."""
@@ -1937,9 +1938,13 @@ def generate_preview_frame(
         filter_parts.append("[video_part][img_part]vstack=inputs=2[v]")
         input_index = 2  # [0]=video, [1]=split image
     else:
-        filter_parts.append(f"{_bg(H)}[bg]")
-        filter_parts.append(f"[0:v]{fg_filter}[fg]")
-        filter_parts.append(f"[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H[v]")
+        if crop_override:
+            cw, ch, cx0, cy0 = crop_override
+            filter_parts.append(f"[0:v]crop={cw}:{ch}:{cx0}:{cy0},scale={W}:{H}[v]")
+        else:
+            filter_parts.append(f"{_bg(H)}[bg]")
+            filter_parts.append(f"[0:v]{fg_filter}[fg]")
+            filter_parts.append(f"[bg][fg]overlay=(W-w)/2+({_pan_x_pct})*W:(H-h)/2+({_pan_y_pct})*H[v]")
 
     last = "v"
     rounded_box_path = None

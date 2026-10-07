@@ -67,6 +67,25 @@ def _get_detector() -> vision.FaceDetector:
     return _detector
 
 
+_detector_quad: Optional[vision.FaceDetector] = None
+
+
+def _get_detector_quad() -> vision.FaceDetector:
+    """Lazy-init a sensitive detector for small faces in wide shots (confidence 0.28)."""
+    global _detector_quad
+    if _detector_quad is None:
+        with _detector_lock:
+            if _detector_quad is None:
+                model_path = _ensure_model()
+                opts = vision.FaceDetectorOptions(
+                    base_options=mp_tasks.BaseOptions(model_asset_path=model_path),
+                    running_mode=vision.RunningMode.IMAGE,
+                    min_detection_confidence=0.28,
+                )
+                _detector_quad = vision.FaceDetector.create_from_options(opts)
+    return _detector_quad
+
+
 # ── Detection over a video range ─────────────────────────────────────────────
 def _iou(a: dict, b: dict) -> float:
     """Intersection-over-union of two bboxes given as {x, y, w, h}."""
@@ -167,9 +186,38 @@ def analyze_clip(
             conf = float(det.categories[0].score) if det.categories else 0.0
             raw_faces.append({"x": x, "y": y, "w": w, "h": h, "confidence": round(conf, 3)})
 
-        # Greedy IoU matching to previous sample's faces. For each new face,
-        # pick the best-matching previous face above IoU 0.25 and inherit
-        # its ID; otherwise mint a new ID.
+        # Multi-scale check for wide two-shots (e.g. podcast wide angles):
+        # BlazeFace on 1080p frame resizes to 128x128, losing small distant faces.
+        # Checking left and right upper quadrants recovers subjects sitting in their chairs.
+        if len(raw_faces) <= 1:
+            quads = [
+                (0, int(height * 0.72), 0, int(width * 0.55)),      # Left chair (guest)
+                (0, int(height * 0.72), int(width * 0.45), width),  # Right chair (host)
+            ]
+            det_q = _get_detector_quad()
+            for y0, y1, x0, x1 in quads:
+                sub = frame[y0:y1, x0:x1]
+                sub_rgb = cv2.cvtColor(sub, cv2.COLOR_BGR2RGB)
+                sub_mp = mp.Image(image_format=mp.ImageFormat.SRGB, data=sub_rgb)
+                try:
+                    res_sub = det_q.detect(sub_mp)
+                except Exception:
+                    continue
+                for det in res_sub.detections:
+                    conf = float(det.categories[0].score) if det.categories else 0.0
+                    bb = det.bounding_box
+                    fx = max(0, int(bb.origin_x + x0))
+                    fy = max(0, int(bb.origin_y + y0))
+                    fw = min(width - fx, int(bb.width))
+                    fh = min(height - fy, int(bb.height))
+                    if fw < 20 or fh < 20:
+                        continue
+                    fcx, fcy = fx + fw / 2.0, fy + fh / 2.0
+                    if not any(math.hypot(fcx - (rf["x"] + rf["w"] / 2.0), fcy - (rf["y"] + rf["h"] / 2.0)) < 150 for rf in raw_faces):
+                        raw_faces.append({"x": fx, "y": fy, "w": fw, "h": fh, "confidence": round(conf, 3)})
+
+        # Greedy IoU matching to previous sample's faces, plus appearance histogram
+        # matching across camera cuts to keep persistent person IDs.
         used_prev: set[int] = set()
         for face in raw_faces:
             best_iou, best_idx = 0.0, -1
@@ -183,12 +231,37 @@ def analyze_clip(
                 face["id"] = prev_faces[best_idx]["id"]
                 used_prev.add(best_idx)
             else:
-                face["id"] = next_id
-                next_id += 1
+                # Camera cut / no IoU match: check appearance similarity via color histogram
+                matched_id = None
+                crop = frame[face["y"]:face["y"]+face["h"], face["x"]:face["x"]+face["w"]]
+                if crop is not None and crop.size > 0 and people:
+                    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+                    hist = cv2.calcHist([hsv], [0, 1], None, [16, 16], [0, 180, 0, 256])
+                    cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+                    best_sim, best_pid = 0.0, None
+                    for pid, pdata in people.items():
+                        if pdata.get("hist") is not None:
+                            sim = cv2.compareHist(hist, pdata["hist"], cv2.HISTCMP_CORREL)
+                            if sim > best_sim:
+                                best_sim, best_pid = sim, pid
+                    if best_sim >= 0.86:
+                        matched_id = best_pid
+
+                if matched_id is not None:
+                    face["id"] = matched_id
+                else:
+                    face["id"] = next_id
+                    next_id += 1
+
             # Update or create the person record. We keep the most-confident
             # bbox/timestamp as the thumbnail anchor for the UI.
             p = people.get(face["id"])
             if p is None:
+                crop = frame[face["y"]:face["y"]+face["h"], face["x"]:face["x"]+face["w"]]
+                hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV) if (crop is not None and crop.size > 0) else None
+                hist = cv2.calcHist([hsv], [0, 1], None, [16, 16], [0, 180, 0, 256]) if hsv is not None else None
+                if hist is not None:
+                    cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
                 people[face["id"]] = {
                     "id": face["id"],
                     "first_t": round(t, 3),
@@ -196,6 +269,7 @@ def analyze_clip(
                     "thumb_box": {k: face[k] for k in ("x", "y", "w", "h")},
                     "thumb_conf": face["confidence"],
                     "appearance_count": 1,
+                    "hist": hist,
                 }
             else:
                 p["appearance_count"] += 1
@@ -225,9 +299,10 @@ def analyze_clip(
     # Sort people by appearance_count desc so the most-prominent person is
     # index 0 in the UI grid (better default for the "Cara grande" auto pick).
     people_list = sorted(people.values(), key=lambda p: -p["appearance_count"])
-    # Drop the temporary thumb_conf field (UI doesn't need it)
+    # Drop temporary fields not needed by UI or JSON
     for p in people_list:
         p.pop("thumb_conf", None)
+        p.pop("hist", None)
 
     print(f"[face_track] done: {len(samples)} samples, {len(people_list)} unique people")
     return {
@@ -316,19 +391,23 @@ def compute_crop_trajectory(
     miss_streak = 0
 
     for sample in face_track["samples"]:
-        if mode == "follow":
+        if mode in ("follow", "static", "lock"):
             faces = _faces_at_sample(sample, follow_id)
-            if not faces:
-                # The chosen person's ID can flicker (greedy IoU matching swaps
-                # IDs when faces cross/overlap). Don't lose them: fall back to
-                # whichever face is nearest the current crop center so the
-                # framing stays on the active person instead of jumping away.
+            if not faces and follow_id is not None and mode in ("static", "lock"):
+                # Locked on a specific person: only use samples where THAT person is visible
+                faces = []
+            elif not faces and follow_id is not None:
+                # In follow mode, only fall back to another face if it is genuinely close to last_cx
+                # (i.e. within 250px, likely an ID flicker on the SAME person, not a cut to the other speaker)
                 sf = sample.get("faces") or []
-                if sf:
-                    faces = [min(sf, key=lambda f: math.hypot(
+                close_faces = [f for f in sf if math.hypot((f["x"] + f["w"] / 2.0) - last_cx, (f["y"] + f["h"] / 2.0) - last_cy) < 250]
+                if close_faces:
+                    faces = [min(close_faces, key=lambda f: math.hypot(
                         (f["x"] + f["w"] / 2.0) - last_cx,
                         (f["y"] + f["h"] / 2.0) - last_cy,
                     ))]
+                else:
+                    faces = []
         elif mode == "biggest":
             faces = _biggest_face(sample)
         else:
@@ -336,24 +415,29 @@ def compute_crop_trajectory(
 
         if not faces:
             miss_streak += 1
-            if mode == "follow":
-                # Hold the last framing — don't drift back toward center when
-                # the chosen person is briefly off-camera (that's what made
-                # manual mode "lose" the person and look un-framed).
-                raw.append({"t": sample["t"], "cx": last_cx, "cy": last_cy,
-                            "cw": last_cw, "ch": last_ch, "miss": True})
-                continue
-            # Drift toward fallback over ~2 seconds of misses (5 samples).
-            drift = min(1.0, miss_streak / 5.0)
-            cx = last_cx + (fallback_cx - last_cx) * drift * 0.15
-            cy = last_cy + (fallback_cy - last_cy) * drift * 0.15
-            cw = last_cw + (fallback_cw - last_cw) * drift * 0.15
-            ch = last_ch + (fallback_ch - last_ch) * drift * 0.15
-            raw.append({"t": sample["t"], "cx": cx, "cy": cy, "cw": cw, "ch": ch, "miss": True})
-            last_cx, last_cy, last_cw, last_ch = cx, cy, cw, ch
+            # Never drift toward fallback center (W/2) in podcasts/interviews.
+            # Holding last valid crop preserves the human framing.
+            raw.append({"t": sample["t"], "cx": last_cx, "cy": last_cy,
+                        "cw": last_cw, "ch": last_ch, "miss": True})
             continue
 
         miss_streak = 0
+
+        # If multiple faces are detected, check if they are too far apart to fit in a 9:16 frame.
+        # If their horizontal span exceeds what a vertical crop can show, averaging them
+        # will disastrously center the camera on the empty space/furniture between them.
+        if len(faces) > 1:
+            span_x = max(f["x"] + f["w"] for f in faces) - min(f["x"] for f in faces)
+            if span_x > (H * target_ar * 1.05):
+                if follow_id is not None:
+                    matching = [f for f in faces if f.get("id") == follow_id]
+                    faces = matching if matching else [max(faces, key=lambda f: f["w"] * f["h"])]
+                elif last_cx < W * 0.45:
+                    faces = [min(faces, key=lambda f: f["x"])]
+                elif last_cx > W * 0.55:
+                    faces = [max(faces, key=lambda f: f["x"])]
+                else:
+                    faces = [max(faces, key=lambda f: f["w"] * f["h"])]
 
         # Union bbox of selected faces.
         x1 = min(f["x"] for f in faces)
@@ -395,6 +479,35 @@ def compute_crop_trajectory(
             cw, ch = cw * scale, ch * scale
         cx = (x1p + x2p) / 2.0
         cy = (y1p + y2p) / 2.0
+
+        # Anti-Dead-Zone Rule:
+        # In a horizontal 16:9 frame of a podcast/interview, the area [0.42*W, 0.58*W] is the empty space between chairs.
+        # If multiple faces were detected or any face was detected on the outer chairs (x < 0.45*W or x > 0.55*W),
+        # NEVER center the camera in this dead zone!
+        all_s_faces = sample.get("faces", [])
+        has_outer_face = any(f["x"] < 0.45 * W or (f["x"] + f["w"]) > 0.55 * W for f in all_s_faces)
+        if (len(all_s_faces) > 1 or has_outer_face) and (0.42 * W < cx < 0.58 * W):
+            left_f = [f for f in all_s_faces if (f["x"] + f["w"] / 2.0) < 0.48 * W]
+            right_f = [f for f in all_s_faces if (f["x"] + f["w"] / 2.0) > 0.52 * W]
+            if follow_id is not None and any(f.get("id") == follow_id for f in left_f):
+                chosen = left_f[0]
+                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+            elif follow_id is not None and any(f.get("id") == follow_id for f in right_f):
+                chosen = right_f[0]
+                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+            elif left_f and last_cx < 0.5 * W:
+                chosen = left_f[0]
+                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+            elif right_f and last_cx > 0.5 * W:
+                chosen = right_f[0]
+                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+            elif left_f:
+                chosen = left_f[0]
+                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+            elif right_f:
+                chosen = right_f[0]
+                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+
         # Re-clamp the center so the crop doesn't poke outside the source.
         cx = max(cw / 2, min(W - cw / 2, cx))
         cy = max(ch / 2, min(H - ch / 2, cy))
@@ -402,9 +515,46 @@ def compute_crop_trajectory(
         raw.append({"t": sample["t"], "cx": cx, "cy": cy, "cw": cw, "ch": ch})
         last_cx, last_cy, last_cw, last_ch = cx, cy, cw, ch
 
-    # ── Temporal smoothing (EMA) ────────────────────────────────────────────
-    # smoothing = 0  → use raw, jittery   |   smoothing = 0.95 → very smooth.
-    # Higher value = more weight on the running average = more inertia.
+    # ── Static / Locked mode: 100% frozen camera during shots with clean cuts ──
+    if mode in ("static", "lock"):
+        # Shot-stable framing: partition into camera shots (cut threshold = 180px displacement).
+        # Within each shot, lock coordinates to that shot's median.
+        # This keeps the camera 100% frozen (no jitter/vibration) during every angle,
+        # but cleanly cuts to the person's location when the camera switches angles.
+        shots: list[list[dict]] = []
+        cur_shot: list[dict] = []
+        for r in raw:
+            if not cur_shot:
+                cur_shot.append(r)
+            else:
+                if abs(r["cx"] - cur_shot[-1]["cx"]) > 180 or abs(r["cy"] - cur_shot[-1]["cy"]) > 180:
+                    shots.append(cur_shot)
+                    cur_shot = [r]
+                else:
+                    cur_shot.append(r)
+        if cur_shot:
+            shots.append(cur_shot)
+
+        out_static: list[dict] = []
+        for shot in shots:
+            valid = [s for s in shot if not s.get("miss")]
+            src = valid if valid else shot
+            med_cx = sorted(s["cx"] for s in src)[len(src) // 2]
+            med_cy = sorted(s["cy"] for s in src)[len(src) // 2]
+            med_cw = sorted(s["cw"] for s in src)[len(src) // 2]
+            med_ch = sorted(s["ch"] for s in src)[len(src) // 2]
+            for s in shot:
+                out_static.append({
+                    "t": s["t"],
+                    "cx": int(round(med_cx)),
+                    "cy": int(round(med_cy)),
+                    "cw": max(2, int(round(med_cw))),
+                    "ch": max(2, int(round(med_ch))),
+                    "miss": False,
+                })
+        return out_static
+
+    # ── Temporal smoothing (EMA) for follow / dynamic mode ──────────────────
     a = max(0.0, min(0.99, smoothing))
     smoothed: list[dict] = []
     for i, r in enumerate(raw):
@@ -412,6 +562,21 @@ def compute_crop_trajectory(
             smoothed.append(dict(r))
             continue
         prev = smoothed[-1]
+        # Camera cut snap: if displacement >= 180px, SNAP immediately! No panning through empty space.
+        if abs(r["cx"] - prev["cx"]) >= 180 or abs(r["cy"] - prev["cy"]) >= 180:
+            smoothed.append(dict(r))
+            continue
+        # Deadzone: if displacement < 30px, hold previous position to eliminate micro-vibrations
+        if abs(r["cx"] - prev["cx"]) < 30 and abs(r["cy"] - prev["cy"]) < 30:
+            smoothed.append({
+                "t": r["t"],
+                "cx": prev["cx"],
+                "cy": prev["cy"],
+                "cw": prev["cw"],
+                "ch": prev["ch"],
+                "miss": r.get("miss", False),
+            })
+            continue
         smoothed.append({
             "t":  r["t"],
             "cx": prev["cx"] * a + r["cx"] * (1 - a),
@@ -520,13 +685,24 @@ def interpolate_trajectory(trajectory: list[dict], fps: float = 30.0) -> list[di
         b = trajectory[min(idx + 1, len(trajectory) - 1)]
         span = max(1e-9, b["t"] - a["t"])
         f = max(0.0, min(1.0, (t - a["t"]) / span))
-        f = f * f * (3.0 - 2.0 * f)   # smoothstep — rounds the corners
+        if abs(b["cx"] - a["cx"]) > 160 or abs(b["cy"] - a["cy"]) > 160:
+            # Camera cut / scene switch: instant snap, do not pan through empty space
+            curr_cx = b["cx"] if f >= 0.5 else a["cx"]
+            curr_cy = b["cy"] if f >= 0.5 else a["cy"]
+            curr_cw = b["cw"] if f >= 0.5 else a["cw"]
+            curr_ch = b["ch"] if f >= 0.5 else a["ch"]
+        else:
+            f = f * f * (3.0 - 2.0 * f)   # smoothstep — rounds the corners
+            curr_cx = a["cx"] + (b["cx"] - a["cx"]) * f
+            curr_cy = a["cy"] + (b["cy"] - a["cy"]) * f
+            curr_cw = a["cw"] + (b["cw"] - a["cw"]) * f
+            curr_ch = a["ch"] + (b["ch"] - a["ch"]) * f
         out.append({
             "t": round(t, 3),
-            "cx": a["cx"] + (b["cx"] - a["cx"]) * f,
-            "cy": a["cy"] + (b["cy"] - a["cy"]) * f,
-            "cw": a["cw"] + (b["cw"] - a["cw"]) * f,
-            "ch": a["ch"] + (b["ch"] - a["ch"]) * f,
+            "cx": curr_cx,
+            "cy": curr_cy,
+            "cw": curr_cw,
+            "ch": curr_ch,
             "miss": a.get("miss", False),
         })
     return out
@@ -552,14 +728,27 @@ def build_sendcmd_file(trajectory: list[dict], output_path: str, label: str = "r
     if not trajectory:
         raise ValueError("empty trajectory")
     trajectory = interpolate_trajectory(trajectory, fps=30.0)
+    # Deadzone stabilization: kills 1-2px per-frame jitter from face detector noise.
+    # If the target top-left is within deadzone_px of the current stable anchor,
+    # keep the anchor rock-solid. Only update when real intentional movement occurs.
+    deadzone_px = 20.0
+    stable_x = None
+    stable_y = None
     with open(output_path, "w", encoding="utf-8") as f:
         for p in trajectory:
-            x1 = max(0, int(p["cx"] - p["cw"] / 2))
-            y1 = max(0, int(p["cy"] - p["ch"] / 2))
+            raw_x = max(0, int(round(p["cx"] - p["cw"] / 2)))
+            raw_y = max(0, int(round(p["cy"] - p["ch"] / 2)))
+            if stable_x is None:
+                stable_x = raw_x
+                stable_y = raw_y
+            else:
+                if math.hypot(raw_x - stable_x, raw_y - stable_y) >= deadzone_px:
+                    stable_x = raw_x
+                    stable_y = raw_y
             line = (
                 f'{p["t"]:.3f} '
-                f'crop@{label} x {x1}, '
-                f'crop@{label} y {y1};\n'
+                f'crop@{label} x {stable_x}, '
+                f'crop@{label} y {stable_y};\n'
             )
             f.write(line)
     return output_path

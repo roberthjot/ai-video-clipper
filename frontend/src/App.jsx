@@ -3273,6 +3273,71 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       .catch(() => {});
   }, [projectId]);
 
+  // Load saved project style + existing face tracks on mount so auto-reframe settings persist
+  useEffect(() => {
+    if (!projectId) return;
+    api.getProject(projectId).then((p) => {
+      if (p) {
+        if (p.style) {
+          setStyle((prev) => ({ ...prev, ...p.style }));
+          if (baseStyleRef.current) baseStyleRef.current = { ...baseStyleRef.current, ...p.style };
+          if (loadedStyleRef.current) loadedStyleRef.current = { ...loadedStyleRef.current, ...p.style };
+        }
+        const tracks = {};
+        for (const c of (p.clips || [])) {
+          if (c.face_track && c.face_track.samples) {
+            tracks[c.id] = {
+              people: c.face_track.people || [],
+              samples: c.face_track.samples || [],
+              width: c.face_track.width || 0,
+              height: c.face_track.height || 0,
+            };
+          }
+        }
+        if (Object.keys(tracks).length > 0) {
+          setClipFaceTracks((prev) => ({ ...tracks, ...prev }));
+        }
+      }
+    }).catch(() => {});
+  }, [projectId]);
+
+  // Also hydrate face tracks from clips prop if available
+  useEffect(() => {
+    if (!clips || !clips.length) return;
+    const tracks = {};
+    for (const c of clips) {
+      if (c.face_track && c.face_track.samples) {
+        tracks[c.id] = {
+          people: c.face_track.people || [],
+          samples: c.face_track.samples || [],
+          width: c.face_track.width || 0,
+          height: c.face_track.height || 0,
+        };
+      }
+    }
+    if (Object.keys(tracks).length > 0) {
+      setClipFaceTracks((prev) => ({ ...tracks, ...prev }));
+    }
+  }, [clips]);
+
+  // Auto-check if selected clip has a cached face track on backend
+  useEffect(() => {
+    if (!selectedClip || !projectId || clipFaceTracks[selectedClip.id]) return;
+    api.clipAnalyzeFaces(projectId, selectedClip.id).then((r) => {
+      if (r && r.samples && r.samples.length > 0) {
+        setClipFaceTracks((prev) => ({
+          ...prev,
+          [selectedClip.id]: {
+            people: r.people || [],
+            samples: r.samples || [],
+            width: r.width || 0,
+            height: r.height || 0,
+          },
+        }));
+      }
+    }).catch(() => {});
+  }, [selectedClip?.id, projectId]);
+
   // Translate the currently selected clip on demand (when user toggles ES on
   // a clip that doesn't have a cached translation yet). Idempotent — backend
   // returns cached data if already translated.
@@ -3433,6 +3498,8 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     }
   };
 
+  const [appliedToAllSuccess, setAppliedToAllSuccess] = useState(false);
+
   // Drop the selected clip's override → it inherits the project style again.
   const clearOverride = async () => {
     if (!selectedClip) return;
@@ -3441,6 +3508,49 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     loadedStyleRef.current = { ...baseStyleRef.current };
     setStyle({ ...baseStyleRef.current });
   };
+
+  // Apply the current active style (including reframe and fill mode) to ALL clips
+  const handleApplyAllClips = async () => {
+    try {
+      const target = { ...style };
+      baseStyleRef.current = target;
+      applyScopeRef.current = "all";
+      setApplyScope("all");
+      setClipStyleMap({});
+      loadedStyleRef.current = target;
+      await api.updateStyle(projectId, target);
+      if (clips && clips.length > 0) {
+        await Promise.all(clips.map((c) => api.clearClipStyle(projectId, c.id).catch(() => {})));
+      }
+      // Invalidate existing preview cache so changes are visibly rendered
+      const useEs = _useEs();
+      if (videoPreviewUrl && selectedClip) {
+        setLoadingVideo(true);
+        setVideoPreviewUrl(null);
+        setTimeout(() => {
+          setVideoPreviewUrl(useEs
+            ? api.getVideoPreviewEsUrl(projectId, selectedClip.id)
+            : api.getVideoPreviewUrl(projectId, selectedClip.id));
+        }, 50);
+      } else if (previewUrl && selectedClip) {
+        setLoadingPreview(true);
+        const isIg = previewUrl.includes("instagram-preview");
+        setPreviewUrl(null);
+        setTimeout(() => {
+          setPreviewUrl(isIg
+            ? (useEs ? api.getInstagramPreviewEsUrl(projectId, selectedClip.id) : api.getInstagramPreviewUrl(projectId, selectedClip.id))
+            : (useEs ? api.getPreviewEsUrl(projectId, selectedClip.id) : api.getPreviewUrl(projectId, selectedClip.id)));
+          setLoadingPreview(false);
+        }, 50);
+      }
+      setAppliedToAllSuccess(true);
+      setTimeout(() => setAppliedToAllSuccess(false), 3500);
+    } catch (err) {
+      console.error("Failed to apply style to all clips:", err);
+    }
+  };
+
+
 
   // When the scope or the selected clip changes, load the style that scope edits
   // into the panel (project base, or the clip's override if it has one).
@@ -4090,7 +4200,33 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
               value={style.fill_mode_scale ?? 1.0} onChange={(e) => setStyle((s) => ({ ...s, fill_mode_scale: parseFloat(e.target.value) }))}
               onReset={() => setStyle((s) => ({ ...s, fill_mode_scale: 1.0 }))} />
 
-            <div style={{ height: 1, background: "var(--st-line)", margin: "6px 0 18px" }} />
+            <div style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                onClick={handleApplyAllClips}
+                className={`st-btn ${appliedToAllSuccess ? "" : "st-btn--primary"}`}
+                style={{
+                  width: "100%",
+                  justifyContent: "center",
+                  padding: "9px 12px",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  background: appliedToAllSuccess ? "var(--st-ok)" : "var(--st-accent)",
+                  color: appliedToAllSuccess ? "#fff" : "var(--st-on-accent)",
+                  border: appliedToAllSuccess ? "1px solid var(--st-ok)" : "1px solid var(--st-accent)",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {appliedToAllSuccess ? "✓ ¡Aplicado a todos los videos!" : "⚡ Aplicar formato a todos los videos"}
+              </button>
+            </div>
+
+            <div style={{ height: 1, background: "var(--st-line)", margin: "14px 0 18px" }} />
 
             {/* Fondo */}
             <StSection>Fondo</StSection>
@@ -4398,16 +4534,16 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                   {/* Mode picker */}
                   <div style={{ marginBottom: 10 }}>
                     <div style={{ fontSize: 10, color: "var(--st-muted)", marginBottom: 5, fontFamily: "var(--st-mono)", letterSpacing: ".05em" }}>MODO</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
-                      {[["all", "🫂 Todos"], ["biggest", "🔍 Grande"], ["follow", "👤 Manual"]].map(([k, label]) => {
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5 }}>
+                      {[["static", "🔒 Fijo"], ["follow", "👤 Seguir"], ["biggest", "🔍 Grande"], ["all", "🫂 Todos"]].map(([k, label]) => {
                         const active = (style.auto_reframe_mode || "all") === k;
-                        const disabled = k === "follow" && people.length === 0;
+                        const disabled = (k === "follow" || k === "static") && people.length === 0;
                         return (
                           <button key={k}
                             onClick={() => !disabled && setStyle((s) => ({ ...s, auto_reframe_mode: k }))}
                             disabled={disabled}
                             style={{
-                              fontSize: 10.5, padding: "6px 3px",
+                              fontSize: 10, padding: "6px 2px",
                               background: active ? "var(--st-accent)" : "transparent",
                               color: active ? "var(--st-on-accent)" : "var(--st-muted)",
                               border: `1px solid ${active ? "var(--st-accent)" : "var(--st-border)"}`,
@@ -4422,10 +4558,10 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                   {/* Manual pick grid — uses the project's raw video as the
                       thumbnail source, scaled with CSS object-position to
                       crop onto each person's thumb_box. */}
-                  {style.auto_reframe_mode === "follow" && people.length > 0 && (
+                  {(style.auto_reframe_mode === "follow" || style.auto_reframe_mode === "static") && people.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ fontSize: 10, color: "var(--st-muted)", marginBottom: 5, fontFamily: "var(--st-mono)", letterSpacing: ".05em" }}>
-                        ELEGÍ A QUIÉN SEGUIR
+                        {style.auto_reframe_mode === "static" ? "ENFOCAR A (CÁMARA FIJA)" : "ELEGÍ A QUIÉN SEGUIR"}
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
                         {people.slice(0, 9).map((p) => {
@@ -4480,7 +4616,30 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                     onChange={(e) => setStyle((s) => ({ ...s, auto_reframe_zoom: parseInt(e.target.value) / 100 }))}
                     onReset={() => setStyle((s) => ({ ...s, auto_reframe_zoom: 1.0 }))} />
 
-                  <div style={{ marginTop: 10 }}>
+                  <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={handleApplyAllClips}
+                      className={`st-btn ${appliedToAllSuccess ? "" : "st-btn--primary"}`}
+                      style={{
+                        width: "100%",
+                        justifyContent: "center",
+                        padding: "9px 12px",
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        background: appliedToAllSuccess ? "var(--st-ok)" : "var(--st-accent)",
+                        color: appliedToAllSuccess ? "#fff" : "var(--st-on-accent)",
+                        border: appliedToAllSuccess ? "1px solid var(--st-ok)" : "1px solid var(--st-accent)",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      {appliedToAllSuccess ? "✓ ¡Aplicado a todos los videos!" : "⚡ Aplicar este encuadre a todos los videos"}
+                    </button>
                     <button onClick={() => handleAnalyzeClipFaces(cur)} disabled={isAnalyzing}
                       className="st-btn st-btn--ghost"
                       style={{ width: "100%", justifyContent: "center", padding: "7px 0", fontSize: 12 }}>
@@ -11029,20 +11188,21 @@ function EditorMode({ onExit }) {
                         <div style={{ fontSize: 10.5, color: "var(--st-muted)", marginBottom: 6, fontFamily: "var(--st-mono)", letterSpacing: ".06em" }}>
                           MODO
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5 }}>
                           {[
+                            ["static", "🔒 Fijo"],
+                            ["follow", "👤 Seguir"],
+                            ["biggest", "🔍 Grande"],
                             ["all", "🫂 Todos"],
-                            ["biggest", "🔍 Más grande"],
-                            ["follow", "👤 Manual"],
                           ].map(([k, label]) => {
                             const active = reframeMode === k;
-                            const disabled = k === "follow" && facePeople.length === 0;
+                            const disabled = (k === "follow" || k === "static") && facePeople.length === 0;
                             return (
                               <button key={k}
                                 onClick={() => !disabled && setReframeMode(k)}
                                 disabled={disabled}
                                 style={{
-                                  fontSize: 11, padding: "7px 4px",
+                                  fontSize: 10, padding: "6px 2px",
                                   background: active ? "var(--st-accent)" : "transparent",
                                   color: active ? "var(--st-on-accent)" : "var(--st-muted)",
                                   border: `1px solid ${active ? "var(--st-accent)" : "var(--st-border)"}`,
@@ -11055,10 +11215,10 @@ function EditorMode({ onExit }) {
                       </div>
 
                       {/* Manual pick grid */}
-                      {reframeMode === "follow" && facePeople.length > 0 && (
+                      {(reframeMode === "follow" || reframeMode === "static") && facePeople.length > 0 && (
                         <div style={{ marginBottom: 14 }}>
                           <div style={{ fontSize: 10.5, color: "var(--st-muted)", marginBottom: 6, fontFamily: "var(--st-mono)", letterSpacing: ".06em" }}>
-                            ELEGÍ A QUIÉN SEGUIR
+                            {reframeMode === "static" ? "ENFOCAR A (CÁMARA FIJA)" : "ELEGÍ A QUIÉN SEGUIR"}
                           </div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                             {facePeople.slice(0, 9).map((p) => {

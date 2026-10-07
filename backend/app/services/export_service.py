@@ -255,14 +255,20 @@ def export_clip_with_style(
             p0 = shifted[0]
             x0 = max(0, int(p0["cx"] - p0["cw"] / 2))
             y0 = max(0, int(p0["cy"] - p0["ch"] / 2))
-            # The crop already targets the canvas aspect ratio; scaling to W
-            # gives us exactly W×target_h with no letterboxing or extra fit.
-            fg_filter = (
-                f"sendcmd=f={rfm_basename},"
-                f"crop@rfm={p0['cw']}:{p0['ch']}:{x0}:{y0},"
-                f"scale={W}:{target_h}"
-            )
-            print(f"[Export] Clip {clip.id}: auto_reframe ACTIVE — {len(shifted)} crop pts, "
+            # If all points share the same crop position (static mode), skip sendcmd entirely
+            is_static = all(p.get("cx") == shifted[0]["cx"] and p.get("cy") == shifted[0]["cy"] for p in shifted)
+            if is_static:
+                fg_filter = (
+                    f"crop={p0['cw']}:{p0['ch']}:{x0}:{y0},"
+                    f"scale={W}:{target_h}"
+                )
+            else:
+                fg_filter = (
+                    f"sendcmd=f={rfm_basename},"
+                    f"crop@rfm={p0['cw']}:{p0['ch']}:{x0}:{y0},"
+                    f"scale={W}:{target_h}"
+                )
+            print(f"[Export] Clip {clip.id}: auto_reframe ACTIVE — {'STATIC' if is_static else f'{len(shifted)} crop pts'}, "
                   f"mode={getattr(style, 'auto_reframe_mode', 'all')}, "
                   f"smooth={getattr(style, 'auto_reframe_smoothing', 0.85)}")
     elif use_keyframes:

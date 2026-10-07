@@ -746,6 +746,37 @@ async def preview_clip_frame(project_id: str, clip_id: int):
         _epx = getattr(clip, 'edit_pan_x', 0.0)
         _epy = getattr(clip, 'edit_pan_y', 0.0)
 
+    _crop_ov = None
+    if getattr(style, "auto_reframe_enabled", False):
+        ft_file = os.path.join(project.output_dir, f"face_track_{clip_id}.json")
+        if not getattr(clip, "face_track", None) or not clip.face_track.get("samples"):
+            if os.path.exists(ft_file):
+                try:
+                    with open(ft_file, "r", encoding="utf-8") as f:
+                        clip.face_track = json.load(f)
+                except Exception:
+                    pass
+        if getattr(clip, "face_track", None) and clip.face_track.get("samples"):
+            try:
+                from ..services import face_track_service
+                traj = face_track_service.compute_crop_trajectory(
+                    face_track=clip.face_track,
+                    mode=getattr(style, "auto_reframe_mode", "all"),
+                    follow_id=getattr(style, "auto_reframe_follow_id", None),
+                    target_aspect=getattr(style, "aspect_ratio", "9:16"),
+                    padding=float(getattr(style, "auto_reframe_padding", 0.30)),
+                    smoothing=float(getattr(style, "auto_reframe_smoothing", 0.85)),
+                )
+                if traj:
+                    closest_p = min(traj, key=lambda p: abs(p["t"] - timestamp))
+                    cw = closest_p["cw"]
+                    ch = closest_p["ch"]
+                    cx0 = max(0, int(closest_p["cx"] - cw / 2))
+                    cy0 = max(0, int(closest_p["cy"] - ch / 2))
+                    _crop_ov = (cw, ch, cx0, cy0)
+            except Exception as e:
+                print(f"[Preview] Error calculating reframe crop: {e}")
+
     try:
         await asyncio.to_thread(
             video_service.generate_preview_frame,
@@ -786,6 +817,7 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             edit_pan_x=_epx,
             edit_pan_y=_epy,
             fill_mode_scale=getattr(style, 'fill_mode_scale', 1.0),
+            crop_override=_crop_ov,
         )
     except Exception as e:
         import traceback
@@ -832,6 +864,37 @@ async def preview_clip_frame_es(project_id: str, clip_id: int):
         _epx = getattr(clip, 'edit_pan_x', 0.0)
         _epy = getattr(clip, 'edit_pan_y', 0.0)
 
+    _crop_ov = None
+    if getattr(style, "auto_reframe_enabled", False):
+        ft_file = os.path.join(project.output_dir, f"face_track_{clip_id}.json")
+        if not getattr(clip, "face_track", None) or not clip.face_track.get("samples"):
+            if os.path.exists(ft_file):
+                try:
+                    with open(ft_file, "r", encoding="utf-8") as f:
+                        clip.face_track = json.load(f)
+                except Exception:
+                    pass
+        if getattr(clip, "face_track", None) and clip.face_track.get("samples"):
+            try:
+                from ..services import face_track_service
+                traj = face_track_service.compute_crop_trajectory(
+                    face_track=clip.face_track,
+                    mode=getattr(style, "auto_reframe_mode", "all"),
+                    follow_id=getattr(style, "auto_reframe_follow_id", None),
+                    target_aspect=getattr(style, "aspect_ratio", "9:16"),
+                    padding=float(getattr(style, "auto_reframe_padding", 0.30)),
+                    smoothing=float(getattr(style, "auto_reframe_smoothing", 0.85)),
+                )
+                if traj:
+                    closest_p = min(traj, key=lambda p: abs(p["t"] - timestamp))
+                    cw = closest_p["cw"]
+                    ch = closest_p["ch"]
+                    cx0 = max(0, int(closest_p["cx"] - cw / 2))
+                    cy0 = max(0, int(closest_p["cy"] - ch / 2))
+                    _crop_ov = (cw, ch, cx0, cy0)
+            except Exception as e:
+                print(f"[Preview] Error calculating reframe crop: {e}")
+
     try:
         await asyncio.to_thread(
             video_service.generate_preview_frame,
@@ -872,6 +935,7 @@ async def preview_clip_frame_es(project_id: str, clip_id: int):
             edit_pan_x=_epx,
             edit_pan_y=_epy,
             fill_mode_scale=getattr(style, 'fill_mode_scale', 1.0),
+            crop_override=_crop_ov,
         )
     except Exception as e:
         import traceback
@@ -912,6 +976,28 @@ async def preview_clip_video(project_id: str, clip_id: int):
     # "Play clip" show the actual reframed output. Slower than the regular
     # preview (preset=fast vs ultrafast) but it's the only way to render
     # the dynamic crop correctly here.
+    # Auto-reframe routing: when auto_reframe is enabled, ensure clip.face_track is loaded
+    if getattr(style, "auto_reframe_enabled", False):
+        if not getattr(clip, "face_track", None) or not clip.face_track.get("samples"):
+            ft_file = os.path.join(project.output_dir, f"face_track_{clip_id}.json")
+            if os.path.exists(ft_file):
+                try:
+                    with open(ft_file, "r", encoding="utf-8") as f:
+                        clip.face_track = json.load(f)
+                except Exception:
+                    pass
+            if not getattr(clip, "face_track", None) or not clip.face_track.get("samples"):
+                print(f"[Preview] Auto-computing face_track for clip {clip_id}...")
+                try:
+                    clip.face_track = await asyncio.to_thread(
+                        face_track_service.analyze_clip,
+                        project.video_path, float(clip.start_time), float(clip.end_time), 5.0
+                    )
+                    with open(ft_file, "w", encoding="utf-8") as f:
+                        json.dump(clip.face_track, f)
+                except Exception as e:
+                    print(f"[Preview] Face auto-compute failed: {e}")
+
     _has_cuts = bool(getattr(clip, "segments", None))
     _needs_full_pipeline = (
         _has_cuts
@@ -1304,6 +1390,27 @@ async def clip_analyze_faces(project_id: str, clip_id: int):
     if clip.end_time - clip.start_time < 0.5:
         raise HTTPException(status_code=400, detail="Clip range too short")
 
+    ft_file = os.path.join(project.output_dir, f"face_track_{clip_id}.json")
+    if not getattr(clip, "face_track", None) and os.path.exists(ft_file):
+        try:
+            with open(ft_file, "r", encoding="utf-8") as f:
+                clip.face_track = json.load(f)
+        except Exception:
+            pass
+
+    if getattr(clip, "face_track", None) and clip.face_track.get("samples"):
+        face_track = clip.face_track
+        return {
+            "status": "ok",
+            "sample_count": len(face_track.get("samples", [])),
+            "people": face_track.get("people", []),
+            "width": face_track.get("width"),
+            "height": face_track.get("height"),
+            "start_time": face_track.get("start_time"),
+            "end_time": face_track.get("end_time"),
+            "samples": face_track.get("samples", []),
+        }
+
     try:
         face_track = await asyncio.to_thread(
             face_track_service.analyze_clip,
@@ -1318,6 +1425,12 @@ async def clip_analyze_faces(project_id: str, clip_id: int):
         raise HTTPException(status_code=500, detail=f"Face analysis failed: {str(e)}")
 
     clip.face_track = face_track
+    try:
+        ft_file = os.path.join(project.output_dir, f"face_track_{clip_id}.json")
+        with open(ft_file, "w", encoding="utf-8") as f:
+            json.dump(face_track, f)
+    except Exception as e:
+        print(f"Failed to cache face_track to disk: {e}")
     return {
         "status": "ok",
         "sample_count": len(face_track.get("samples", [])),

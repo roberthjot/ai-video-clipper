@@ -101,7 +101,17 @@ async def get_project(project_id: str):
     """Get project details."""
     if project_id not in projects:
         raise HTTPException(status_code=404, detail="Project not found")
-    return projects[project_id]
+    p = projects[project_id]
+    for c in p.clips:
+        if not getattr(c, "face_track", None):
+            ft_file = os.path.join(p.output_dir, f"face_track_{c.id}.json")
+            if os.path.exists(ft_file):
+                try:
+                    with open(ft_file, "r", encoding="utf-8") as f:
+                        c.face_track = json.load(f)
+                except Exception:
+                    pass
+    return p
 
 
 @router.patch("/projects/{project_id}/creator")
