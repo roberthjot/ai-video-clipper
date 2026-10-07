@@ -1,6 +1,6 @@
 import os
 import uuid
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -121,7 +121,7 @@ async def process_memes(
     text_x: float = Form(0.05),
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
-    font_size: int = Form(60),
+    font_size: int = Form(55),
     content_type: str = Form("meme"),
     crop_top_pct: float = Form(0.0),
     crop_bottom_pct: float = Form(0.0),
@@ -185,6 +185,15 @@ async def process_memes(
                                  crop_left_pct=crop_left_pct, crop_right_pct=crop_right_pct,
                                  gemini_model=(gemini_model or None))
     return {"batch_id": batch_id, "count": len(video_paths)}
+
+
+@router.post("/import-batch")
+async def import_meme_batch(payload: dict = Body(...)):
+    """Directly register a ready meme batch without Gemini calls."""
+    from ..services.meme_service import meme_batches
+    batch_id = payload.get("batch_id") or uuid.uuid4().hex[:12]
+    meme_batches[batch_id] = payload
+    return {"batch_id": batch_id, "status": payload.get("status", "completed")}
 
 
 @router.get("/status/{batch_id}")
@@ -269,7 +278,7 @@ async def reexport_meme(
     text_x: float = Form(0.05),
     video_scale: float = Form(0.9),
     video_y: float = Form(0.6),
-    font_size: int = Form(60),
+    font_size: int = Form(55),
     custom_text: str = Form(""),
     crop_top_pct: float = Form(0.0),
     crop_bottom_pct: float = Form(0.0),
@@ -278,7 +287,7 @@ async def reexport_meme(
     corner_radius: int = Form(0),
     # ── Extended controls (meme editor parity) — all optional ─────────────
     bg_mode: str = Form("color"),              # "color" | "blur"
-    font_family: str = Form("calibri"),
+    font_family: str = Form("arial"),
     text_color: str = Form(""),
     stroke_color: str = Form(""),
     stroke_width: int = Form(0),
@@ -288,7 +297,7 @@ async def reexport_meme(
     mirror_cyclic_enabled: bool = Form(False),
     mirror_cyclic_interval: float = Form(5.0),
     boost_contrast: bool = Form(False),
-    text_align: str = Form("left"),
+    text_align: str = Form("center"),
 ):
     """Re-export a meme with updated settings (no Gemini call). Supports crop +
     rounded corners + the extended editor controls (font/color/stroke, blur
@@ -436,8 +445,8 @@ async def preview_background(batch_id: str, index: int, bust: int = 0):
             cfg.get("bg_color", "black"),
             text_y=float(cfg.get("text_y", 0.08)), text_x=float(cfg.get("text_x", 0.05)),
             video_scale=float(cfg.get("video_scale", 0.9)), video_y=float(cfg.get("video_y", 0.6)),
-            font_size=int(cfg.get("font_size", 60)), corner_radius=int(cfg.get("corner_radius", 0)),
-            bg_mode=cfg.get("bg_mode", "color"), font_family=cfg.get("font_family", "calibri"),
+            font_size=int(cfg.get("font_size", 55)), corner_radius=int(cfg.get("corner_radius", 0)),
+            bg_mode=cfg.get("bg_mode", "color"), font_family=cfg.get("font_family", "arial"),
             text_color=cfg.get("text_color", ""), stroke_color=cfg.get("stroke_color", ""),
             stroke_width=int(cfg.get("stroke_width", 0)),
             visual_filter=cfg.get("visual_filter", "none"),
@@ -445,7 +454,7 @@ async def preview_background(batch_id: str, index: int, bust: int = 0):
             mirror_cyclic_enabled=bool(cfg.get("mirror_cyclic_enabled", False)),
             mirror_cyclic_interval=float(cfg.get("mirror_cyclic_interval", 5.0)),
             boost_contrast=bool(cfg.get("boost_contrast", False)),
-            text_align=cfg.get("text_align", "left"),
+            text_align=cfg.get("text_align", "center"),
             with_text=False,
         )
         return FileResponse(bg_path, media_type="video/mp4")

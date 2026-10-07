@@ -1,8 +1,30 @@
-# 🎬 AI Video Clipper v9.6
+# 🎬 AI Video Clipper v10.0
 
-An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos — styled like CapCut/TikTok clips with a dedicated Instagram export mode and a Meme Generator.
+An intelligent, full-stack web application that automatically identifies, extracts, and edits viral-worthy moments from long videos — styled like CapCut/TikTok clips with a dedicated Instagram export mode, a Meme Generator, and a Music Vibe extractor.
 
-**Powered by:** Google Gemini 2.5 Pro + FFmpeg + PIL
+**Powered by:** Faster-Whisper + Intel QSV + Google Gemini 2.5 + FFmpeg + PIL
+
+---
+
+## ⚡ Performance & Engine Optimizations (v10.0)
+
+- **🚀 Ultra-Fast Local Whisper Transcription**:
+  - Powered by `faster-whisper` optimized with multi-threading (`cpu_threads=8`), greedy decoding (`beam_size=1`), and Voice Activity Detection (`vad_filter=True`).
+  - Transcribes 15+ minute raw videos in ~90 seconds locally with zero cloud API latency or quota limits.
+- **🏎️ Intel Quick Sync Video (QSV) Hardware Acceleration**:
+  - Parallel batch exports using `h264_qsv` with a 3-worker thread pool (`ThreadPoolExecutor(max_workers=3)`).
+  - Renders 10 Full HD 1080×1920 vertical videos with dynamic background blur, auto-crop, and animated subtitles in under 3.5 minutes (~20 seconds per video).
+- **🔌 Direct Ingestion APIs**:
+  - `POST /api/import-preanalyzed`: Instant project injection bypassing cloud API token saturation and 429 rate limits.
+  - `POST /api/meme/import-batch`: Direct registration of pre-analyzed meme and music vibe batches.
+- **🔗 Deep URL Routing**:
+  - Direct project loading via `http://localhost:5173/?project=<PROJECT_ID>`.
+  - Direct meme/music batch loading via `http://localhost:5173/?mode=meme&batch=<BATCH_ID>`.
+- **🎯 Standardized Meme & Music Vibe Presets**:
+  - Default font: **Arial (meme)** (`arial.ttf`).
+  - Default alignment: **Centro** (`center`).
+  - Default font size: **55px**.
+  - Strict formatting rules: **Sentence case** enforcement, 3rd-person viral hooks, and zero emojis.
 
 ---
 

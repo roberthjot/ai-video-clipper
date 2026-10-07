@@ -6488,12 +6488,13 @@ const MEME_PRESETS = [
 // ================================================
 // MEME ITEM CARD
 // ================================================
-function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalCropTopPct = 0, globalCropBottomPct = 0, globalCropLeftPct = 0, globalCropRightPct = 0, globalCornerRadius = 0, globalTextAlign = "left" }) {
-  const [textY, setTextY] = useState(0.22);
-  const [textX, setTextX] = useState(0.05);
-  const [videoY, setVideoY] = useState(0.55);
-  const [videoScale, setVideoScale] = useState(0.9);
-  const [fontSize, setFontSize] = useState(60);
+function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalCropTopPct = 0, globalCropBottomPct = 0, globalCropLeftPct = 0, globalCropRightPct = 0, globalCornerRadius = 0, globalTextAlign = "center" }) {
+  const lastExp = item?.last_export || {};
+  const [textY, setTextY] = useState(() => (lastExp.text_y !== undefined ? lastExp.text_y : 0.10));
+  const [textX, setTextX] = useState(() => (lastExp.text_x !== undefined ? lastExp.text_x : 0.05));
+  const [videoY, setVideoY] = useState(() => (lastExp.video_y !== undefined ? lastExp.video_y : 0.58));
+  const [videoScale, setVideoScale] = useState(() => (lastExp.video_scale !== undefined ? lastExp.video_scale : 0.9));
+  const [fontSize, setFontSize] = useState(() => (lastExp.font_size !== undefined ? lastExp.font_size : 55));
   const [cropTopPct, setCropTopPct] = useState(0);
   const [cropBottomPct, setCropBottomPct] = useState(0);
   const [cropLeftPct, setCropLeftPct] = useState(0);
@@ -6509,17 +6510,12 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
   const [customText, setCustomText] = useState("");
 
   // ── Extended editor controls (parity with Visual Editor) ───────────────
-  // All default to "preserve the old meme look" so cards that never open
-  // the Ajustes panel come out identical to before.
-  const [bgMode, setBgMode] = useState("color");          // "color" | "blur"
-  const [fontFamily, setFontFamily] = useState("calibri");
-  const [textColor, setTextColor] = useState("");         // "" = derive from bg
-  const [strokeColor, setStrokeColor] = useState("#000000");
-  const [strokeWidth, setStrokeWidth] = useState(0);
-  // Text horizontal alignment — "left" preserves the legacy meme look,
-  // "center" is what most users actually want for memes. Default left here
-  // so existing cards don't shift; the picker lets the user switch.
-  const [textAlign, setTextAlign] = useState("left");     // "left" | "center" | "right"
+  const [bgMode, setBgMode] = useState(() => lastExp.bg_mode || "color");
+  const [fontFamily, setFontFamily] = useState(() => lastExp.font_family || "arial");
+  const [textColor, setTextColor] = useState(() => lastExp.text_color || "");
+  const [strokeColor, setStrokeColor] = useState(() => lastExp.stroke_color || "#000000");
+  const [strokeWidth, setStrokeWidth] = useState(() => lastExp.stroke_width || 0);
+  const [textAlign, setTextAlign] = useState(() => lastExp.text_align || "center");
   const [visualFilter, setVisualFilter] = useState("none");
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
@@ -6896,9 +6892,9 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
 {(() => {
               const displayText = (customText && customText !== item.meme_text) ? customText : (item.meme_text || "");
               if (!displayText) return null;
-              const isLeft = (textAlign || "left") === "left";
-              const isCenter = (textAlign || "left") === "center";
-              const isRight = (textAlign || "left") === "right";
+              const isLeft = (textAlign || "center") === "left";
+              const isCenter = (textAlign || "center") === "center";
+              const isRight = (textAlign || "center") === "right";
               // CSS font stacks mirroring the backend font map keys.
               const fontMap = {
                 calibri: "Calibri, 'Segoe UI', sans-serif",
@@ -6911,7 +6907,7 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
               };
               // The baked text is font_size px in a 1080px-wide canvas → in
               // container-query % units: fontSize / 1080 * 100.
-              const fsCqw = (fontSize || 60) / 1080 * 100;
+              const fsCqw = (fontSize || 55) / 1080 * 100;
               const fillC = textColor || (bgMode === "blur" ? "rgba(255,255,255,.92)" : "#ffffff");
               const hasStroke = (strokeWidth || 0) > 0;
               const strokeClr = strokeColor || "#000000";
@@ -6949,12 +6945,13 @@ function MemeItemCard({ item, batchId, index, statusLabel, globalPreset, globalC
                   <div style={{
                     fontSize: `${fsCqw}cqw`,
                     lineHeight: 1.35,
-                    fontFamily: fontMap[fontFamily] || fontMap.calibri,
+                    fontFamily: fontMap[fontFamily] || fontMap.arial,
                     fontWeight: fontFamily === "arial_black" || fontFamily === "impact" ? 800 : 700,
                     color: fillC,
                     whiteSpace: "pre-wrap",
                     overflowWrap: "anywhere",
                     userSelect: "none",
+                    textAlign: isCenter ? "center" : isRight ? "right" : "left",
                     textShadow: hasStroke
                       ? `-1px -1px 0 ${strokeClr}, 1px -1px 0 ${strokeClr}, -1px 1px 0 ${strokeClr}, 1px 1px 0 ${strokeClr}`
                       : "none",
@@ -7192,7 +7189,7 @@ function MemeStep() {
   const [contentType, setContentType] = useState("meme");
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
-  const [batchId, setBatchId] = useState(null);
+  const [batchId, setBatchId] = useState(() => new URLSearchParams(window.location.search).get("batch") || null);
   const [batch, setBatch] = useState(null);
   const [error, setError] = useState("");
   const [showGlobalSliders, setShowGlobalSliders] = useState(false);
@@ -7200,14 +7197,14 @@ function MemeStep() {
   const [gTextX, setGTextX] = useState(0.05);
   const [gVideoY, setGVideoY] = useState(0.55);
   const [gVideoScale, setGVideoScale] = useState(0.9);
-  const [gFontSize, setGFontSize] = useState(65);
+  const [gFontSize, setGFontSize] = useState(55);
   // Extended global controls (apply to all)
   const [gBgMode, setGBgMode] = useState("color");
-  const [gFontFamily, setGFontFamily] = useState("calibri");
+  const [gFontFamily, setGFontFamily] = useState("arial");
   const [gTextColor, setGTextColor] = useState("");
-  const [gStrokeColor, setGStrokeColor] = useState("#000000");
-  const [gStrokeWidth, setGStrokeWidth] = useState(0);
-  const [gTextAlign, setGTextAlign] = useState("left"); // "left" | "center" | "right"
+  const [gStrokeColor, setStrokeColor] = useState("#000000");
+  const [gStrokeWidth, setStrokeWidth] = useState(0);
+  const [gTextAlign, setGTextAlign] = useState("center"); // "left" | "center" | "right"
   const [gVisualFilter, setGVisualFilter] = useState("none");
   const [gMirrorCyclic, setGMirrorCyclic] = useState(false);
   const [gBoostContrast, setGBoostContrast] = useState(false);
@@ -11492,6 +11489,10 @@ function App() {
           setStep(2);
         }
       }).catch((err) => console.error("Could not load project:", err));
+    }
+    const m = params.get("mode");
+    if (m === "meme" || params.get("batch")) {
+      setMode("meme");
     }
   }, []);
 

@@ -256,11 +256,11 @@ def _hex_to_rgb(h: str, fallback=(255, 255, 255)) -> tuple:
 
 
 def create_meme_bg_png(text: str, bg_color: str = "black", W: int = 1080, H: int = 1920,
-                        text_y_ratio: float = 0.08, font_size: int = 60, text_x_ratio: float = 0.05,
-                        font_family: str = "calibri", text_color: str = "",
+                        text_y_ratio: float = 0.08, font_size: int = 55, text_x_ratio: float = 0.05,
+                        font_family: str = "arial", text_color: str = "",
                         stroke_color: str = "", stroke_width: int = 0,
                         transparent: bool = False,
-                        text_align: str = "left") -> tuple:
+                        text_align: str = "center") -> tuple:
     """Create meme background PNG: solid color + meme text at given Y ratio.
 
     When `transparent=True`, returns an RGBA image with ONLY the text painted
@@ -370,11 +370,11 @@ _MEME_VISUAL_FILTERS = {
 def export_meme_video(video_path: str, meme_text: str, output_path: str,
                       bg_color: str = "black", text_y: float = 0.08,
                       video_scale: float = 0.9, video_y: float = 0.6,
-                      font_size: int = 60, text_x: float = 0.05,
+                      font_size: int = 55, text_x: float = 0.05,
                       corner_radius: int = 0,
                       # New v2 controls — all default to "preserve old behaviour"
                       bg_mode: str = "color",            # "color" | "blur"
-                      font_family: str = "calibri",
+                      font_family: str = "arial",
                       text_color: str = "",
                       stroke_color: str = "",
                       stroke_width: int = 0,
@@ -384,7 +384,7 @@ def export_meme_video(video_path: str, meme_text: str, output_path: str,
                       mirror_cyclic_enabled: bool = False,
                       mirror_cyclic_interval: float = 5.0,
                       boost_contrast: bool = False,
-                      text_align: str = "left",
+                      text_align: str = "center",
                       with_text: bool = True,
                       ) -> None:
     """Export full video (no cuts) overlaid on meme background.
@@ -668,8 +668,9 @@ def _process_one_item(batch_id, i, video_path, bg_color, text_y, video_scale, vi
             "video_scale": video_scale, "video_y": video_y,
             "font_size": font_size,
             "corner_radius": 0,
-            "bg_mode": "color", "font_family": "calibri",
+            "bg_mode": "color", "font_family": "arial",
             "text_color": "", "stroke_color": "", "stroke_width": 0,
+            "text_align": "center",
             "visual_filter": "none",
             "trim_start": 0.0, "trim_end": 0.0,
             "mirror_cyclic_enabled": False, "mirror_cyclic_interval": 5.0,
@@ -688,7 +689,7 @@ def _process_one_item(batch_id, i, video_path, bg_color, text_y, video_scale, vi
 
 def start_meme_batch(video_paths: list, filenames: list, bg_color: str = "black",
                      text_y: float = 0.08, video_scale: float = 0.9, video_y: float = 0.6,
-                     font_size: int = 60, text_x: float = 0.05, content_type: str = "meme",
+                     font_size: int = 55, text_x: float = 0.05, content_type: str = "meme",
                      crop_top_pct: float = 0.0, crop_bottom_pct: float = 0.0,
                      crop_left_pct: float = 0.0, crop_right_pct: float = 0.0,
                      gemini_model: str = None) -> str:
