@@ -11474,6 +11474,27 @@ function App() {
   const [clips, setClips] = useState([]);
   const [filename, setFilename] = useState("");
 
+  useEffect(() => {
+    // Support loading project directly via ?project=ID or /clips/ID
+    const params = new URLSearchParams(window.location.search);
+    let pid = params.get("project");
+    if (!pid) {
+      const match = window.location.pathname.match(/\/clips\/([a-zA-Z0-9]+)/);
+      if (match) pid = match[1];
+    }
+    if (pid) {
+      api.getProject(pid).then((p) => {
+        if (p && p.clips && p.clips.length > 0) {
+          setProjectId(p.id);
+          setClips(p.clips);
+          setFilename(p.video_filename);
+          setMode("video");
+          setStep(2);
+        }
+      }).catch((err) => console.error("Could not load project:", err));
+    }
+  }, []);
+
   const handleUploadComplete = ({ projectId, clips, filename }) => {
     setProjectId(projectId);
     setClips(clips);
