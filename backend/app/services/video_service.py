@@ -1320,10 +1320,17 @@ def create_text_caption_overlay(lines: list, variant: str = "clean",
                 tokens.append({"text": word, "color": color, "br": False})
 
     word_tokens = [t for t in tokens if not t["br"]]
-    if title_case and word_tokens:
-        new_texts = _smart_title_words([t["text"] for t in word_tokens])
-        for t, nt in zip(word_tokens, new_texts):
-            t["text"] = nt
+    if word_tokens:
+        first_word = True
+        for t in word_tokens:
+            txt = t["text"]
+            if not txt:
+                continue
+            if first_word:
+                t["text"] = txt[:1].upper() + txt[1:].lower()
+                first_word = False
+            else:
+                t["text"] = txt.lower()
 
     # 'yellow' variant: color the LAST text-bearing word yellow.
     if variant == "yellow":
