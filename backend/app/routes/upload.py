@@ -158,7 +158,7 @@ async def import_preanalyzed(payload: dict):
         raise HTTPException(status_code=400, detail="Invalid video_path")
 
     filename = os.path.basename(video_path)
-    project_id = str(uuid.uuid4())[:8]
+    project_id = (payload.get("project_id") or "").strip() or str(uuid.uuid4())[:8]
     output_dir = os.path.join(settings.PROJECTS_DIR, project_id)
     os.makedirs(output_dir, exist_ok=True)
 
