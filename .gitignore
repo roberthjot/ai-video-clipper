@@ -67,3 +67,6 @@ Thumbs.db
 _blaze_face.tflite
 backend/_blaze_face.tflite
 backend/app/services/_blaze_face.tflite
+
+# Scratch scripts
+scratch/

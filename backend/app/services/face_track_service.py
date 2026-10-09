@@ -60,7 +60,7 @@ def _get_detector() -> vision.FaceDetector:
                 opts = vision.FaceDetectorOptions(
                     base_options=mp_tasks.BaseOptions(model_asset_path=model_path),
                     running_mode=vision.RunningMode.IMAGE,
-                    min_detection_confidence=0.35,
+                    min_detection_confidence=0.45,
                 )
                 _detector = vision.FaceDetector.create_from_options(opts)
                 print("[face_track] detector initialized")
@@ -71,7 +71,7 @@ _detector_quad: Optional[vision.FaceDetector] = None
 
 
 def _get_detector_quad() -> vision.FaceDetector:
-    """Lazy-init a sensitive detector for small faces in wide shots (confidence 0.28)."""
+    """Lazy-init a sensitive detector for small faces in wide shots (confidence 0.42)."""
     global _detector_quad
     if _detector_quad is None:
         with _detector_lock:
@@ -80,7 +80,7 @@ def _get_detector_quad() -> vision.FaceDetector:
                 opts = vision.FaceDetectorOptions(
                     base_options=mp_tasks.BaseOptions(model_asset_path=model_path),
                     running_mode=vision.RunningMode.IMAGE,
-                    min_detection_confidence=0.28,
+                    min_detection_confidence=0.42,
                 )
                 _detector_quad = vision.FaceDetector.create_from_options(opts)
     return _detector_quad
@@ -411,7 +411,14 @@ def compute_crop_trajectory(
         elif mode == "biggest":
             faces = _biggest_face(sample)
         else:
-            faces = sample.get("faces", [])
+            # Mode "all": only include faces with robust confidence (>= 0.40)
+            # to prevent background shadow artifacts from shifting the camera
+            all_f = sample.get("faces", [])
+            faces = [f for f in all_f if f.get("confidence", 1.0) >= 0.40]
+            if not faces and all_f:
+                # If only weak detections exist, pick the one closest to current camera
+                # instead of pulling the camera towards distant background noise
+                faces = [min(all_f, key=lambda f: math.hypot((f["x"] + f["w"]/2.0) - last_cx, (f["y"] + f["h"]/2.0) - last_cy))]
 
         if not faces:
             miss_streak += 1
@@ -424,20 +431,19 @@ def compute_crop_trajectory(
         miss_streak = 0
 
         # If multiple faces are detected, check if they are too far apart to fit in a 9:16 frame.
-        # If their horizontal span exceeds what a vertical crop can show, averaging them
-        # will disastrously center the camera on the empty space/furniture between them.
+        # If their horizontal span exceeds what a vertical crop can comfortably show,
+        # never average them (averaging puts the camera on empty space/furniture between them).
         if len(faces) > 1:
             span_x = max(f["x"] + f["w"] for f in faces) - min(f["x"] for f in faces)
-            if span_x > (H * target_ar * 1.05):
+            usable_w = (H * target_ar) * 0.90
+            if span_x > usable_w:
                 if follow_id is not None:
                     matching = [f for f in faces if f.get("id") == follow_id]
                     faces = matching if matching else [max(faces, key=lambda f: f["w"] * f["h"])]
-                elif last_cx < W * 0.45:
-                    faces = [min(faces, key=lambda f: f["x"])]
-                elif last_cx > W * 0.55:
-                    faces = [max(faces, key=lambda f: f["x"])]
                 else:
-                    faces = [max(faces, key=lambda f: f["w"] * f["h"])]
+                    # Pick the face closest to where the camera already was (continuity)
+                    # or the largest face if first frame
+                    faces = [min(faces, key=lambda f: math.hypot((f["x"] + f["w"]/2.0) - last_cx, (f["y"] + f["h"]/2.0) - last_cy))]
 
         # Union bbox of selected faces.
         x1 = min(f["x"] for f in faces)
@@ -480,33 +486,26 @@ def compute_crop_trajectory(
         cx = (x1p + x2p) / 2.0
         cy = (y1p + y2p) / 2.0
 
-        # Anti-Dead-Zone Rule:
-        # In a horizontal 16:9 frame of a podcast/interview, the area [0.42*W, 0.58*W] is the empty space between chairs.
-        # If multiple faces were detected or any face was detected on the outer chairs (x < 0.45*W or x > 0.55*W),
-        # NEVER center the camera in this dead zone!
-        all_s_faces = sample.get("faces", [])
-        has_outer_face = any(f["x"] < 0.45 * W or (f["x"] + f["w"]) > 0.55 * W for f in all_s_faces)
-        if (len(all_s_faces) > 1 or has_outer_face) and (0.42 * W < cx < 0.58 * W):
-            left_f = [f for f in all_s_faces if (f["x"] + f["w"] / 2.0) < 0.48 * W]
-            right_f = [f for f in all_s_faces if (f["x"] + f["w"] / 2.0) > 0.52 * W]
-            if follow_id is not None and any(f.get("id") == follow_id for f in left_f):
-                chosen = left_f[0]
-                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
-            elif follow_id is not None and any(f.get("id") == follow_id for f in right_f):
-                chosen = right_f[0]
-                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
-            elif left_f and last_cx < 0.5 * W:
-                chosen = left_f[0]
-                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
-            elif right_f and last_cx > 0.5 * W:
-                chosen = right_f[0]
-                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
-            elif left_f:
-                chosen = left_f[0]
-                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
-            elif right_f:
-                chosen = right_f[0]
-                cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+        # Anti-Dead-Zone Rule (Two-person setups / podcasts):
+        # Only applies when there are CONFIRMED faces on both left and right sides
+        # (to prevent centering between two chairs). Never activates on single-speaker shots!
+        strong_faces = [f for f in sample.get("faces", []) if f.get("confidence", 1.0) >= 0.40]
+        if len(strong_faces) >= 2:
+            left_f = [f for f in strong_faces if (f["x"] + f["w"] / 2.0) < 0.45 * W]
+            right_f = [f for f in strong_faces if (f["x"] + f["w"] / 2.0) > 0.55 * W]
+            if left_f and right_f and (0.45 * W < cx < 0.55 * W):
+                if follow_id is not None and any(f.get("id") == follow_id for f in left_f):
+                    chosen = left_f[0]
+                    cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+                elif follow_id is not None and any(f.get("id") == follow_id for f in right_f):
+                    chosen = right_f[0]
+                    cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+                elif last_cx < 0.5 * W:
+                    chosen = left_f[0]
+                    cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
+                else:
+                    chosen = right_f[0]
+                    cx, cy = chosen["x"] + chosen["w"] / 2.0, chosen["y"] + chosen["h"] / 2.0
 
         # Re-clamp the center so the crop doesn't poke outside the source.
         cx = max(cw / 2, min(W - cw / 2, cx))
