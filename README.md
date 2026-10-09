@@ -35,8 +35,15 @@ An intelligent, full-stack web application that automatically identifies, extrac
 - **✂️ Smart Clipping**: Extracts clips with precise timestamps and AI-generated captions. Deduplication prevents the same moment from appearing twice.
 - **🎞️ Live Preview**: Play generated clips in the browser with full styling applied before exporting.
 - **📊 Real-time Progress**: Live status bars for upload, analysis, and export.
-- **📱 9:16 Vertical Format**: Auto-crops and scales to vertical format for TikTok, Reels, and Shorts.
+- **📱 9:16 Vertical Format & Auto-Encuadre**: Auto-crop dinámico mediante MediaPipe BlazeFace. Mantiene al hablante centrado en pantalla vertical con suavidad configurable, ajuste de aire (headroom), protección contra desviaciones a objetos del fondo (anti-drift) y lógica anti-espacio muerto para podcasts.
 - **📄 IG Description per clip**: Gemini generates a 3-4 paragraph Instagram post caption + 12-15 hashtags per clip, saved to `clips_info.txt`.
+
+### 🎯 Auto-Encuadre Inteligente (Face Tracking 9:16)
+- **🧠 Detección Robusta con MediaPipe**: BlazeFace optimizado con filtrado de confianza (`0.45` / `0.42`), descartando sombras, cuadros o muebles del fondo.
+- **🚫 Protección Anti-Drift**: Evita que la cámara se desplace hacia objetos estáticos o falsos positivos.
+- **🎙️ Regla Anti-Dead-Zone Inteligente**: Detecta automáticamente si la escena es un podcast/entrevista con múltiples personas en extremos opuestos para evitar encuadrar el espacio vacío entre sillas, manteniéndose fijo en el presentador en tomas individuales.
+- **🎛️ Controles de Suavidad y Aire**: Deslizadores para regular la latencia de seguimiento y el margen superior (headroom) sobre la cabeza.
+- **⚡ Aplicación Masiva**: Botón de un solo clic para calcular y aplicar el encuadre facial en todos los clips del proyecto a la vez.
 
 ### TikTok Export
 - **🎨 CapCut-Style Overlay**: White rounded box (r=14) with black **Calibri Bold** font (72px), PIL-rendered — no FFmpeg drawtext, apostrophes fully supported.

@@ -1,5 +1,16 @@
 # AI Video Clipper — Changelog
 
+## 🎯 Corrección de Auto-Encuadre (Anti-Drift & Robust Face Tracking)
+
+- **🚫 Eliminación de falsos positivos en el fondo (Anti-Drift)**:
+  - Se incrementaron los umbrales mínimos de confianza de detección de MediaPipe BlazeFace a `0.45` en el detector principal y `0.42` en el detector de planos abiertos (previamente `0.35` y `0.28`).
+  - En el cálculo de trayectoria (`compute_crop_trajectory` en modo `"all"`), se descartan detecciones espurias con confianza `< 0.40`. Esto previene que muebles, impresoras, cuadros o sombras en la pared desplacen la cámara fuera del presentador.
+- **🎙️ Regla Anti-Dead-Zone inteligente (Podcasts vs. Hablante Único)**:
+  - La lógica de división de encuadre en zonas muertas ahora exige estrictamente la presencia de **al menos 2 rostros reales confirmados** (`confidence >= 0.40`) situados en costados opuestos del plano (`< 0.45*W` y `> 0.55*W`).
+  - En videos con un único hablante o planos cerrados, la cámara se mantiene firmemente centrada en la persona sin saltos repentinos al vacío.
+- **📐 Suavidad y continuidad de cámara**:
+  - En presencia de múltiples candidatos o separaciones mayores al límite 9:16 vertical, el algoritmo prioriza la cara más cercana a la posición previa de la cámara (`last_cx`, `last_cy`), garantizando un paneo suave y continuo sin saltos bruscos.
+
 ## ⚡ Auto-encuadre masivo y optimización de clips
 
 - **⚡ Aplicar este encuadre a todos los videos**:
