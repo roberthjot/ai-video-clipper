@@ -1,5 +1,15 @@
 # AI Video Clipper — Changelog
 
+## ⚡ Auto-encuadre masivo y optimización de clips
+
+- **⚡ Aplicar este encuadre a todos los videos**:
+  - Implementado endpoint `POST /api/clips/{project_id}/analyze-all-faces` para procesar en lote las caras y trayectorias de todos los clips que aún no cuenten con análisis de MediaPipe.
+  - Actualizado el botón en la interfaz (`App.jsx`) con estado de carga y procesamiento reactivo (`⏳ Analizando y aplicando a todos los videos...`), sincronizando las caras y asegurando que todos los clips reciban el badge 🎯 y el encuadre activo sin pasos manuales.
+  - Persistencia y rehidratación de `face_track_{id}.json` mejorada en backend al consultar proyectos.
+- **🌐 Ingesta de clips y audios**:
+  - Manejo de pistas de audio originales en inglés evitando selecciones de doblajes no deseados en descargas de YouTube.
+  - Formateo estricto de textos y hooks en tercera persona para optimización de contenido viral.
+
 ## ✨ Nuevo modelo Gemini 3.8 Flash
 
 - Agregado `gemini-3.8-flash` (GA Sep 2026) a la whitelist del backend

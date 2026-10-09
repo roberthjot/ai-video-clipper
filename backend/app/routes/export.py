@@ -1,6 +1,7 @@
 import os
 import shutil
 import uuid
+import json
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse
 from ..models.clip import StyleConfig
@@ -128,8 +129,17 @@ async def update_style(project_id: str, style: StyleConfig):
         style.music_path = project.style.music_path
 
     project.style = style
+    _save_project_to_disk(project)
     return {"status": "updated", "style": style.model_dump()}
 
+
+def _save_project_to_disk(project):
+    try:
+        json_path = os.path.join(project.output_dir, "project_data.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(project.model_dump(), f, indent=2)
+    except Exception as e:
+        print(f"Error saving project_data.json: {e}")
 
 
 @router.put("/style/{project_id}/{clip_id}")
@@ -151,6 +161,7 @@ async def update_clip_style(project_id: str, clip_id: int, style: StyleConfig):
         style.split_image_path = project.style.split_image_path
 
     clip.style_override = style
+    _save_project_to_disk(project)
     return {"status": "updated", "clip_id": clip_id}
 
 
@@ -165,6 +176,7 @@ async def clear_clip_style(project_id: str, clip_id: int):
     if clip is None:
         raise HTTPException(status_code=404, detail="Clip not found")
     clip.style_override = None
+    _save_project_to_disk(project)
     return {"status": "cleared", "clip_id": clip_id}
 
 

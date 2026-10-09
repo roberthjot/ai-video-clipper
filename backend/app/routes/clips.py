@@ -1,6 +1,7 @@
 import os
 import math
 import uuid
+import json
 import asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -1391,7 +1392,8 @@ async def clip_analyze_faces(project_id: str, clip_id: int):
         raise HTTPException(status_code=400, detail="Clip range too short")
 
     ft_file = os.path.join(project.output_dir, f"face_track_{clip_id}.json")
-    if not getattr(clip, "face_track", None) and os.path.exists(ft_file):
+    ft = getattr(clip, "face_track", None)
+    if (not ft or not isinstance(ft, dict) or not ft.get("samples")) and os.path.exists(ft_file) and os.path.getsize(ft_file) > 100:
         try:
             with open(ft_file, "r", encoding="utf-8") as f:
                 clip.face_track = json.load(f)
@@ -1443,6 +1445,63 @@ async def clip_analyze_faces(project_id: str, clip_id: int):
     }
 
 
+@router.post("/{project_id}/analyze-all-faces")
+async def project_analyze_all_faces(project_id: str):
+    """Analyze faces for all clips in the project that don't already have face_track samples."""
+    from ..services import face_track_service
+
+    projects = get_project_store()
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = projects[project_id]
+
+    results = {}
+    for clip in project.clips:
+        ft_file = os.path.join(project.output_dir, f"face_track_{clip.id}.json")
+        ft = getattr(clip, "face_track", None)
+        if (not ft or not isinstance(ft, dict) or not ft.get("samples")) and os.path.exists(ft_file) and os.path.getsize(ft_file) > 100:
+            try:
+                with open(ft_file, "r", encoding="utf-8") as f:
+                    clip.face_track = json.load(f)
+            except Exception:
+                pass
+
+        if getattr(clip, "face_track", None) and clip.face_track.get("samples"):
+            results[clip.id] = {
+                "people": clip.face_track.get("people", []),
+                "samples": clip.face_track.get("samples", []),
+                "width": clip.face_track.get("width", 0),
+                "height": clip.face_track.get("height", 0),
+            }
+            continue
+
+        if clip.end_time - clip.start_time >= 0.5:
+            try:
+                face_track = await asyncio.to_thread(
+                    face_track_service.analyze_clip,
+                    project.video_path,
+                    float(clip.start_time),
+                    float(clip.end_time),
+                    5.0,
+                )
+                clip.face_track = face_track
+                try:
+                    with open(ft_file, "w", encoding="utf-8") as f:
+                        json.dump(face_track, f)
+                except Exception:
+                    pass
+                results[clip.id] = {
+                    "people": face_track.get("people", []),
+                    "samples": face_track.get("samples", []),
+                    "width": face_track.get("width", 0),
+                    "height": face_track.get("height", 0),
+                }
+            except Exception as e:
+                print(f"[AutoReframe] Error analyzing clip {clip.id}: {e}")
+
+    return {"status": "ok", "tracks": results}
+
+
 @router.get("/{project_id}/{clip_id}/preview-reframe")
 async def clip_preview_reframe(project_id: str, clip_id: int, seconds: float = 10.0):
     """10s MP4 sample with auto-reframe applied so the user can verify the
@@ -1460,7 +1519,16 @@ async def clip_preview_reframe(project_id: str, clip_id: int, seconds: float = 1
 
     ft = getattr(clip, "face_track", None) or {}
     if not ft.get("samples"):
-        raise HTTPException(status_code=400, detail="Analyze faces first")
+        ft_file = os.path.join(project.output_dir, f"face_track_{clip_id}.json")
+        if os.path.exists(ft_file):
+            try:
+                with open(ft_file, "r", encoding="utf-8") as f:
+                    clip.face_track = json.load(f)
+                    ft = clip.face_track
+            except Exception:
+                pass
+    if not ft.get("samples"):
+        ft["samples"] = [{"t": 0, "faces": []}]
 
     samples = ft["samples"]
     def _score(s):

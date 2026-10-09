@@ -3257,6 +3257,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
   // routes through the real export pipeline instead of the fast preview path.
   const [clipFaceTracks, setClipFaceTracks] = useState({});  // {clipId: {people, samples, width, height}}
   const [analyzingFacesId, setAnalyzingFacesId] = useState(null);  // clipId being analyzed
+  const [isApplyingAllFaces, setIsApplyingAllFaces] = useState(false);  // Bulk analyzing/applying faces
   const [analyzeFacesError, setAnalyzeFacesError] = useState(null);
 
   // Load translation status once on mount so we know which clips already
@@ -3522,9 +3523,47 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       if (clips && clips.length > 0) {
         await Promise.all(clips.map((c) => api.clearClipStyle(projectId, c.id).catch(() => {})));
       }
+
+      // If auto-reframe is enabled, ensure ALL clips have their face tracks computed!
+      if (target.auto_reframe_enabled) {
+        setIsApplyingAllFaces(true);
+        try {
+          const res = await api.projectAnalyzeAllFaces(projectId);
+          if (res && res.tracks) {
+            setClipFaceTracks((prev) => ({ ...prev, ...res.tracks }));
+          }
+        } catch (e) {
+          console.error("Error bulk analyzing faces:", e);
+        } finally {
+          setIsApplyingAllFaces(false);
+        }
+      }
+
+      // Sync face tracks for all clips from the project
+      try {
+        const updatedP = await api.getProject(projectId);
+        if (updatedP && updatedP.clips) {
+          const tracks = {};
+          for (const c of updatedP.clips) {
+            if (c.face_track && c.face_track.samples) {
+              tracks[c.id] = {
+                people: c.face_track.people || [],
+                samples: c.face_track.samples || [],
+                width: c.face_track.width || 0,
+                height: c.face_track.height || 0,
+              };
+            }
+          }
+          if (Object.keys(tracks).length > 0) {
+            setClipFaceTracks((prev) => ({ ...prev, ...tracks }));
+          }
+        }
+      } catch (_) {}
+
       // Invalidate existing preview cache so changes are visibly rendered
       const useEs = _useEs();
       if (videoPreviewUrl && selectedClip) {
+        setLoadingPreview(false);
         setLoadingVideo(true);
         setVideoPreviewUrl(null);
         setTimeout(() => {
@@ -3533,6 +3572,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             : api.getVideoPreviewUrl(projectId, selectedClip.id));
         }, 50);
       } else if (previewUrl && selectedClip) {
+        setLoadingVideo(false);
         setLoadingPreview(true);
         const isIg = previewUrl.includes("instagram-preview");
         setPreviewUrl(null);
@@ -3610,6 +3650,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
       alert("Please select a clip first");
       return;
     }
+    setLoadingVideo(false);
     setLoadingPreview(true);
     setVideoPreviewUrl(null);
     try {
@@ -3620,23 +3661,27 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
     } catch (err) {
       console.error("Preview failed:", err);
       alert("Preview failed: " + err.message);
+    } finally {
+      setLoadingPreview(false);
     }
-    setLoadingPreview(false);
   };
 
   const handlePlayVideo = async () => {
     if (!selectedClip) return;
+    setLoadingPreview(false);
     setLoadingVideo(true);
     setPreviewUrl(null);
     await persistStyle(style);
     setVideoPreviewUrl(_useEs()
       ? api.getVideoPreviewEsUrl(projectId, selectedClip.id)
       : api.getVideoPreviewUrl(projectId, selectedClip.id));
-    // loadingVideo stays true until onCanPlay fires on the video element
+    // Safety fallback: if video event doesn't fire in 20s, clear loadingVideo
+    setTimeout(() => setLoadingVideo(false), 20000);
   };
 
   const handlePlayInstagram = async () => {
     if (!selectedClip) return;
+    setLoadingVideo(false);
     setLoadingPreview(true);
     setVideoPreviewUrl(null);
     try {
@@ -3646,8 +3691,9 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
         : api.getInstagramPreviewUrl(projectId, selectedClip.id));
     } catch (err) {
       alert("Failed to generate IG preview: " + err.message);
+    } finally {
+      setLoadingPreview(false);
     }
-    setLoadingPreview(false);
   };
 
   // Persist style on change (debounced) + refresh any active preview. Saving
@@ -3924,30 +3970,28 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, minHeight: 0 }}>
             <div className="editor-canvas-container" ref={canvasRef} style={{ height: "100%", maxHeight: 560, width: "auto" }}>
               <div className="editor-canvas">
-                {loadingPreview ? (
+                {loadingVideo && videoPreviewUrl ? (
+                  <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--st-soft)", flexDirection: "column", gap: 12 }}>
+                    <Loader2 size={26} style={{ color: "var(--st-muted)", animation: "st-spin 1s linear infinite" }} />
+                    <span style={{ color: "var(--st-muted)", fontSize: 13, fontWeight: 500 }}>Generando video preview…</span>
+                    <span style={{ color: "var(--st-faint)", fontFamily: "var(--st-mono)", fontSize: 11 }}>la primera vez tarda ~10s</span>
+                  </div>
+                ) : loadingPreview ? (
                   <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--st-soft)", flexDirection: "column", gap: 12 }}>
                     <Loader2 size={26} style={{ color: "var(--st-muted)", animation: "st-spin 1s linear infinite" }} />
                     <span style={{ color: "var(--st-muted)", fontSize: 13, fontWeight: 500 }}>Generando preview…</span>
-                    <span style={{ color: "var(--st-faint)", fontFamily: "var(--st-mono)", fontSize: 11 }}>la primera vez tarda ~15s</span>
+                    <span style={{ color: "var(--st-faint)", fontFamily: "var(--st-mono)", fontSize: 11 }}>la primera vez tarda ~10s</span>
                   </div>
                 ) : videoPreviewUrl ? (
-                  <>
-                    {loadingVideo && (
-                      <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--st-soft)", flexDirection: "column", gap: 12, position: "absolute", top: 0, left: 0, zIndex: 2 }}>
-                        <Loader2 size={26} style={{ color: "var(--st-muted)", animation: "st-spin 1s linear infinite" }} />
-                        <span style={{ color: "var(--st-muted)", fontSize: 13, fontWeight: 500 }}>Generando video preview…</span>
-                        <span style={{ color: "var(--st-faint)", fontFamily: "var(--st-mono)", fontSize: 11 }}>la primera vez tarda ~15s</span>
-                      </div>
-                    )}
-                    <video
-                      key={videoPreviewUrl}
-                      controls autoPlay
-                      src={videoPreviewUrl}
-                      style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000", borderRadius: 16, display: loadingVideo ? "none" : "block" }}
-                      onCanPlay={() => setLoadingVideo(false)}
-                      onError={() => { setLoadingVideo(false); alert("Failed to generate video preview. Try again."); setVideoPreviewUrl(null); }}
-                    />
-                  </>
+                  <video
+                    key={videoPreviewUrl}
+                    controls autoPlay
+                    src={videoPreviewUrl}
+                    style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000", borderRadius: 16 }}
+                    onCanPlay={() => setLoadingVideo(false)}
+                    onLoadedData={() => setLoadingVideo(false)}
+                    onError={() => { setLoadingVideo(false); alert("Failed to generate video preview. Try again."); setVideoPreviewUrl(null); }}
+                  />
                 ) : previewUrl ? (
                   <img
                     src={previewUrl}
@@ -4182,9 +4226,9 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
             {/* Clip seleccionado */}
             <StSection icon={<Film size={14} />}>Clip seleccionado</StSection>
             <select className="st-select" value={selectedClip?.id || ""}
-              onChange={(e) => { const clip = clips.find((c) => c.id === parseInt(e.target.value)); setSelectedClip(clip); setPreviewUrl(null); setVideoPreviewUrl(null); }}
+              onChange={(e) => { const clip = clips.find((c) => c.id === parseInt(e.target.value)); setSelectedClip(clip); setPreviewUrl(null); setVideoPreviewUrl(null); setLoadingPreview(false); setLoadingVideo(false); }}
               style={{ marginBottom: 20 }}>
-              {clips.map((c) => (<option key={c.id} value={c.id}>Clip {c.id}: {c.description}</option>))}
+              {clips.map((c) => (<option key={c.id} value={c.id}>Clip {c.id}: {c.description}{style.auto_reframe_enabled && clipFaceTracks[c.id] ? " 🎯" : ""}</option>))}
             </select>
 
             {/* Formato de video */}
@@ -4620,6 +4664,7 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                     <button
                       type="button"
                       onClick={handleApplyAllClips}
+                      disabled={isApplyingAllFaces}
                       className={`st-btn ${appliedToAllSuccess ? "" : "st-btn--primary"}`}
                       style={{
                         width: "100%",
@@ -4631,14 +4676,19 @@ function EditorStep({ projectId, clips, onUpdateClip, onExportDone }) {
                         color: appliedToAllSuccess ? "#fff" : "var(--st-on-accent)",
                         border: appliedToAllSuccess ? "1px solid var(--st-ok)" : "1px solid var(--st-accent)",
                         borderRadius: 8,
-                        cursor: "pointer",
+                        cursor: isApplyingAllFaces ? "wait" : "pointer",
                         display: "flex",
                         alignItems: "center",
                         gap: 6,
+                        opacity: isApplyingAllFaces ? 0.7 : 1,
                         transition: "all 0.2s ease",
                       }}
                     >
-                      {appliedToAllSuccess ? "✓ ¡Aplicado a todos los videos!" : "⚡ Aplicar este encuadre a todos los videos"}
+                      {isApplyingAllFaces
+                        ? "⏳ Analizando y aplicando a todos los videos..."
+                        : appliedToAllSuccess
+                        ? "✓ ¡Aplicado a todos los videos!"
+                        : "⚡ Aplicar este encuadre a todos los videos"}
                     </button>
                     <button onClick={() => handleAnalyzeClipFaces(cur)} disabled={isAnalyzing}
                       className="st-btn st-btn--ghost"

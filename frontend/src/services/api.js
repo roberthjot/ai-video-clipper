@@ -899,6 +899,17 @@ export async function clipAnalyzeFaces(projectId, clipId) {
     return res.json();
 }
 
+export async function projectAnalyzeAllFaces(projectId) {
+    const res = await fetch(`${API_BASE}/clips/${projectId}/analyze-all-faces`, {
+        method: "POST",
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Bulk face analysis failed");
+    }
+    return res.json();
+}
+
 export async function editorAnalyzeFaces(projectId) {
     const res = await fetch(`${API_BASE}/editor/${projectId}/analyze-faces`, {
         method: "POST",

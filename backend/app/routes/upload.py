@@ -9,8 +9,46 @@ from ..services import video_service, gemini_service
 
 router = APIRouter(prefix="/api", tags=["upload"])
 
-# In-memory project store (simple for desktop app)
-projects: dict[str, Project] = {}
+def _ensure_project_loaded(project_id: str):
+    if dict.__contains__(projects, project_id):
+        return projects[project_id]
+    project_dir = os.path.join(settings.PROJECTS_DIR, project_id)
+    json_path = os.path.join(project_dir, "project_data.json")
+    if os.path.exists(json_path):
+        try:
+            import json
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            p = Project(**data)
+            dict.__setitem__(projects, project_id, p)
+            return p
+        except Exception as e:
+            print(f"Error loading project {project_id} from disk: {e}")
+    return None
+
+
+class _ProjectStore(dict):
+    def __getitem__(self, key):
+        if not dict.__contains__(self, key):
+            p = _ensure_project_loaded(key)
+            if p is not None:
+                return p
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        if not dict.__contains__(self, key):
+            p = _ensure_project_loaded(key)
+            if p is not None:
+                return p
+        return super().get(key, default)
+
+    def __contains__(self, key):
+        if dict.__contains__(self, key):
+            return True
+        return _ensure_project_loaded(key) is not None
+
+
+projects: _ProjectStore = _ProjectStore()
 
 
 @router.post("/upload")
@@ -84,6 +122,10 @@ async def upload_video(
 @router.get("/projects")
 async def list_projects():
     """List all projects."""
+    if os.path.exists(settings.PROJECTS_DIR):
+        for pid in os.listdir(settings.PROJECTS_DIR):
+            if pid not in projects:
+                _ensure_project_loaded(pid)
     return [
         {
             "id": p.id,
@@ -99,13 +141,15 @@ async def list_projects():
 @router.get("/projects/{project_id}")
 async def get_project(project_id: str):
     """Get project details."""
-    if project_id not in projects:
+    p = _ensure_project_loaded(project_id)
+    if not p:
         raise HTTPException(status_code=404, detail="Project not found")
-    p = projects[project_id]
     for c in p.clips:
-        if not getattr(c, "face_track", None):
+        ft = getattr(c, "face_track", None)
+        has_real_samples = ft and isinstance(ft, dict) and ft.get("samples") and len(ft.get("samples", [])) > 1
+        if not has_real_samples:
             ft_file = os.path.join(p.output_dir, f"face_track_{c.id}.json")
-            if os.path.exists(ft_file):
+            if os.path.exists(ft_file) and os.path.getsize(ft_file) > 100:
                 try:
                     with open(ft_file, "r", encoding="utf-8") as f:
                         c.face_track = json.load(f)
@@ -209,6 +253,6 @@ async def import_preanalyzed(payload: dict):
     return {"project_id": project_id, "status": "ready", "clips_count": len(clips)}
 
 
-def get_project_store():
-    """Access the in-memory project store (used by other routes)."""
+def get_project_store() -> _ProjectStore:
+    """Access the project store with disk fallback (used by other routes)."""
     return projects
