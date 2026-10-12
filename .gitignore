@@ -40,6 +40,7 @@ test_*.py
 
 # Temp working files (FFmpeg chunks, ASS subs, thumbnails)
 backend/app/services/temp/
+backend/app/temp_lyrics/
 *.ass
 
 # User-edited prompt overrides (from Ajustes → Prompts)

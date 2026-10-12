@@ -1077,3 +1077,76 @@ export async function saveEditorSegments(projectId, segments) {
     }
     return res.json();
 }
+
+// ─── Lyric Edits (Saturn / Rolitas) API ────────────────────────────────────
+export async function getStockClips() {
+    const res = await fetch(`${API_BASE}/lyrics/stock-clips`);
+    if (!res.ok) throw new Error("Failed to load stock clips");
+    return res.json();
+}
+
+export async function uploadLyricsAudio(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_BASE}/lyrics/upload-audio`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Audio upload failed");
+    }
+    return res.json();
+}
+
+export async function uploadLyricsClip(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_BASE}/lyrics/upload-clip`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Clip upload failed");
+    }
+    return res.json();
+}
+
+export async function transcribeLyrics(audioId, style = "impact", customLyrics = null) {
+    const res = await fetch(`${API_BASE}/lyrics/transcribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio_id: audioId, style, custom_lyrics: customLyrics }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Transcription failed");
+    }
+    return res.json();
+}
+
+export async function renderLyricsEdit(params) {
+    const res = await fetch(`${API_BASE}/lyrics/render`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Render failed");
+    }
+    return res.json();
+}
+
+export function getLyricsVideoUrl(filename) {
+    return `${API_BASE}/lyrics/video/${filename}`;
+}
+
+export async function getLyricsDemo() {
+    const res = await fetch(`${API_BASE}/lyrics/demo`);
+    if (!res.ok) throw new Error("Failed to load demo");
+    return res.json();
+}
+
+

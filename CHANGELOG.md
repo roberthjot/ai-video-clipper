@@ -1,5 +1,24 @@
 # AI Video Clipper — Changelog
 
+## 🎵 Nueva Herramienta: Lyric Edits (Estilo Saturn / Rolitas)
+
+- **📱 Formato Vertical 9:16 & Montaje Secuencial Multi-Clip**:
+  - Creación de videos musicales en lienzo vertical 1080×1920 con fondo negro y ventana central de 1080×608 para clips de video estéticos oscuros.
+  - Suministrado paquete de clips estéticos de stock (`clip1_foggy_trees`, `clip2_dark_walk`, `clip3_neon_rain`, `clip4_retro_dark`), con soporte para carga de clips propios del usuario y montaje secuencial con transiciones.
+- **🎨 Catálogo Completo de 42 Estilos de Subtítulos (`subtitle_service.py`)**:
+  - Integración de todos los estilos visuales del programa en el flujo de Lyric Edits:
+    - **Karaoke**: Amarillo, Verde, Azul, Rosa, Rojo, Naranja, Morado y Subrayado.
+    - **1 Palabra / Formato Viral**: Pop-up (MrBeast), Glitch RGB, Neón Cyan, 3D Magenta, Doble Borde, Gold, Comic Pop, Zoom Hormozi, Giro, Barra, Minimal, Sombra y Bounce.
+    - **Cajas**: Highlight amarillo, Cajas de colores (Verde, Azul, Rosa, Roja), Burbuja TikTok y Caja Línea.
+    - **Efectos & Retro**: Retro 3D, Neón frase, Typewriter, Vertical Stack, Reveal y Contorno (Hollow).
+    - **Clásicos**: Estándar Netflix, Limpio, Impact (Saturn) y Arial Black Cursiva.
+  - Conversión inteligente de tarjetas a palabras para animación sincronizada.
+  - Controles de tamaño de fuente (`font_size`), posición vertical (`subtitle_y`) y presets de posición.
+- **⏱️ Sincronización y Detección de Letras**:
+  - Soporte de Faster-Whisper con timestamps por palabra y filtro Silero VAD (`vad_filter=True`) para mayor precisión en la detección de actividad vocal.
+  - Botones de ajuste de desfase rápido en la interfaz (`-0.2s` y `+0.2s`) para calibrar canciones en bloque.
+  - Documentación técnica detallada en `docs/LYRIC_EDITS.md` con diagnóstico de reconocimiento en música y roadmap para alineación forzada.
+
 ## 🎯 Corrección de Auto-Encuadre (Anti-Drift & Robust Face Tracking)
 
 - **🚫 Eliminación de falsos positivos en el fondo (Anti-Drift)**:

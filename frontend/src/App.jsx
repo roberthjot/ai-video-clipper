@@ -4,6 +4,7 @@ import * as api from "./services/api";
 import { useTheme } from "./ThemeContext.jsx";
 import { useModel } from "./ModelContext.jsx";
 import { StSection, StChip, StSlider, StToggle, StFieldRow, StRow, StSegmented } from "./components/studio.jsx";
+import LyricsStep from "./components/LyricsStep.jsx";
 
 // Human label for a model value (falls back to the raw value).
 const modelLabel = (val) => (GEMINI_VIDEO_MODELS.find((m) => m.val === val) || {}).label || val;
@@ -292,6 +293,7 @@ function Sidebar({ active, filename, clipCount, hasProject, onNav }) {
       {/* HERRAMIENTAS */}
       <div style={group}>
         <div style={eyebrow}>Herramientas</div>
+        <NavItem icon={<Music2 size={17} />} label="Lyric Edits" active={active === "lyrics"} onClick={() => onNav("lyrics")} />
         <NavItem icon={<ImageIcon size={17} />} label="Memes" active={active === "meme"} onClick={() => onNav("meme")} />
         <NavItem icon={<Radio size={17} />} label="Live Stream" active={active === "live"} onClick={() => onNav("live")} />
         <NavItem icon={<Sparkles size={17} />} label="Analyzer" active={active === "analyzer"} onClick={() => onNav("analyzer")} />
@@ -11675,7 +11677,7 @@ function PromptsStep({ onExit }) {
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 function App() {
-  const [mode, setMode] = useState("video"); // "video" | "stream" | "meme" | "analyzer" | "editor"
+  const [mode, setMode] = useState(() => new URLSearchParams(window.location.search).get("mode") || "lyrics"); // "video" | "stream" | "meme" | "analyzer" | "editor" | "lyrics"
   const [step, setStep] = useState(1);
   const [projectId, setProjectId] = useState(null);
   const [clips, setClips] = useState([]);
@@ -11748,6 +11750,7 @@ function App() {
 
   // Which sidebar item is active, derived from mode + step
   const activeNav =
+    mode === "lyrics" ? "lyrics" :
     mode === "settings" || mode === "prompts" ? "settings" :
     mode === "editor" ? "editor" :
     mode === "meme" ? "meme" :
@@ -11761,6 +11764,7 @@ function App() {
     else if (target === "clips") { setMode("video"); setStep(2); }
     else if (target === "export") { setMode("video"); setStep(3); }
     else if (target === "editor") setMode("editor");
+    else if (target === "lyrics") setMode("lyrics");
     else if (target === "meme") setMode("meme");
     else if (target === "live") setMode("stream");
     else if (target === "analyzer") setMode("analyzer");
@@ -11787,6 +11791,7 @@ function App() {
         onNav={handleNav}
       />
       <main style={{ flex: 1, minWidth: 0, background: "var(--st-bg)" }}>
+        {mode === "lyrics" && <LyricsStep />}
         {mode === "analyzer" && <AnalyzerStep />}
         {mode === "stream" && (
           <LiveStreamStep
