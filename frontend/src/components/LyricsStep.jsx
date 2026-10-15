@@ -280,7 +280,7 @@ export default function LyricsStep() {
 
   // Background clips
   const [stockClips, setStockClips] = useState([]);
-  const [selectedClips, setSelectedClips] = useState(["clip1", "clip2", "clip3", "clip4"]);
+  const [selectedClips, setSelectedClips] = useState(["clip1", "clip2", "clip3", "clip4", "clip5", "clip6", "clip7", "clip8"]);
   const [userClips, setUserClips] = useState([]);
   const [uploadingClip, setUploadingClip] = useState(false);
 
@@ -288,7 +288,7 @@ export default function LyricsStep() {
   const [subStyle, setSubStyle] = useState("karaoke");
   const [activeCategory, setActiveCategory] = useState("all");
   const [fontSize, setFontSize] = useState(80);
-  const [subtitleY, setSubtitleY] = useState(0.10);
+  const [subtitleY, setSubtitleY] = useState(0.16);
   const [cards, setCards] = useState([]);
   const [transcribing, setTranscribing] = useState(false);
 

@@ -1,5 +1,12 @@
 # AI Video Clipper — Changelog
 
+## ▶️ Reproducción de clips en Live Stream (sin salir de la app)
+
+- **Reproductor in-app para el pescador**: cada clip de "Pescar clips en vivo" tiene ahora un botón `Play` que baja el MP4 y lo reproduce en un modal con controles (antes solo se podía descargar).
+- **Reproductor in-app para clips virales del VOD**: el botón ▶ del modal "Momentos virales del VOD" ya no abre una pestaña externa; reproduce el clip dentro de la app con el mismo flujo.
+- **Cache de reproducción en el frontend** (`App.jsx`): los blob URLs se cachean por `(platform, id)` (tope de 10, con revocación al desmontar) para que re-reproducir sea instantáneo sin volver a bajar del CDN.
+- **Cache en disco en el backend** (`routes/stream.py: /api/stream/clip-download`): los clips se guardan como `_pesc_downloads/{platform}_{clip_id}.mp4` y se reutilizan en descargas/reproducciones posteriores (los clips son inmutables).
+
 ## 🎵 Nueva Herramienta: Lyric Edits (Estilo Saturn / Rolitas)
 
 - **📱 Formato Vertical 9:16 & Montaje Secuencial Multi-Clip**:

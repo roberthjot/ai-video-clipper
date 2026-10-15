@@ -58,33 +58,36 @@ async def get_stock_clips():
 async def get_lyrics_demo():
     """Returns pre-loaded demo of Beéle - La Plena (W Sound 05)."""
     cards = [
-        {"text": "OYE LO QUE PASA ES QUE", "start": 1.71, "end": 2.61},
+        {"text": "OYE, LO QUE PASA ES QUE", "start": 1.71, "end": 2.61},
         {"text": "DESDE QUE VI TU CARA", "start": 2.61, "end": 3.57},
-        {"text": "ME ENAMORÉ", "start": 3.57, "end": 4.19},
-        {"text": "DE TI", "start": 4.19, "end": 4.51},
-        {"text": "TODO LO QUE TE HE DICHO", "start": 4.51, "end": 6.31},
-        {"text": "SIENTO QUE TE PASA LO MISMO", "start": 6.31, "end": 7.65},
-        {"text": "CUANDO TE MIRO", "start": 7.65, "end": 8.39},
-        {"text": "QUÉ DICES SI NOS VAMOS", "start": 8.39, "end": 10.39},
-        {"text": "QUIERO HACERTE DE TODO", "start": 10.81, "end": 12.03},
-        {"text": "QUIERO QUE TÚ ME DIGAS", "start": 12.17, "end": 13.17},
-        {"text": "TE DIGO SOBELOVE", "start": 13.17, "end": 14.13},
-        {"text": "Y LUEGO VIENE ME DICE", "start": 14.45, "end": 16.29},
-        {"text": "QUE NO QUIERE QUE LA FRENE", "start": 16.29, "end": 17.25},
-        {"text": "SI A TI TE GUSTA EL INFIERNO", "start": 21.54, "end": 23.20},
-        {"text": "PA' QUE VAMOS A APAGARLO", "start": 23.20, "end": 24.60},
+        {"text": "ME ENAMORO DE TI TODA", "start": 3.57, "end": 4.83},
+        {"text": "ES QUE TÚ TIENES UN NO SÉ QUÉ", "start": 4.83, "end": 6.13},
+        {"text": "SIENTO QUE TE PASA LO MISMO", "start": 6.13, "end": 7.65},
+        {"text": "CUANDO TE MIRO", "start": 7.65, "end": 8.41},
+        {"text": "¿QUÉ DICES SI NOS PARCHAMOS", "start": 8.41, "end": 9.51},
+        {"text": "A VER EL AMANECER?", "start": 9.51, "end": 10.79},
+        {"text": "QUIERO HACERTE TODO", "start": 10.79, "end": 12.03},
+        {"text": "QUIERO QUE TÚ SEAS MI TODA", "start": 12.17, "end": 13.19},
+        {"text": "LE DIGO: SÓBELO, VE", "start": 13.19, "end": 14.13},
+        {"text": "Y LUEGO VIENE Y ME LO SOBA", "start": 14.45, "end": 15.63},
+        {"text": "VAMO' A VERNOS LUEGO", "start": 15.63, "end": 17.27},
+        {"text": "ELLA, PARCERITA PAISA", "start": 21.56, "end": 22.40},
+        {"text": "Y YO, COSTEÑO COLETO", "start": 22.40, "end": 23.22},
+        {"text": "EN UNA BALDOSA LA APRIETO", "start": 23.80, "end": 25.64},
+        {"text": "PA' HABLARTE CLARO, CERO VISAJE", "start": 26.20, "end": 27.50},
+        {"text": "SE SABE QUE TÚ ERES PURO VENENO", "start": 28.98, "end": 31.48},
     ]
     raw_path = os.path.join(UPLOAD_DIR, "audio_beele_demo.mp3")
     AUDIO_STORE["beele_demo"] = {
         "raw_path": raw_path,
         "wav_path": raw_path,
         "filename": "Beéle - La Plena (W Sound 05).mp3",
-        "duration": 24.5
+        "duration": 31.80
     }
     return {
         "audio_id": "beele_demo",
         "audio_name": "Beéle - La Plena (W Sound 05).mp3",
-        "duration": 24.5,
+        "duration": 31.80,
         "cards": cards,
         "video_url": "/api/lyrics/video/beele_plena_edit.mp4",
         "filename": "beele_plena_edit.mp4"

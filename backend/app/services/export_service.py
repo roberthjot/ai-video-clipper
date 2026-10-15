@@ -45,6 +45,8 @@ def get_progress(project_id: str) -> dict:
     })
 
 
+
+
 def export_clip_with_style(
     video_path: str,
     clip: ClipData,

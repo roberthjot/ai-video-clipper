@@ -76,6 +76,12 @@ export async function updateProjectModel(projectId, geminiModel) {
     return res.json();
 }
 
+export async function listProjects() {
+    const res = await fetch(`${API_BASE}/projects`);
+    if (!res.ok) throw new Error("Failed to list projects");
+    return res.json();
+}
+
 export async function getProject(projectId) {
     const res = await fetch(`${API_BASE}/projects/${projectId}`);
     if (!res.ok) throw new Error("Failed to get project");

@@ -254,24 +254,30 @@ def clip_download(payload: dict):
 
     dl_dir = _os.path.join(_settings.PROJECTS_DIR, "_pesc_downloads")
     _os.makedirs(dl_dir, exist_ok=True)
-    dest = _os.path.join(dl_dir, f"{_uuid.uuid4().hex[:8]}_{safe_title}.mp4")
 
-    try:
-        if platform == "twitch":
-            if not slug:
-                raise HTTPException(status_code=400, detail="slug required for twitch")
-            twitch_service.download_clip_to_disk(slug, dest)
-        elif platform == "kick":
-            ident = url or slug   # Kick prefers the channel-prefixed URL for yt-dlp
-            if not ident:
-                raise HTTPException(status_code=400, detail="url or slug required for kick")
-            kick_service.download_clip_to_disk(ident, dest)
-        else:
-            raise HTTPException(status_code=400, detail="platform must be 'twitch' or 'kick'")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Clip download failed: {e}")
+    # Cache per (platform, clip id): clips are immutable, so replaying or
+    # re-downloading the same clip serves the local file instead of hitting
+    # the platform CDN again (also makes in-app playback instant on replay).
+    cache_key = _re.sub(r"[^\w\-]+", "_", f"{platform}_{slug or url}")[:80] or _uuid.uuid4().hex[:8]
+    dest = _os.path.join(dl_dir, f"{cache_key}.mp4")
+
+    if not (_os.path.exists(dest) and _os.path.getsize(dest) > 0):
+        try:
+            if platform == "twitch":
+                if not slug:
+                    raise HTTPException(status_code=400, detail="slug required for twitch")
+                twitch_service.download_clip_to_disk(slug, dest)
+            elif platform == "kick":
+                ident = url or slug   # Kick prefers the channel-prefixed URL for yt-dlp
+                if not ident:
+                    raise HTTPException(status_code=400, detail="url or slug required for kick")
+                kick_service.download_clip_to_disk(ident, dest)
+            else:
+                raise HTTPException(status_code=400, detail="platform must be 'twitch' or 'kick'")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Clip download failed: {e}")
 
     if not _os.path.exists(dest):
         raise HTTPException(status_code=502, detail="Clip downloaded but file is missing")

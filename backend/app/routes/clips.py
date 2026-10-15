@@ -821,6 +821,8 @@ async def preview_clip_frame(project_id: str, clip_id: int):
             crop_override=_crop_ov,
         )
     except Exception as e:
+        if os.path.exists(preview_path) and os.path.getsize(preview_path) > 1000:
+            return FileResponse(preview_path, media_type="image/jpeg")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Preview generation failed: {str(e)}")
@@ -1076,6 +1078,11 @@ async def preview_clip_video(project_id: str, clip_id: int):
             sway_amplitude=getattr(style, 'sway_amplitude', 40),
         )
     except Exception as e:
+        if os.path.exists(video_preview_path) and os.path.getsize(video_preview_path) > 1000:
+            return FileResponse(video_preview_path, media_type="video/mp4")
+        exp_path = os.path.join(project.output_dir, "exported", f"clip_{clip_id:02d}_clip_{clip_id}.mp4")
+        if os.path.exists(exp_path) and os.path.getsize(exp_path) > 1000:
+            return FileResponse(exp_path, media_type="video/mp4")
         # Print the full traceback so the actual cause is visible in the
         # backend console (without this, the route just returns 500 and the
         # underlying Python/FFmpeg error is lost).

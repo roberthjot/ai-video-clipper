@@ -245,13 +245,27 @@ function NavItem({ icon, label, active, badge, disabled, onClick }) {
 }
 
 // ── Studio left sidebar (replaces the old top tabs) ──
-function Sidebar({ active, filename, clipCount, hasProject, onNav }) {
+function Sidebar({ active, filename, clipCount, hasProject, onNav, currentProjectId, onSelectProject }) {
   const { theme, toggle } = useTheme();
   const { model } = useModel();
+  const [showProjects, setShowProjects] = useState(false);
+  const [projectList, setProjectList] = useState([]);
   const group = { display: "flex", flexDirection: "column", gap: 2 };
   const eyebrow = {
     fontFamily: "var(--st-ui)", fontSize: 10.5, fontWeight: 700, letterSpacing: ".09em",
     color: "var(--st-faint)", textTransform: "uppercase", padding: "0 10px 7px",
+  };
+
+  const handleToggleProjects = async () => {
+    if (!showProjects) {
+      try {
+        const projs = await api.listProjects();
+        setProjectList(projs || []);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    setShowProjects((prev) => !prev);
   };
   return (
     <div style={{
@@ -270,15 +284,59 @@ function Sidebar({ active, filename, clipCount, hasProject, onNav }) {
       </div>
 
       {/* project selector */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 9, padding: "9px 11px",
-        borderRadius: 10, border: "1px solid var(--st-border)", background: "var(--st-soft)",
-      }}>
-        <Film size={15} style={{ color: "var(--st-muted)" }} />
-        <span style={{ fontFamily: "var(--st-mono)", fontSize: 11.5, color: "var(--st-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {filename || "sin proyecto"}
-        </span>
-        <ChevronDown size={14} style={{ color: "var(--st-faint)" }} />
+      <div style={{ position: "relative" }}>
+        <div
+          onClick={handleToggleProjects}
+          title="Click para cambiar de proyecto"
+          style={{
+            display: "flex", alignItems: "center", gap: 9, padding: "9px 11px",
+            borderRadius: 10, border: "1px solid var(--st-border)", background: "var(--st-soft)",
+            cursor: "pointer", transition: "background 0.15s ease",
+          }}
+        >
+          <Film size={15} style={{ color: "var(--st-accent)" }} />
+          <span style={{ fontFamily: "var(--st-mono)", fontSize: 11.5, color: "var(--st-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {filename || currentProjectId || "sin proyecto"}
+          </span>
+          <ChevronDown size={14} style={{ color: "var(--st-faint)", transform: showProjects ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }} />
+        </div>
+
+        {showProjects && (
+          <div style={{
+            position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 100,
+            background: "var(--st-surface)", border: "1px solid var(--st-border)",
+            borderRadius: 10, padding: 6, maxHeight: 220, overflowY: "auto",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", gap: 4,
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--st-faint)", padding: "4px 8px", textTransform: "uppercase" }}>Proyectos</div>
+            {projectList.length === 0 ? (
+              <div style={{ fontSize: 11.5, color: "var(--st-muted)", padding: "6px 8px" }}>No hay proyectos</div>
+            ) : (
+              projectList.map((p) => (
+                <div
+                  key={p.id}
+                  onClick={() => {
+                    setShowProjects(false);
+                    if (onSelectProject) onSelectProject(p.id);
+                  }}
+                  style={{
+                    padding: "7px 9px", borderRadius: 6, cursor: "pointer",
+                    background: p.id === currentProjectId ? "var(--st-accent-soft, rgba(59,130,246,0.15))" : "transparent",
+                    color: p.id === currentProjectId ? "var(--st-accent)" : "var(--st-text)",
+                    fontSize: 11.5, display: "flex", alignItems: "center", justifyContent: "space-between",
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }} title={p.filename || p.id}>
+                    {p.id}
+                  </span>
+                  <span style={{ fontSize: 10, color: "var(--st-muted)", marginLeft: 6, flexShrink: 0 }}>
+                    {p.clip_count} clips
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* PROYECTO */}
@@ -5501,6 +5559,43 @@ function HmsInput({ label, value, onChange }) {
   );
 }
 
+// ─── StreamClipPlayer ──────────────────────────────────────────────────────
+// Minimal in-app playback modal for stream/VOD clips (pescador + viral lists).
+// `clip` = { url: blob URL, title, subtitle }. Dark backdrop on purpose so
+// the 9:16/16:9 clip is the only thing visible.
+function StreamClipPlayer({ clip, onClose }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 200, padding: 20 }}
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 440 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <div style={{
+            flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: "#fff",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {clip.title}
+          </div>
+          <X size={18} style={{ cursor: "pointer", color: "rgba(255,255,255,.7)", flexShrink: 0 }} onClick={onClose} />
+        </div>
+        <video
+          src={clip.url}
+          controls
+          autoPlay
+          playsInline
+          style={{ width: "100%", maxHeight: "76vh", borderRadius: 10, background: "#000", display: "block" }}
+        />
+        {clip.subtitle && (
+          <div style={{ marginTop: 8, fontSize: 11.5, color: "rgba(255,255,255,.55)", fontFamily: "var(--st-mono)" }}>
+            {clip.subtitle}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function LiveStreamStep({ onClipToProject }) {
   // Tab inside Live Stream: "record" (existing recording/VOD flow) or
   // "pescar" (live-clip pescador — polls platform every 60s, accumulates
@@ -5515,10 +5610,19 @@ function LiveStreamStep({ onClipToProject }) {
   const [pescError, setPescError] = useState("");
   const [pescSelected, setPescSelected] = useState(new Set());
   const [pescDownloading, setPescDownloading] = useState(new Set());  // clip ids being downloaded
+  const [pescPlaying, setPescPlaying] = useState(new Set());          // clip ids buffering for playback
+  const [clipPlayer, setClipPlayer] = useState(null);                 // {url, title, subtitle} → playback modal
+  const clipBlobCache = useRef(new Map());                            // `${platform}:${id}` → object URL
   const [pescSort, setPescSort] = useState("recent");          // "recent" | "views"
   const [pescSearch, setPescSearch] = useState("");
   const [pescProcessing, setPescProcessing] = useState(null);  // {phase, name, progress} during batch
   const pescPollRef = useRef(null);
+
+  // Revoke every cached playback blob URL when leaving Live Stream.
+  useEffect(() => () => {
+    clipBlobCache.current.forEach((u) => URL.revokeObjectURL(u));
+    clipBlobCache.current.clear();
+  }, []);
 
   const [url, setUrl] = useState("");
   const [segmentMinutes, setSegmentMinutes] = useState(10);
@@ -5909,6 +6013,38 @@ function LiveStreamStep({ onClipToProject }) {
     }
     return arr;
   })();
+
+  // ── In-app clip playback ────────────────────────────────────────────────
+  // Plays a stream/VOD clip in a modal <video>. Fetches the raw MP4 through
+  // the same backend download route and caches the blob URL per
+  // (platform, id) so replay is instant. Cache capped + revoked on unmount.
+  const CLIP_CACHE_MAX = 10;
+  const playStreamClip = async (platform, c, subtitle) => {
+    if (!platform || !c || !c.id) return;
+    const key = `${platform}:${c.id}`;
+    const cached = clipBlobCache.current.get(key);
+    if (cached) {
+      setClipPlayer({ url: cached, title: c.title, subtitle });
+      return;
+    }
+    if (pescPlaying.has(c.id)) return;
+    setPescPlaying((s) => new Set(s).add(c.id));
+    try {
+      const blob = await api.downloadPescClipBlob(platform, c.id, c.url, c.title);
+      const objUrl = URL.createObjectURL(blob);
+      if (clipBlobCache.current.size >= CLIP_CACHE_MAX) {
+        const oldestKey = clipBlobCache.current.keys().next().value;
+        URL.revokeObjectURL(clipBlobCache.current.get(oldestKey));
+        clipBlobCache.current.delete(oldestKey);
+      }
+      clipBlobCache.current.set(key, objUrl);
+      setClipPlayer({ url: objUrl, title: c.title, subtitle });
+    } catch (e) {
+      alert("No se pudo reproducir el clip: " + e.message);
+    } finally {
+      setPescPlaying((s) => { const n = new Set(s); n.delete(c.id); return n; });
+    }
+  };
 
   // Process selected pescador clips with the existing Kick/Twitch batch flow.
   // Download ONE pescador clip (raw MP4, no Gemini). Fetches the blob and
@@ -6355,9 +6491,14 @@ function LiveStreamStep({ onClipToProject }) {
                         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}
                           onClick={(e) => e.stopPropagation()}>
                           <button title="Reproducir clip"
-                            onClick={() => c.url && window.open(c.url, "_blank")}
-                            style={{ background: "var(--st-alt)", border: "1px solid var(--st-border)", borderRadius: 5, padding: "4px 7px", cursor: "pointer", color: "var(--st-muted)", fontSize: 12, lineHeight: 1 }}
-                          >▶</button>
+                            onClick={() => playStreamClip(vodPlatform, c, c.creator_name)}
+                            disabled={pescPlaying.has(c.id)}
+                            style={{ background: "var(--st-alt)", border: "1px solid var(--st-border)", borderRadius: 5, padding: "4px 7px", cursor: "pointer", color: "var(--st-muted)", fontSize: 12, lineHeight: 1, display: "flex", alignItems: "center" }}
+                          >
+                            {pescPlaying.has(c.id)
+                              ? <Loader2 size={12} style={{ animation: "st-spin 1s linear infinite" }} />
+                              : <Play size={12} />}
+                          </button>
                           <button title="Descargar MP4"
                             onClick={async () => {
                               try {
@@ -6648,6 +6789,17 @@ function LiveStreamStep({ onClipToProject }) {
                             </div>
                           </div>
                           <button
+                            onClick={(e) => { e.stopPropagation(); playStreamClip(pescSession.platform, c, c.creator_name); }}
+                            disabled={pescPlaying.has(c.id)}
+                            title="Reproducir este clip"
+                            className="st-btn st-btn--ghost"
+                            style={{ flexShrink: 0, padding: "6px 9px", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+                            {pescPlaying.has(c.id)
+                              ? <Loader2 size={14} style={{ animation: "st-spin 1s linear infinite" }} />
+                              : <Play size={14} />}
+                            {pescPlaying.has(c.id) ? "Cargando…" : "Play"}
+                          </button>
+                          <button
                             onClick={(e) => { e.stopPropagation(); downloadPescClip(c); }}
                             disabled={pescDownloading.has(c.id)}
                             title="Descargar este clip (MP4, sin Gemini)"
@@ -6680,6 +6832,9 @@ function LiveStreamStep({ onClipToProject }) {
             )}
           </>
         )}
+
+        {/* In-app clip playback modal (pescador + viral lists) */}
+        {clipPlayer && <StreamClipPlayer clip={clipPlayer} onClose={() => setClipPlayer(null)} />}
       </div>
     </div>
   );
@@ -11683,25 +11838,55 @@ function App() {
   const [clips, setClips] = useState([]);
   const [filename, setFilename] = useState("");
 
+  const handleSelectProject = (pid) => {
+    if (!pid) return;
+    api.getProject(pid).then((p) => {
+      if (p && p.clips && p.clips.length > 0) {
+        setProjectId(p.id);
+        setClips(p.clips);
+        setFilename(p.video_filename);
+        setMode("video");
+        setStep(2);
+        try {
+          localStorage.setItem("active_project_id", p.id);
+          const newUrl = new URL(window.location);
+          newUrl.searchParams.set("project", p.id);
+          window.history.replaceState(null, "", newUrl.toString());
+        } catch (_) {}
+      }
+    }).catch((err) => console.error("Could not load project:", err));
+  };
+
   useEffect(() => {
-    // Support loading project directly via ?project=ID or /clips/ID
+    // Support loading project directly via ?project=ID or /clips/ID or localStorage or latest project
     const params = new URLSearchParams(window.location.search);
     let pid = params.get("project");
     if (!pid) {
-      const match = window.location.pathname.match(/\/clips\/([a-zA-Z0-9]+)/);
+      const match = window.location.pathname.match(/\/clips\/([a-zA-Z0-9_-]+)/);
       if (match) pid = match[1];
     }
-    if (pid) {
-      api.getProject(pid).then((p) => {
-        if (p && p.clips && p.clips.length > 0) {
-          setProjectId(p.id);
-          setClips(p.clips);
-          setFilename(p.video_filename);
-          setMode("video");
-          setStep(2);
-        }
-      }).catch((err) => console.error("Could not load project:", err));
+    if (!pid) {
+      try {
+        const saved = localStorage.getItem("active_project_id");
+        if (saved) pid = saved;
+      } catch (_) {}
     }
+
+    if (pid) {
+      handleSelectProject(pid);
+    } else {
+      // Auto-load most recent project with clips so the user immediately sees their work
+      api.listProjects().then((projs) => {
+        if (Array.isArray(projs) && projs.length > 0) {
+          const withClips = projs.filter(p => p.clip_count > 0);
+          if (withClips.length > 0) {
+            withClips.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+            handleSelectProject(withClips[0].id);
+          }
+        }
+      }).catch((err) => console.error("Could not auto-load projects:", err));
+    }
+
     const m = params.get("mode");
     if (m === "meme" || params.get("batch")) {
       setMode("meme");
@@ -11789,6 +11974,8 @@ function App() {
         clipCount={clips.length}
         hasProject={!!projectId}
         onNav={handleNav}
+        currentProjectId={projectId}
+        onSelectProject={handleSelectProject}
       />
       <main style={{ flex: 1, minWidth: 0, background: "var(--st-bg)" }}>
         {mode === "lyrics" && <LyricsStep />}

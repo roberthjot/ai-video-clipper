@@ -14,11 +14,16 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(STOCK_DIR, exist_ok=True)
 
 STOCK_PRESETS = [
-    {"id": "clip1", "filename": "clip1_foggy_trees.mp4", "name": "Niebla y Ramas Oscuras"},
-    {"id": "clip2", "filename": "clip2_dark_walk.mp4", "name": "Sendero y Silueta"},
-    {"id": "clip3", "filename": "clip3_neon_rain.mp4", "name": "Lluvia de Neón Cyberpunk"},
-    {"id": "clip4", "filename": "clip4_retro_dark.mp4", "name": "Estética Retro 80s"},
+    {"id": "clip1", "filename": "clip1_city_aerial.mp4", "name": "Avenida Nocturna Aérea"},
+    {"id": "clip2", "filename": "clip2_main_avenue.mp4", "name": "Tráfico Gran Avenida"},
+    {"id": "clip3", "filename": "clip3_aerial_traffic.mp4", "name": "Tráfico Nocturno Cinemático"},
+    {"id": "clip4", "filename": "clip4_street_bokeh.mp4", "name": "Calle y Luces Bokeh"},
+    {"id": "clip5", "filename": "clip5_city_walker.mp4", "name": "Caminata Nocturna Urbana"},
+    {"id": "clip6", "filename": "clip6_neon_dancer.mp4", "name": "Silueta Neón Púrpura"},
+    {"id": "clip7", "filename": "clip7_sports_car.mp4", "name": "Auto Deportivo Neón Rojo"},
+    {"id": "clip8", "filename": "clip8_neon_tunnel.mp4", "name": "Túnel Cyberpunk VJ"},
 ]
+
 
 
 def list_stock_clips():
@@ -163,6 +168,10 @@ def format_ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+def escape_ass(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", "\\N")
+
+
 def create_ass_subtitles(
     cards: list,
     output_ass_path: str,
@@ -172,23 +181,58 @@ def create_ass_subtitles(
     size_scale: float = 1.0,
     duration: float = 30.0
 ):
-    """Generate ASS subtitle file using either custom styles or any style in subtitle_service."""
-    if font_style in ("impact", "slant"):
-        if font_style == "slant":
-            font_name = "Arial Black"
-            italic = -1
-            outline = 4
-            shadow = 4
-        else:
-            font_name = "Impact"
-            italic = 0
-            outline = 4
-            shadow = 3
+    """
+    Generate ASS subtitle file with exact card-level synchronization and aesthetic styling.
+    Ensures subtitles only appear during active vocal segments and never float across pauses.
+    Supports all styles (karaoke colors, boxes, neons, popups, typewriter, retro, clean, impact, etc.).
+    """
+    WHITE = "&H00FFFFFF"
+    YELLOW = "&H0000FFFF"
+    GREEN = "&H0000FF00"
+    BLUE = "&H00FFFF00"
+    PINK = "&H00FF00FF"
+    RED = "&H000000FF"
+    ORANGE = "&H0000A5FF"
+    PURPLE = "&H00F020A0"
+    BLACK = "&H00000000"
 
-        # Alignment=5 (center). Offset Y if specified
-        margin_v = int(1920 * (subtitle_y or 0.0))
+    font_name = "Arial Black"
+    italic = 0
+    outline = 5
+    shadow = 2
+    border_style = 1
+    spacing = 0
 
-        header = f"""[Script Info]
+    if font_style == "impact":
+        font_name = "Impact"
+        outline = 4
+        shadow = 3
+    elif font_style == "slant":
+        italic = -1
+        outline = 4
+        shadow = 3
+    elif font_style == "standard":
+        font_name = "Arial"
+        outline = 2
+        shadow = 0
+        spacing = 3
+    elif font_style == "retro":
+        outline = 6
+        shadow = 6
+    elif font_style in ("line_box", "bubble"):
+        border_style = 3
+        outline = 8
+        shadow = 0
+
+    scale = max(0.6, min(1.6, float(size_scale if size_scale != 1.0 else (font_size / 80.0))))
+    effective_font_size = max(24, int(font_size * scale))
+    effective_outline = max(2, int(outline * scale))
+
+    base_margin = 650
+    margin_v = int(base_margin + 1920 * (subtitle_y or 0.0))
+    margin_v = max(40, min(1880, margin_v))
+
+    header = f"""[Script Info]
 Title: Lyric Edit
 ScriptType: v4.00+
 WrapStyle: 0
@@ -198,40 +242,146 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,{italic},0,0,100,100,1,0,1,{outline},{shadow},5,40,40,{margin_v},1
+Style: Default,{font_name},{effective_font_size},{WHITE},{YELLOW},{BLACK},{BLACK},-1,{italic},0,0,100,100,{spacing},0,{border_style},{effective_outline},{shadow},2,40,40,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-        lines = [header]
-        for card in cards:
-            st = format_ass_time(card["start"])
-            et = format_ass_time(card["end"])
-            txt = card["text"].replace("\n", "\\N")
-            lines.append(f"Dialogue: 0,{st},{et},Default,,0,0,0,,{txt}\n")
+    lines = [header]
 
-        with open(output_ass_path, "w", encoding="utf-8") as f:
-            f.writelines(lines)
-    else:
-        # Full support for all styles in subtitle_service
-        words = cards_to_words(cards)
-        effective_scale = size_scale if size_scale != 1.0 else (font_size / 80.0)
-        ass_path = subtitle_service.generate_ass_for_clip(
-            transcript={"words": words},
-            clip_start=0.0,
-            clip_end=duration + 5.0,
-            style=font_style,
-            output_dir=OUTPUT_DIR,
-            time_offset=0.0,
-            size_scale=effective_scale,
-            y_offset=subtitle_y or 0.0
-        )
-        if ass_path and os.path.exists(ass_path):
-            import shutil
-            shutil.copy2(ass_path, output_ass_path)
+    karaoke_colors = {
+        "karaoke": YELLOW,
+        "karaoke_green": GREEN,
+        "karaoke_blue": BLUE,
+        "karaoke_pink": PINK,
+        "karaoke_red": RED,
+        "karaoke_orange": ORANGE,
+        "karaoke_purple": PURPLE,
+    }
+
+    for card in cards:
+        c_start = float(card["start"])
+        c_end = float(card["end"])
+        if c_end <= c_start:
+            c_end = c_start + 0.5
+        c_dur = c_end - c_start
+
+        raw_text = str(card.get("text", "")).strip().upper()
+        tokens = raw_text.split()
+        if not tokens:
+            continue
+
+        if font_style in karaoke_colors or font_style == "underline":
+            h_color = karaoke_colors.get(font_style, YELLOW)
+            total_chars = sum(len(t) for t in tokens)
+            cur_t = c_start
+            word_spans = []
+            for idx, t in enumerate(tokens):
+                if idx == len(tokens) - 1:
+                    w_end = c_end
+                else:
+                    share = (len(t) / max(1, total_chars)) * c_dur
+                    w_end = cur_t + share
+                word_spans.append((cur_t, w_end))
+                cur_t = w_end
+
+            for idx, (w_st, w_et) in enumerate(word_spans):
+                parts = []
+                for j, t in enumerate(tokens):
+                    esc_t = escape_ass(t)
+                    if j == idx:
+                        if font_style == "underline":
+                            parts.append(f"{{\\u1}}{esc_t}{{\\u0}}")
+                        else:
+                            parts.append(f"{{\\c{h_color}\\fscx112\\fscy112}}{esc_t}{{\\r}}")
+                    else:
+                        parts.append(esc_t)
+                line_text = " ".join(parts)
+                lines.append(f"Dialogue: 0,{format_ass_time(w_st)},{format_ass_time(w_et)},Default,,0,0,0,,{line_text}\n")
+
+        elif font_style in ("highlight", "box_green", "box_blue", "box_pink", "box_red"):
+            box_colors = {
+                "highlight": (YELLOW, BLACK),
+                "box_green": (GREEN, BLACK),
+                "box_blue": (BLUE, WHITE),
+                "box_pink": (PINK, BLACK),
+                "box_red": (RED, WHITE),
+            }
+            bg_col, txt_col = box_colors.get(font_style, (YELLOW, BLACK))
+            total_chars = sum(len(t) for t in tokens)
+            cur_t = c_start
+            word_spans = []
+            for idx, t in enumerate(tokens):
+                if idx == len(tokens) - 1:
+                    w_end = c_end
+                else:
+                    share = (len(t) / max(1, total_chars)) * c_dur
+                    w_end = cur_t + share
+                word_spans.append((cur_t, w_end))
+                cur_t = w_end
+
+            for idx, (w_st, w_et) in enumerate(word_spans):
+                parts = []
+                for j, t in enumerate(tokens):
+                    esc_t = escape_ass(t)
+                    if j == idx:
+                        parts.append(f"{{\\1c{txt_col}\\3c{bg_col}\\bord10}}{esc_t}{{\\r}}")
+                    else:
+                        parts.append(esc_t)
+                line_text = " ".join(parts)
+                lines.append(f"Dialogue: 0,{format_ass_time(w_st)},{format_ass_time(w_et)},Default,,0,0,0,,{line_text}\n")
+
+        elif font_style == "neon":
+            esc_txt = escape_ass(raw_text)
+            neon_txt = f"{{\\3c{BLUE}\\bord8\\blur4}}{esc_txt}"
+            lines.append(f"Dialogue: 0,{format_ass_time(c_start)},{format_ass_time(c_end)},Default,,0,0,0,,{neon_txt}\n")
+
+        elif font_style == "hollow":
+            esc_txt = escape_ass(raw_text)
+            hollow_txt = f"{{\\1a&HFF&\\3c{WHITE}\\bord5}}{esc_txt}"
+            lines.append(f"Dialogue: 0,{format_ass_time(c_start)},{format_ass_time(c_end)},Default,,0,0,0,,{hollow_txt}\n")
+
+        elif font_style == "retro":
+            esc_txt = escape_ass(raw_text)
+            retro_txt = f"{{\\3c{PINK}\\4c{BLUE}\\xshad6\\yshad6}}{esc_txt}"
+            lines.append(f"Dialogue: 0,{format_ass_time(c_start)},{format_ass_time(c_end)},Default,,0,0,0,,{retro_txt}\n")
+
+        elif font_style in ("popup", "bounce", "word_zoom", "word_neon", "word_3d", "word_yellow", "word_rotate", "word_glitch"):
+            total_chars = sum(len(t) for t in tokens)
+            cur_t = c_start
+            for idx, t in enumerate(tokens):
+                if idx == len(tokens) - 1:
+                    w_end = c_end
+                else:
+                    share = (len(t) / max(1, total_chars)) * c_dur
+                    w_end = cur_t + share
+                esc_t = escape_ass(t)
+                if font_style == "popup":
+                    anim = f"{{\\fad(40,20)\\fscx85\\fscy85\\t(0,100,\\fscx112\\fscy112)\\t(100,160,\\fscx100\\fscy100)}}{esc_t}"
+                elif font_style == "bounce":
+                    anim = f"{{\\fscx80\\fscy80\\t(0,100,\\fscx120\\fscy120)\\t(100,150,\\fscx100\\fscy100)}}{esc_t}"
+                elif font_style == "word_zoom":
+                    anim = f"{{\\fscx70\\fscy70\\t(0,120,\\fscx125\\fscy125)}}{esc_t}"
+                elif font_style == "word_yellow":
+                    anim = f"{{\\c{YELLOW}}}{esc_t}"
+                elif font_style == "word_neon":
+                    anim = f"{{\\3c{BLUE}\\bord8\\blur4}}{esc_t}"
+                elif font_style == "word_rotate":
+                    anim = f"{{\\frz-5}}{esc_t}"
+                elif font_style == "word_glitch":
+                    anim = f"{{\\3c{PINK}\\4c{BLUE}\\xshad3\\yshad-2}}{esc_t}"
+                else:
+                    anim = f"{{\\4c&H111111&\\xshad7\\yshad7}}{esc_t}"
+
+                lines.append(f"Dialogue: 0,{format_ass_time(cur_t)},{format_ass_time(w_end)},Default,,0,0,0,,{anim}\n")
+                cur_t = w_end
+
         else:
-            # Fallback to impact
-            create_ass_subtitles(cards, output_ass_path, font_style="impact", font_size=font_size, subtitle_y=subtitle_y)
+            esc_txt = escape_ass(raw_text)
+            lines.append(f"Dialogue: 0,{format_ass_time(c_start)},{format_ass_time(c_end)},Default,,0,0,0,,{esc_txt}\n")
+
+    with open(output_ass_path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
 
 
 def render_lyric_video(

@@ -96,6 +96,9 @@ A completely independent mode — no clipping, no timestamps. Upload short video
 - **Live countdown timer**: Each recording segment shows a progress bar and time remaining
 - **Download button**: Download any completed segment as MP4 directly from the browser
 - **Workflow**: Record → Download segment → Upload to Video Clipper → Analyze with Gemini
+- **🎣 Pescar clips en vivo**: While a channel is live, polls its clips API every ~60s and accumulates every new viewer-made clip (sort/search/multi-select)
+- **▶️ In-app playback**: Play any found clip (pescador or VOD "Momentos virales") in a modal player with controls — no external tab. Clips are cached locally (browser blob cache + `_pesc_downloads/` disk cache), so replays and repeated downloads are instant
+- **Send to Clips without Gemini**: Selected clips become a download-only project you can re-analyze at your own pace
 
 ### 🛡️ Anti-Detect (Export Only)
 - **Strip Metadata**: Removes all EXIF/MP4 metadata (`-map_metadata -1`)
@@ -354,6 +357,11 @@ eq=contrast=1.05:brightness=0.02:saturation=1.05  # boost_contrast
 | `GET` | `/api/stream/status/{session_id}` | Poll session status + segments |
 | `GET` | `/api/stream/download/{session_id}/{segment_index}` | Download recorded segment as MP4 |
 | `GET` | `/api/stream/sessions` | List all stream sessions |
+| `POST` | `/api/stream/live-clips/start` | Start "pescador" session (poll new clips every ~60s) |
+| `GET` | `/api/stream/live-clips/status/{session_id}` | Poll pescador session + found clips |
+| `POST` | `/api/stream/live-clips/stop/{session_id}` | Stop pescador session |
+| `POST` | `/api/stream/live-clips/clear/{session_id}` | Empty found clips, keep session running |
+| `POST` | `/api/stream/clip-download` | Download one clip (MP4, disk-cached per clip id) |
 
 ---
 
